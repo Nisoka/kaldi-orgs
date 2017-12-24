@@ -1,0 +1,70 @@
+* gmm
+  gmm-init-mono.cc
+  Vector<BaseFloat> glob_inv_var(dim);
+  39 dim Vector inv_var 转置的对角协方差
+  Vector<BaseFloat> glob_mean(dim); 
+  Vecotr.Set(1.0);(Set all members of Vector to the value)
+  39 dim Vector mean
+  
+  Vector<double> var_stats(dim);
+  Vector<double> mean_stats(dim);
+  var mean统计信息
+  SequentialDoubleMatrixReader feat_reader(train_feats);
+  feat_reader 读取训练用feats
+  
+  foreach key_feats
+      feareach feat_in_key
+          count += 1.0
+          var_stats.AddVec2(1.0, mat.Row(i));
+          mean_stats.AddVec(1.0, mat.Row(i));
+  
+  var_stats.Scale(1.0/count);
+  mean_stats.Scale(1.0/count);
+  var_stats.AddVec2(-1.0, mean_stats);
+
+  (
+   mean = sum{v_x} / cnt;
+   var = sum{v_x^2}/cnt - mean^2
+  )
+
+  var_stats.InvertElements();
+  协方差转置 方便以后计算.
+  glob_inv_var.CopyFromVec(var_stats);
+  glob_mean.CopyFromVec(mean_stats);
+  至此得到了 转置协方差 均值向量
+
+  
+  HmmTopology topo;
+  bool binary_in;
+  # 读取拓扑文件
+  Input ki(topo_filename, &binary_in);
+  topo.Read(ki.Stream(), binary_in);
+  # vector<int32> 读取得到topo文件中所有的音素
+  const std::vector<int32> &phones = topo.GetPhones();
+  # 构造vector向量, 具有 1+phones.back()个元素 并全部初始化为0.
+  std::vector<int32> phone2num_pdf_classes (1+phones.back());
+  
+  # 赋值 phone2num_pdf_class 某个音素phone对应的pdf-class? 不是应该state对应么？
+  for (size_t i = 0; i < phones.size(); i++)
+      phone2num_pdf_classes[phones[i]] = topo.NumPdfClasses(phones[i]);
+
+  # 构建 状态绑定决策树, shared_phones 音素共享文件, 
+  # 根据音素 状态拓扑结构中状态的最大pdf列表 以及所有共享音素 构建决策树.
+  ContextDependency *ctx_dep = NULL;
+  ctx_dep = MonophoneContextDependencyShared(shared_phones, phone2num_pdf_classes);
+
+  DiagGmm gmm; 某个状态对应的GMM模型 - 即pdf-class的原理模型。
+  AmDiagGmm 保存所有音素所有状态的gmm。
+  for (int i = 0; i < num_pdfs; i++)
+    am_gmm.AddPdf(gmm);
+  
+  
+
+      
+  
+          
+      
+  
+
+  
+  

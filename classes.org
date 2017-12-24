@@ -1,0 +1,55 @@
+
+* HmmTopology
+
+Vector<BaseFloat>
+    是一个kaldi自己实现的Vector容器类, 保存多维向量
+
+** 核心成员 phones_ phone2idx_ entries_
+std::vector<int32> phones_;  // list of all phones we have topology for.  Sorted, uniq.  no epsilon (zero) phone.
+std::vector<int32> phone2idx_;  // map from phones to indexes into the entries vector (or -1 for not present).
+std::vector<TopologyEntry> entries_; 所有可能的 音素-state 拓扑结构。
+
+phone2idx_ 
+    以 phone-id为索引, 以phone-id对应的TopologyEntry索引 为值.
+entries_
+    使用phone2idx_数组来索引某个音素的对应 TopologyEntry.  entries_[phone2idx_[phone]]
+
+TopologyForphone(phone);
+    return entries_[phone2idx_[phone]]
+    返回音素对应的音素-状态拓扑结构.
+
+int32 NumPdfClass(int32 phone);
+    TopologyForphone(phone);
+    返回的是 phone对应的TopologyEntry 音素-状态拓扑结构中所有状态pdf-class最大值。
+
+
+** typedef std::vector<HmmState> TopologyEntry;
+   描述 某个音素的HmmState拓扑结构.
+
+   const HmmTopology::TopologyEntry& HmmTopology::TopologyForPhone(int32 phone) const {  // Will throw if phone not covered.
+     if (static_cast<size_t>(phone) >= phone2idx_.size() || phone2idx_[phone] == -1) {
+       KALDI_ERR << "TopologyForPhone(), phone "<<(phone)<<" not covered.";
+     }
+
+     return entries_[phone2idx_[phone]];
+   }
+
+
+
+* DiagGmm
+  DiagGmm 代表混合高斯模型 是一个聚类后状态的pdf-class
+  
+** 核心成员
+  /// Equals log(weight) - 0.5 * (log det(var) + mean*mean*inv(var))
+  gconsts_是一个拟合用系数, 具体就是
+  Vector<BaseFloat> gconsts_;
+  bool valid_gconsts_;   ///< Recompute gconsts_ if false
+  // 
+
+  各个分模型权重
+  Vector<BaseFloat> weights_;        ///< weights (not log).
+
+  各分模型的转置协方差 均值*inv_vars
+  Matrix<BaseFloat> inv_vars_;       ///< Inverted (diagonal) variances
+  Matrix<BaseFloat> means_invvars_;  ///< Means times inverted variance
+

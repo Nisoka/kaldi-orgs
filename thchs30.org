@@ -294,15 +294,6 @@ result:
 
 *** monophone
     
-    单音素训练
-    #monophone
-    steps/train_mono.sh --boost-silence 1.25 --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/mono || exit 1;
-    #test monophone model
-    local/thchs-30_decode.sh --mono true --nj $n "steps/decode.sh" exp/mono data/mfcc &
-    
-    #monophone_ali
-    steps/align_si.sh --boost-silence 1.25 --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/mono exp/mono_ali || exit 1;
-    
 **** steps/train_mono.sh
 
      整体框架以及框架描述
