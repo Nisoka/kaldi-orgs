@@ -1,0 +1,129 @@
+* data_prepared and data/dict lang graph
+  http://blog.csdn.net/baidu_36137891/article/details/77848796
+
+* HMM topology and transition modeling
+  HMM拓扑结构 以及 转移模型
+** Introduction
+   kaldi中如何表示HMM topo结构, 以及如何建模和训练HMM Transition转移模型部分。
+   简单介绍如何使用决策树.
+   class 和 function的详细信息在  Classes and functions related to HMM topology and transition modeling
+   
+** 1 HMM topologies
+   HmmTopology是用户指定的音素HMM拓扑结构的方法, 正常情况下, 脚本创建一个text格式的描述HMMTopology对象的文件.
+   这个文件在命令行时传递给shell内调用程序， 如下时正常情况下Hmmtopology对象的文本形式
+       在HmmTopology 中给出的概率是用来初始化训练的, 而训练后的概率会与上下文HMM模型具有相关性.
+   并保存到TransitionModel object 中. 并且TransitionModel中会保存HmmTopology作为成员.
+       但是要注意, HmmTopology中保存的初始化用转移概率 在初始化TransitionModel之后不再使用.
+       有一个特例是, 对于非终止状态的非发射状态(那些具有输出转移的 但是没有<PdfClass>的状态)
+   Kaldi并不会训练这些状态, 并且会直接用HmmTopology中给出的他们的转移概率.
+   这个决定 不支持对非激发状态的可训练的转移概率 来简化训练机制，并且因为具有带转移的非发射状态
+   是不正常的, 我们也觉得这个没有什么损失.???
+       
+*** 发射状态 emitting state
+    具有pdfclass, 并且发出特征向量的状态。
+    (因为 特征是由状态生成的(隐马尔科夫原理), 但是识别时候是反过来的过程根据pdf+特征得到状态)
+
+    non-emitting state
+    没有pdfclass，不发出特征向量的状态.
+    一般没有输出转移，一般用来表示HMM结构的终止(是用来表示下一个音素的连接用的), 
+    但是有些特殊non-emitting state会具有输出转移，一般看不到.
+
+** 2 Pdf-classes
+   pdf-class 是关联到HmmTopology对象的概念, HmmTopology对象是一个音素的原型HMM结构.
+   每个编号的状态具有两个变量 - forward_pdf_class 和 self_loop_pdf_class. 
+       self_loop_pdf_class是一种关联到self_loop转移的pdf-class.默认是区别于forward_pdf_class.
+   但是可以用来定义 低对流性 的HMM topology, 其中self_loop 和 forward转移的pdfs可以不同.
+       ??? 这是个策略 --只允许在self_loop的pdf-class不同, 而不允许一个完全基于弧的表示(HMM中的所有转移的pdf概率认为是独立的)
+   这个策略是为了妥协 能够兼容Kaldi之前版本, 能够支持用于我们 'chain models' 的topology结构.????
+       如果两个状态具有相同的pdf-class变量, 他们就共享相同的 概率分布函数 pdf.
+       如果他们在不同的音素上下文环境中, 因为决策树代码的原因, 并不能直接获得HMM-state, 而能够获得pdf-class。
+       正常情况下 pdf-class 和 HMM-state的id表示相同的东西. 但是pdf-class提供了一个方法 能够让不同的
+   HMM state共享pdf。 这会十分有用, 如果你想更复杂的转移模型但是并不像让声学模型保持相同.
+       pdf-class的另一个功能是指定一个 非发射状态. 如果某个HMM状态的pdf-class设置为常数kNoPdf=-1
+   该HMM状态就是一个非发射状态(没有关联的pdf). 这个可以简单的通过去掉HmmTopology text格式中的 <pdfclass>标签和关联的pdf-id即可。
+       特定HMM原型的pdf-class的集合，一般从0开始并顺序下延(eg 0 1 2), 这是为了构图代码实现上方便, 并且不会导致任何通用性损失.
+*** self_loop_pdf_class & forward_pdf_class & pdf-class
+    三者之间的相同与不同关系？？
+    现在就认为 只有pdf-class。另外两个适用于之前版本的Kaldi的。
+
+** 3 Transition Models 
+   TransitionModel 对象保存了 转移概率<LogProbs>和HMM topology结构(包含了一个HmmTopology对象), 
+   构图代码依赖与TransitionModel 对象来得到topology 和 转移概率
+   (构图代码还需要一个上下文依赖接口对象来获得关联到特定音素上下文状态的pdf-class)
+
+   如何在kaldi中建模转移概率
+   转移模型代码的基础如下, 生成上下文相关的HMM状态的转移概率 依赖于以下五个点
+   1 phone
+   2 源HMM状态 (被HmmTopology对象解释的状态 即 正常的状态 0 1 2)
+   3.1 forward-pdf-id 即 关联到该状态state的 forward转移pdf 的index索引
+   3.2 self-loop-pdf-id  关联到该状态state的 self-loop的pdf 的index索引
+   4 HmmTopology对象中该转移的 index 索引。
+
+       ??? 现在一般 forward-pdf-id self-loop-pdf-id 是相同的 表示的是一个状态的pdf-class。
+   
+       上面四个要点中最后一个 可以看作是将HmmTopology对象中的可作为转移的目标Hmm-state状态进行编码。
+   生成转移概率要根据上面四个要点的原因是 这是我们在不增加解码图大小情况下最细粒度的方法。
+   并且训练转移概率十分方便. 实践中, 在常规设置下，可能相同精度下建模转移 不会产生任何不同。
+   并且HTK 在单音素下 共享转移方法也足够了.
+
+*** 使用transition id等变量的原因
+   TransitionModel 对象 在初始化时设置了一些列的 整数映射, 并且被代码中其他部分使用这些映射.
+   除了上面提到的变量, 还有一些变量叫做 transition-ids, transition-index(与transition-ids不同), 
+   transition-state。
+
+   引入这些identifiers变量 和 相关映射mapping 的原因是
+       我们可以使用这些概念来使用一个基于FST的很好的训练方法.
+
+       最自然的基于FST的方式 是用pdf-ids作为输入标签. 然而，一直要记住, 给定的构建树算法, 从pdf-id映射到一个音素并不是一直可能的，
+   这样从输入标签序列映射到音素序列会很困难, 并且也有很多不便, 也会导致单独使用FST的信息训练转移概率很困难. 
+   因为这些原因 我们在FST上使用transition-ids作为输入标签,
+   这些transition-ids可以映射得到pdf-id， 也能够映射到phone和一个HMM原型中的特定转移。
+   
+*** TransitionModel使用的整数id
+   TransitionModel中使用了下面的这些id类型, 他们都是用int32表示。
+   注意, 这些变量有的是1-索引的 有的是0-索引的.
+
+*** Traning the transition model
+   转移模型的训练过程十分简单, 训练或测试时创建的FST 使用trainsition-ids作为输入标签。 训练时
+   使用Viterbi解码, 给定一个输入标签序列, 实际就是 transition-ids序列().
+   我们为了训练转移概率 计算统计信息 基本上就是计算每个transition-ids在训练中出现总数.
+   Transition::Update()使每个转移状态transition-state -- tuple(phone, HMM-state, pdf-class)(Transitoion-model中最基本的对象)
+   执行ML（最大似然估计） 更新, 更新操作是很简单的方法. 转移概率的训练也有一些问题, 例如如果某个转移状态不可见时候怎么处理.
+
+
+
+
+** Alignments in Kaldi  kaldi 中的对齐
+    alignment, 我们一般指的是 一些vector<int32>对象, 保存的是transition-ids的序列。
+其长度和该对齐结果 对应的说话语音长度相同. transition-ids一般从解码器的输入标签序列获得.
+对齐结果 用于训练时Viterbi训练用, 也用于测试时适应. 
+    因为transition-ids编码了音素信息，因此从对齐结果中可以获得得到音素序列.
+
+    我们经常需要处理 对应说话语音索引的alignment对齐结果, 为了方便我们一般使用IO的表结构来
+保存。
+    函数convertAlignment() 用于将对齐从一个转移模型转化为另一个转移模型.典型情况时，
+当你具有从一个转移模型A(通过某个决策树创建的)得到的对齐结果, 希望将该对齐结果
+转化到由另一个转移模型B生成的对齐结果. 该函数可以执行一个映射将原始的音素映射到
+新的音素集合；这个特性一般用不到, 但是当我们使用一个用聚类减少了音素集合的简化转移模型时
+很有用.
+
+*** State-level posterious 状态级别后先验概率
+    
+
+     
+* reference
+  kaldi:
+  http://www.kaldi-asr.org/doc/hmm.html
+  语音识别原理中的几个经典blog。
+  http://blog.csdn.net/wbgxx333/article/details/41019453
+
+  
+  
+  
+      
+  
+
+  
+  
+      
+  
