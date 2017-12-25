@@ -127,7 +127,167 @@ int32 NumPdfClass(int32 phone);
 
      return entries_[phone2idx_[phone]];
    }
+   
+   返回某个音素phone TopologyEntry结构所有state中pdf-class最大值.
+   int32 HmmTopology::NumPdfClasses(int32 phone) const {
+     // will throw if phone not covered.
+     const TopologyEntry &entry = TopologyForPhone(phone);
+     int32 max_pdf_class = 0;
+     for (size_t i = 0; i < entry.size(); i++) {
+       max_pdf_class = std::max(max_pdf_class, entry[i].forward_pdf_class);
+       max_pdf_class = std::max(max_pdf_class, entry[i].self_loop_pdf_class);
+     }
+     return max_pdf_class+1;
+   }
 
+
+
+
+
+
+
+
+
+
+* EventMap & EventType
+  上下文音素下的某个状态 认为能够确定一个状态 确定状态.
+
+  EventType typedef std::vector<std::pair<EventKeyType, EventValueType> > EventType;
+      是键值对的向量, 在kaldi中用来完全描述一个状态.
+      通过EventType 可以描述一个确定状态
+  EventAnswerType 
+      一个确定状态  生成概率GMM的pdf-id.
+  EventMap
+      讲EventMap描述的一个确定状态 与 状态对应的pdf-id 进行映射.
+      应该是要先装载某个决策树, 以决策树为地图, 通过EventType进行定位 EventAnswerType
+
+
+  eg 
+    a/b/c 中 b的第二个状态 s2.
+    假设音素a，b和c的整数索引分别为10,11和12。
+    
+    在KALDI 中用EventType描述确定状态时 
+      0，1和2是3音素窗口“a/b/c”中的位置，
+      -1是我们用于对状态id进行编码的特殊索引
+      (c.f.常量kPdfClass = -1)
+         
+    表示为排序向量对为：
+      EventType e = {{-1,1}，{0,10}，{1,11}，{2,12}};
+
+    假设对应于这种声学状态的声学状态索引（pdf-id）恰好为1000.那么如果我们有一个表示树的EventMap“emap”，那么我们期望以下的断言不会失败：
+      EventAnswerType ans;
+      bool ret = emap.Map（e，＆ans）; // emap的类型是EventMap; e是EventType
+      KALDI_ASSERT（ret == true && ans == 1000）;
+
+ 
+ 
+  
+  
+  
+  
+  
+  
+
+
+
+* class ContextDependencyInterface 
+  上下文相关结构的虚基类
+  从一个上下文相关音素 到 整数叶子节点序列的映射.
+  phone-in-context width -- 3 triphone.
+
+
+* ContextDependency
+
+**  GetPdfInfo()
+
+std::vector<std::vector<std::vector<std::pair<int32, int32> > > > *pdf_info
+# 所有pdf-id     音素内pdf-class       <phone, pdf-class> ????
+
+void ContextDependency::GetPdfInfo(
+    const std::vector<int32> &phones,
+    const std::vector<int32> &num_pdf_classes,  // indexed by phone,
+    std::vector<std::vector<std::pair<int32, int32> > > *pdf_info) const {
+
+    # phones 所有音素数组
+    # 音素内最大pdf-class
+    # 输出参数。
+
+  # 决策树的 定位信息
+  EventType vec;
+  # 所有pdf-id
+  pdf_info->resize(NumPdfs()); 
+  for (size_t i = 0 ; i < phones.size(); i++) {
+    int32 phone = phones[i];
+    vec.clear();
+    vec.push_back(std::make_pair(static_cast<EventKeyType>(P_),
+                                 static_cast<EventValueType>(phone)));
+    
+    # Now get length ; max_pdf-class in phone.
+    EventAnswerType len = num_pdf_classes[phone];
+
+    # pos 是phone 内的 pdf-class
+    for (int32 pos = 0; pos < len; pos++) {
+      # vec[0] ---- (0, phone)      
+      # vec[1] ---- (-1, pdf-class)
+      # mono 训练时 构造的是这样的决策定位, 只用两个坐标.
+      vec.resize(2);
+      vec[0] = std::make_pair(static_cast<EventKeyType>(P_),
+                              static_cast<EventValueType>(phone));
+
+      vec[1] = std::make_pair(kPdfClass, static_cast<EventValueType>(pos));
+
+      
+      std::vector<EventAnswerType> pdfs;  // pdfs that can be at this pos as this phone.
+      # 从to_pdf_ 对象中映射得到 pdfs ---- pdf-id???, 不同音素也可以得到的相同的pdf-id
+      # 一般 pdfs 只有一个元素 就是该 phone, pdf-class 对应的pdf-id.
+      to_pdf_->MultiMap(vec, &pdfs);
+
+      for (size_t j = 0; j < pdfs.size(); j++) {
+        # <phone, pos>  >> 
+        (*pdf_info)[pdfs[j]].push_back(std::make_pair(phone, pos));
+      }
+    }
+  }
+}
+
+*** another
+void ContextDependency::GetPdfInfo(
+    const std::vector<int32> &phones,
+    const std::vector<std::vector<std::pair<int32, int32> > > &pdf_class_pairs,
+    std::vector<std::vector<std::vector<std::pair<int32, int32> > > > *pdf_info) const {
+
+    # phones 所有音素数组
+    # 音素内最大pdf-class
+    # 输出参数。
+
+  pdf_info->resize(1 + *std::max_element(phones.begin(), phones.end()));
+  # 音素窗
+  std::vector<int32> phone_window(N_, -1);
+  # 状态坐标(left, center, right, curState).
+  EventType vec;
+
+  for (size_t i = 0 ; i < phones.size(); i++) {
+    # loop over phones
+    int32 phone = phones[i];
+
+    # pdf_class_pairs[phone]  音素内的所有pdf-class.
+    (*pdf_info)[phone].resize(pdf_class_pairs[phone].size());
+    for (size_t j = 0; j < pdf_class_pairs[phone].size(); j++) {
+      // loop over pdf_class pairs
+      int32 pdf_class = pdf_class_pairs[phone][j].first,
+            self_loop_pdf_class = pdf_class_pairs[phone][j].second;
+      phone_window[P_] = phone;
+
+      unordered_set<std::pair<int32, int32>, PairHasher<int32> > pairs;
+      EnumeratePairs(phones, self_loop_pdf_class, pdf_class, phone_window, &pairs);
+      unordered_set<std::pair<int32, int32>, PairHasher<int32> >::iterator iter = pairs.begin(),
+                           end = pairs.end();
+      for (; iter != end; ++iter)
+        (*pdf_info)[phone][j].push_back(*iter);
+      std::sort( ((*pdf_info)[phone][j]).begin(),  ((*pdf_info)[phone][j]).end());
+    }
+  }
+}
 
 
 
@@ -162,3 +322,17 @@ int32 NumPdfClass(int32 phone);
      op.Read(argc, argv);
      # 获取位置参数.
      std::string tree_in_filename = po.GetArg(1);
+** pdf-class
+   pdf-class的标号（注：如果HMM的每个状态都有对应的pdf，则pdf-class可理解为HMM的第几个状态）。
+   一般情况，pdf-class的值与HMM状态的序号是相同的，比如0，1或2
+
+
+
+* questions
+
+**  MultiMap 函数
+  vec 是一个 上下文相关音素中的某个状态 ---- 确定状态.
+  怎么获得的多个pdfs呢???
+  # pdfs that can be at this pos as this phone.
+  std::vector<EventAnswerType> pdfs;  
+  to_pdfs_.MultiMap(EventType vec, pdfs)

@@ -1,5 +1,8 @@
 * data_prepared and data/dict lang graph
+  更详细点
+  http://blog.csdn.net/wbgxx333/article/details/26233527
   http://blog.csdn.net/baidu_36137891/article/details/77848796
+
 
 * HMM topology and transition modeling
   HMM拓扑结构 以及 转移模型
@@ -110,7 +113,26 @@
 *** State-level posterious 状态级别后先验概率
     
 
-     
+
+* 决策树在kaldi中如何使用
+  kaldi 翻译
+  http://blog.csdn.net/chenhoujiangsir/article/details/51613144
+  Kaldi决策树状态绑定学习笔记
+  http://blog.csdn.net/u010731824/article/details/69668647
+  kaldi001 -- 树的内部结构 主要是翻译了 Decision tree internals
+  http://blog.csdn.net/u012361418/article/details/72851507
+
+  1 Introducing
+  2 音素上下文窗口 phonetic context windows
+    N = 3   P = 1  
+  3 树的构建过程 tree building process
+    roots 
+  4 pdf 标号
+  5 上下文相关对象 Context dependency objects
+  6 决策树列子
+  7 输入符号对象 The ilabel_info objects
+  
+
 * reference
   kaldi:
   http://www.kaldi-asr.org/doc/hmm.html

@@ -1,0 +1,12 @@
+topo file
+
+model file
+  描述了所有音素HMM结构
+  内部的状态转移概率 A
+  状态的观测生成概率 B
+  包含一个TransitionModel 对象<LogProbs> 和 一个 AmDiagGmm对象<DiagGmm>
+
+
+roots.txt
+  描述音素是否被共享决策树根节点.
+
