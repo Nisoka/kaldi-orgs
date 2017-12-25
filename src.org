@@ -77,155 +77,166 @@
 
 
 
-* TransitonModel construct
-  1 构建tuples  transition-state (phone, state, pdf-id, pdf-id)
-  2 state2tid  tid2state tid2pdf-id
-  3 probs
-  
-  
-**   ComputeTuples(ctx_dep) ComputeTuplesIsHmm()
+** TransitonModel construct
+   1 构建tuples  transition-state (phone, state, pdf-id, pdf-id)
+   2 state2tid  tid2state tid2pdf-id
+   3 probs
+   
+   
+***   ComputeTuples(ctx_dep) ComputeTuplesIsHmm()
 
-    void TransitionModel::ComputeTuplesIsHmm(const ContextDependencyInterface &ctx_dep);
-      # 获得topo结构里所有音素
-      const std::vector<int32> &phones = topo_.GetPhones();
-      std::vector<int32> num_pdf_classes;
-      # 所有音素中所有状态的的最大pdf-class (某个音素有多个状态 每个状态有一个pdf-class 一般是音素内的状态index 0 1 2)
-      # 结果num_pdf_classes 保存的是每个音素的 状态数.
-      for (size_t i = 0; i < phones.size(); i++)
-        *num_pdf_classes[phones[i]] = topo_.NumPdfClasses(phones[i]);*
-      
-      # this is the case for normal models. but not fot chain models
-      #     对    的                  向量                         的 向量
-      # <phone,pdf-class>某个state   多个相同pdf-class的state       所有的state
-      std::vector<std::vector<std::pair<int32, int32> > > pdf_info;
+     void TransitionModel::ComputeTuplesIsHmm(const ContextDependencyInterface &ctx_dep);
+       # 获得topo结构里所有音素
+       const std::vector<int32> &phones = topo_.GetPhones();
+       std::vector<int32> num_pdf_classes;
+       # 所有音素中所有状态的的最大pdf-class (某个音素有多个状态 每个状态有一个pdf-class 一般是音素内的状态index 0 1 2)
+       # 结果num_pdf_classes 保存的是每个音素的 状态数.
+       for (size_t i = 0; i < phones.size(); i++)
+         *num_pdf_classes[phones[i]] = topo_.NumPdfClasses(phones[i]);*
+       
+       # this is the case for normal models. but not fot chain models
+       #     对    的                  向量                         的 向量
+       # <phone,pdf-class>某个state   多个相同pdf-class的state       所有的state
+       std::vector<std::vector<std::pair<int32, int32> > > pdf_info;
 
-      # 从决策树中取出 对应音素的pdf-info 每个音素 是< vector<pari<> > >
-      # pdf-info 就是pdf-id (phone, pdf-class) 可以索引的pdf信息数组.
-      *ctx_dep.GetPdfInfo(phones, num_pdf_classes, &pdf_info);*
-      # 类似于pdf-info 可以用pdf-id 索引得到所有HMM状态. 因为状态绑定???是的因为pdf-class可以相同, 这样表示绑定
-      std::map<std::pair<int32, int32>, std::vector<int32> > to_hmm_state_list;
+       # 从决策树中取出 对应音素的pdf-info 每个音素 是< vector<pari<> > >
+       # pdf-info 就是pdf-id (phone, pdf-class) 可以索引的pdf信息数组.
+       *ctx_dep.GetPdfInfo(phones, num_pdf_classes, &pdf_info);*
+       # 类似于pdf-info 可以用pdf-id 索引得到所有HMM状态. 因为状态绑定???是的因为pdf-class可以相同, 这样表示绑定
+       std::map<std::pair<int32, int32>, std::vector<int32> > to_hmm_state_list;
 
-      for (size_t i = 0; i < phones.size(); i++) {  // setting up to_hmm_state_list.
-        int32 phone = phones[i];
-        # 获得音素的 topologyEntry结构
-        const HmmTopology::TopologyEntry &entry = topo_.TopologyForPhone(phone);
-        # entry保存的是一系列状态, 就是遍历 音素phone 内状态
-        for (int32 j = 0; j < static_cast<int32>(entry.size()); j++) {  // for each state...
-          # 获得音素的 pdf-class
-          int32 pdf_class = entry[j].forward_pdf_class;
-          if (pdf_class != kNoPdf) {
-            # 用 <phone, pdf-class> 进行索引, j 保存的是phone内状态号index, 
-            *to_hmm_state_list[std::make_pair(phone, pdf_class)].push_back(j);*
-          }
-        }
-      }
+       for (size_t i = 0; i < phones.size(); i++) {  // setting up to_hmm_state_list.
+         int32 phone = phones[i];
+         # 获得音素的 topologyEntry结构
+         const HmmTopology::TopologyEntry &entry = topo_.TopologyForPhone(phone);
+         # entry保存的是一系列状态, 就是遍历 音素phone 内状态
+         for (int32 j = 0; j < static_cast<int32>(entry.size()); j++) {  // for each state...
+           # 获得音素的 pdf-class
+           int32 pdf_class = entry[j].forward_pdf_class;
+           if (pdf_class != kNoPdf) {
+             # 用 <phone, pdf-class> 进行索引, j 保存的是phone内状态号index, 
+             *to_hmm_state_list[std::make_pair(phone, pdf_class)].push_back(j);*
+           }
+         }
+       }
 
 
-  # pdf-id 可以被多个 不同音素的不同pdf-class 共享.
-  # pdf-class又可以由同一个音素的不同 HMM-State 共享.
+   # pdf-id 可以被多个 不同音素的不同pdf-class 共享.
+   # pdf-class又可以由同一个音素的不同 HMM-State 共享.
 
-  # 遍历所有pdf-id
-  for (int32 pdf = 0; pdf < static_cast<int32>(pdf_info.size()); pdf++) {
-    # 某个pdf-id 可能包含的多个共享pdf-class (phone, pdf-class). j
-    for (size_t j = 0; j < pdf_info[pdf].size(); j++) {
-      int32 phone = pdf_info[pdf][j].first,
-            pdf_class = pdf_info[pdf][j].second;
+   # 遍历所有pdf-id
+   for (int32 pdf = 0; pdf < static_cast<int32>(pdf_info.size()); pdf++) {
+     # 某个pdf-id 可能包含的多个共享pdf-class (phone, pdf-class). j
+     for (size_t j = 0; j < pdf_info[pdf].size(); j++) {
+       int32 phone = pdf_info[pdf][j].first,
+             pdf_class = pdf_info[pdf][j].second;
 
-      # state_vec 是可能发出该pdf_class的 phone内 多个HMM-state数组
-      const std::vector<int32> &state_vec = to_hmm_state_list[std::make_pair(phone, pdf_class)];
+       # state_vec 是可能发出该pdf_class的 phone内 多个HMM-state数组
+       const std::vector<int32> &state_vec = to_hmm_state_list[std::make_pair(phone, pdf_class)];
 
-      for (size_t k = 0; k < state_vec.size(); k++) {
-        int32 hmm_state = state_vec[k];
-        # 这样tuples_ 不会重复么？？？ 
-        # 不会因为上面遍历的是 phone, pdf-class ，所有以phone,pdf-class 索引得到的状态都加入到tuples_里面了.
-        *tuples_.push_back(Tuple(phone, hmm_state, pdf, pdf));*
-      }
-    }
-  }
+       for (size_t k = 0; k < state_vec.size(); k++) {
+         int32 hmm_state = state_vec[k];
+         # 这样tuples_ 不会重复么？？？ 
+         # 不会因为上面遍历的是 phone, pdf-class ，所有以phone,pdf-class 索引得到的状态都加入到tuples_里面了.
+         *tuples_.push_back(Tuple(phone, hmm_state, pdf, pdf));*
+       }
+     }
+   }
 
-  num-pdf-class 每个音素含有的 pdf-class (绑定状态的共享pdf-index)
-  pdf-info   vector< vector< pari<phone, pdf-class> > >
-      由pdf-id 索引的, 向量内每个元素 每个Phone 包含的所有 pdf-class.
-  to_hmm_state_list 
-      保存元素是  以 phone, pdf-class 为观测生成函数的 所有的状态 (所有被绑定的状态)
-  tuples  Tuple(phone, hmm_state, pdf, pdf)
-      所有的 phone,state,pdf-id .
-      
-**   ComputeDerived()
-  state2id_.resize(tuples_.size()+2);  // indexed by transition-state  --- (phone, state, pdf-id, pdf-id)  
+   num-pdf-class 每个音素含有的 pdf-class (绑定状态的共享pdf-index)
+   pdf-info   vector< vector< pari<phone, pdf-class> > >
+       由pdf-id 索引的, 向量内每个元素 每个Phone 包含的所有 pdf-class.
+   to_hmm_state_list 
+       保存元素是  以 phone, pdf-class 为观测生成函数的 所有的状态 (所有被绑定的状态)
+   tuples  Tuple(phone, hmm_state, pdf, pdf)
+       所有的 phone,state,pdf-id .
+       
+***   ComputeDerived()
+   state2id_.resize(tuples_.size()+2);  // indexed by transition-state  --- (phone, state, pdf-id, pdf-id)  
 
-  int32 cur_transition_id = 1;
+   int32 cur_transition_id = 1;
 
-  num_pdfs_ = 0;
+   num_pdfs_ = 0;
 
-  # tuples  transition-state 实际就是 所有状态的所有状态
-  for (int32 tstate = 1;
-      tstate <= static_cast<int32>(tuples_.size()+1);  // not a typo.
-      tstate++) {
-    # state2id_[] 保存对应transition-state 对应的 多个transition的第一个transition-id
-    *state2id_[tstate] = cur_transition_id;*
+   # tuples  transition-state 实际就是 所有状态的所有状态
+   for (int32 tstate = 1;
+       tstate <= static_cast<int32>(tuples_.size()+1);  // not a typo.
+       tstate++) {
+     # state2id_[] 保存对应transition-state 对应的 多个transition的第一个transition-id
+     *state2id_[tstate] = cur_transition_id;*
 
-    if (static_cast<size_t>(tstate) <= tuples_.size()) {
+     if (static_cast<size_t>(tstate) <= tuples_.size()) {
 
-      int32 
-      phone = tuples_[tstate-1].phone,
-      hmm_state = tuples_[tstate-1].hmm_state,
-      forward_pdf = tuples_[tstate-1].forward_pdf,
-      self_loop_pdf = tuples_[tstate-1].self_loop_pdf;
-      # pdf-id
-      num_pdfs_ = std::max(num_pdfs_, 1 + forward_pdf);
-      num_pdfs_ = std::max(num_pdfs_, 1 + self_loop_pdf);
-      # 该 transition-state 的 HMM-State.
-      const HmmTopology::HmmState &state = topo_.TopologyForPhone(phone)[hmm_state];
-      # 状态的所有转移.
-      int32 my_num_ids = static_cast<int32>(state.transitions.size());
-      # state2id_ 保存的是 状态对应的多个转移的第一个转移编号 
-      *cur_transition_id += my_num_ids;  // # trans out of this state.*
-    }
-  }
+       int32 
+       phone = tuples_[tstate-1].phone,
+       hmm_state = tuples_[tstate-1].hmm_state,
+       forward_pdf = tuples_[tstate-1].forward_pdf,
+       self_loop_pdf = tuples_[tstate-1].self_loop_pdf;
+       # pdf-id
+       num_pdfs_ = std::max(num_pdfs_, 1 + forward_pdf);
+       num_pdfs_ = std::max(num_pdfs_, 1 + self_loop_pdf);
+       # 该 transition-state 的 HMM-State.
+       const HmmTopology::HmmState &state = topo_.TopologyForPhone(phone)[hmm_state];
+       # 状态的所有转移.
+       int32 my_num_ids = static_cast<int32>(state.transitions.size());
+       # state2id_ 保存的是 状态对应的多个转移的第一个转移编号 
+       *cur_transition_id += my_num_ids;  // # trans out of this state.*
+     }
+   }
 
-  # state2id_ 的反向索引 tid -> (phone, state)
-  id2state_.resize(cur_transition_id);   // cur_transition_id is #transition-ids+1.
-  # 从transition-id  ---> pdf-id
-  id2pdf_id_.resize(cur_transition_id);
+   # state2id_ 的反向索引 tid -> (phone, state)
+   id2state_.resize(cur_transition_id);   // cur_transition_id is #transition-ids+1.
+   # 从transition-id  ---> pdf-id
+   id2pdf_id_.resize(cur_transition_id);
 
-  for (int32 tstate = 1; tstate <= static_cast<int32>(tuples_.size()); tstate++)
-    for (int32 tid = state2id_[tstate]; tid < state2id_[tstate+1]; tid++) {
-      id2state_[tid] = tstate;
-      if (IsSelfLoop(tid))
-        id2pdf_id_[tid] = tuples_[tstate-1].self_loop_pdf;
-      else
-        id2pdf_id_[tid] = tuples_[tstate-1].forward_pdf;
-    }
-  }
+   for (int32 tstate = 1; tstate <= static_cast<int32>(tuples_.size()); tstate++)
+     for (int32 tid = state2id_[tstate]; tid < state2id_[tstate+1]; tid++) {
+       id2state_[tid] = tstate;
+       if (IsSelfLoop(tid))
+         id2pdf_id_[tid] = tuples_[tstate-1].self_loop_pdf;
+       else
+         id2pdf_id_[tid] = tuples_[tstate-1].forward_pdf;
+     }
+   }
 
-**   InitializeProbs()
+***   InitializeProbs()
 
-  log_probs_.Resize(NumTransitionIds()+1);  // one-based array, zeroth element empty.
-  
-  for (int32 trans_id = 1; trans_id <= NumTransitionIds(); trans_id++) {
+   log_probs_.Resize(NumTransitionIds()+1);  // one-based array, zeroth element empty.
+   
+   for (int32 trans_id = 1; trans_id <= NumTransitionIds(); trans_id++) {
 
-    # trans_state --- tuples (phone, state)
-    int32 trans_state = id2state_[trans_id];
-    # trans_index --- transition-id 在 某个trans_state 中的index
-    int32 trans_index = trans_id - state2id_[trans_state]; 
+     # trans_state --- tuples (phone, state)
+     int32 trans_state = id2state_[trans_id];
+     # trans_index --- transition-id 在 某个trans_state 中的index
+     int32 trans_index = trans_id - state2id_[trans_state]; 
 
-    # 获得tuple
-    const Tuple &tuple = tuples_[trans_state-1];
-    # 获得phone的状态
-    const HmmTopology::TopologyEntry &entry = topo_.TopologyForPhone(tuple.phone);
-    # entry[state] 获得该状态 
-    # entry[state].transitions[trans_index].second -- 转移概率.
-    BaseFloat prob = entry[tuple.hmm_state].transitions[trans_index].second;
-    
-    #
-    *log_probs_(trans_id) = Log(prob);*
-  }
-  ComputeDerivedOfProbs();
-**   Check()
+     # 获得tuple
+     const Tuple &tuple = tuples_[trans_state-1];
+     # 获得phone的状态
+     const HmmTopology::TopologyEntry &entry = topo_.TopologyForPhone(tuple.phone);
+     # entry[state] 获得该状态 
+     # entry[state].transitions[trans_index].second -- 转移概率.
+     BaseFloat prob = entry[tuple.hmm_state].transitions[trans_index].second;
+     
+     #
+     *log_probs_(trans_id) = Log(prob);*
+   }
+   ComputeDerivedOfProbs();
+***   Check()
+
+
+
+
 
 
 * compile-train-graphs.cc
+
+    compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $dir/tree $dir/0.mdl  $lang/L.fst \
+    "ark:sym2int.pl --map-oov $oov_sym -f 2- $lang/words.txt < $sdata/JOB/text|" \
+    "ark:|gzip -c >$dir/fsts.JOB.gz" || exit 1;
+    
+    src/bin/compile-train-graphs.cc
+
 
     disambig_rxfilename ====  所有销岐符号
     std::string tree_rxfilename = exp/mono/tree
@@ -259,9 +270,9 @@
 
     lex_fst = NULL;  // we gave ownership to gc.
 
-    # read 中文标注
+    # read 中文标注 -> transcript_reader
     SequentialInt32VectorReader transcript_reader(transcript_rspecifier);
-    # 获得写描述符  fsts.JOB.gz
+    # 获得写描述符<VectorFstHolder>  fsts.JOB.gz
     TableWriter<fst::VectorFstHolder> fst_writer(fsts_wspecifier);
 
     int num_succeed = 0, num_fail = 0;
@@ -271,6 +282,8 @@
     if (batch_size == 1) {  // We treat batch_size of 1 as a special case in order
 
     } else {
+      # key - transcript
+      # uttid - utt_words
       std::vector<std::string> keys;
       std::vector<std::vector<int32> > transcripts;
       
@@ -283,7 +296,9 @@
         for (; !transcript_reader.Done() &&
                 static_cast<int32>(transcripts.size()) < batch_size;
             transcript_reader.Next()) {
+          # keys - vector<uttid>
           keys.push_back(transcript_reader.Key());
+          # transcript - vector<vector<wordid>>
           transcripts.push_back(transcript_reader.Value());
         }
 
@@ -310,3 +325,104 @@
     }
 
 
+** CompileGraphsFromText(transcript, &fsts){
+  using namespace fst;
+  VectorFst<StdArc> word_fst;
+
+***  MakeLinearAcceptor(transcript, &word_fst);
+  # 构建线性图  根据transcript 构建
+  312   typedef typename Arc::StateId StateId;
+  313   typedef typename Arc::Weight Weight;
+  314 
+  315   ofst->DeleteStates();
+  # 增加状态 作为初始状态
+  316   StateId cur_state = ofst->AddState();
+  317   ofst->SetStart(cur_state);
+
+  # 根据labels 循环增加状态 next_state, 并构建状态转移弧 Arc
+  318   for (size_t i = 0; i < labels.size(); i++) {
+  319     StateId next_state = ofst->AddState();
+  320     Arc arc(labels[i], labels[i], Weight::One(), next_state);
+  321     ofst->AddArc(cur_state, arc);
+  322     cur_state = next_state;
+  323   }
+  # 构建终止状态
+  324   ofst->SetFinal(cur_state, Weight::One());
+
+  return 
+  
+***  return CompileGraph(word_fst, out_fst);
+  using namespace fst;
+
+  VectorFst<StdArc> phone2word_fst;
+  # TableCompose more efficient than compose.
+  # lex_fst_ 是前面构造函数时候 获得的
+  # phone2word_fst， 输出结果
+  TableCompose(*lex_fst_, word_fst, &phone2word_fst, &lex_cache_);
+
+  ContextFst<StdArc> *cfst = NULL;
+
+  {  // make cfst [ it's expanded on the fly ]
+    # needed to create context fst.
+    const std::vector<int32> &phone_syms = trans_model_.GetPhones();  
+    int32 subseq_symbol = phone_syms.back() + 1;
+    if (!disambig_syms_.empty() && subseq_symbol <= disambig_syms_.back())
+      subseq_symbol = 1 + disambig_syms_.back();
+
+    cfst = new ContextFst<StdArc>(subseq_symbol,
+                                  phone_syms,
+                                  disambig_syms_,
+                                  ctx_dep_.ContextWidth(),
+                                  ctx_dep_.CentralPosition());
+  }
+
+  VectorFst<StdArc> ctx2word_fst;
+  ComposeContextFst(*cfst, phone2word_fst, &ctx2word_fst);
+  // ComposeContextFst is like Compose but faster for this particular Fst type.
+  // [and doesn't expand too many arcs in the ContextFst.]
+
+  KALDI_ASSERT(ctx2word_fst.Start() != kNoStateId);
+
+  HTransducerConfig h_cfg;
+  h_cfg.transition_scale = opts_.transition_scale;
+
+  std::vector<int32> disambig_syms_h; // disambiguation symbols on
+  // input side of H.
+  VectorFst<StdArc> *H = GetHTransducer(cfst->ILabelInfo(),
+                                        ctx_dep_,
+                                        trans_model_,
+                                        h_cfg,
+                                        &disambig_syms_h);
+  
+  VectorFst<StdArc> &trans2word_fst = *out_fst;  // transition-id to word.
+  TableCompose(*H, ctx2word_fst, &trans2word_fst);
+  
+  KALDI_ASSERT(trans2word_fst.Start() != kNoStateId);
+
+  // Epsilon-removal and determinization combined. This will fail if not determinizable.
+  DeterminizeStarInLog(&trans2word_fst);
+
+  if (!disambig_syms_h.empty()) {
+    RemoveSomeInputSymbols(disambig_syms_h, &trans2word_fst);
+    // we elect not to remove epsilons after this phase, as it is
+    // a little slow.
+    if (opts_.rm_eps)
+      RemoveEpsLocal(&trans2word_fst);
+  }
+
+  
+  # Encoded minimization.
+  MinimizeEncoded(&trans2word_fst);
+
+  std::vector<int32> disambig;
+  AddSelfLoops(trans_model_,
+               disambig,
+               opts_.self_loop_scale,
+               opts_.reorder,
+               &trans2word_fst);
+}
+
+
+* Others
+
+  1 OpenFst --- StdArc Arc VectorFst
