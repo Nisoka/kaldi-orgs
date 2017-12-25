@@ -1,5 +1,4 @@
-* gmm
-  gmm-init-mono.cc
+* gmm-init-mono.cc
   Vector<BaseFloat> glob_inv_var(dim);
   39 dim Vector inv_var 转置的对角协方差
   Vector<BaseFloat> glob_mean(dim); 
@@ -54,17 +53,7 @@
   ctx_dep = MonophoneContextDependencyShared(shared_phones, phone2num_pdf_classes);
 
   DiagGmm gmm; 某个状态对应的GMM模型 - 即pdf-class的原理模型。
+
   AmDiagGmm 保存所有音素所有状态的gmm。
   for (int i = 0; i < num_pdfs; i++)
     am_gmm.AddPdf(gmm);
-  
-  
-
-      
-  
-          
-      
-  
-
-  
-  

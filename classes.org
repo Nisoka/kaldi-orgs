@@ -1,8 +1,102 @@
+* Graphviz
+
+  dot 语法总结
+  http://blog.csdn.net/zouhust/article/details/50317949
+  http://blog.csdn.net/stormdpzh/article/details/14648827
+  dot 实例
+  https://www.jianshu.com/p/e44885a777f0
+
+
+* DiagGmm
+  DiagGmm 代表混合高斯模型 是一个聚类后状态的pdf-class
+
+  DiagGmmNormal
+  代表一个GMM模型对象, 一个GMM模型是一个HMM状态的模型 pdf-- 概率分布函数(由 MFCC --> 状态概率).
+  GMM 模型参数 包括 
+  1 weight 高斯模型分量权重 n个分量
+  2 高斯模型均值means x n
+  3 高斯模型协方差vars x n
+
+  DiagGmmNormal完整描述一个GMM模型 即一个状态(绑定不绑定都可以)的模型.
+  
+  DiagGmm 为了计算方便,kaldi 使用DiagGmm 表示简单处理的DiagGmmNormal [1]
+  保存的并不是原原本本的均值、方差，
+  1 weight 高斯模型分量权重 n个分量
+  2 方差每一元素求倒数后的inv_vars_
+  3 均值乘以inv_vars_后的means_invvars_
+
+** GMM 参数
+  高斯分布，是一个以均值 方差为参数的函数。
+  所以一个模型是高斯分布, 则其分布函数就可以通过均值u 和 delta描述.
+  当高斯分布描述的随机变量是多维时,得到多维高斯分布, 这时候描述该分布的参数
+  就是多维均值以及多维变量的协方差矩阵 因为协方差矩阵是对角的一般叫做Diag。
+  
+  GMM 是一个混合多维高斯分布
+  Kaldi中使用DiagGmmNormal描述一个状态的GMM pdf(概率分布函数), 
+  保存的就是多维均值 以及 协方差矩阵.
+  而一般为了计算使用方面 一般使用的是 DiagGmm, 是为了后续计算进行了
+  多维均值 以及协方差处理计算过的inv_vars_ mean_invvas_的.[1]
+
+  [1]
+  Kaldi单音素GMM学习笔记---
+  http://blog.csdn.net/u010731824/article/details/69668765
+
+  多维高斯分布由一维演进过程
+  https://www.zhihu.com/question/36339816/answer/67439742
+  方差矩阵
+  http://blog.csdn.net/beechina/article/details/51074750  
+  多维度高斯分布
+  http://blog.csdn.net/cuihuijun1hao/article/details/71307166
+  详解
+  http://www.doc88.com/p-373366287206.html
+
+
+  
+** 核心成员
+  /// Equals log(weight) - 0.5 * (log det(var) + mean*mean*inv(var))
+  gconsts_是一个拟合用系数, 具体就是
+  Vector<BaseFloat> gconsts_;
+  bool valid_gconsts_;   ///< Recompute gconsts_ if false
+  // 
+
+  各个分模型权重
+  Vector<BaseFloat> weights_;        ///< weights (not log).
+
+  各分模型的转置协方差 均值*inv_vars
+  Matrix<BaseFloat> inv_vars_;       ///< Inverted (diagonal) variances
+  Matrix<BaseFloat> means_invvars_;  ///< Means times inverted variance
+
+
+
+
+
 
 * HmmTopology
+  HmmTopology HT 
+      表示一个音素-状态的HMM拓扑结构, 只描述了音素内 状态结构以及转移的初始拓扑结构,
+      但并没有描述一个HMM模型的观测生成概率, 只具有初始化能力.
 
-Vector<BaseFloat>
-    是一个kaldi自己实现的Vector容器类, 保存多维向量
+      <TopoEntry> 是一个音素的拓扑结构
+      提供了音素内状态结构以及初始的状态转移概率A  
+      整个HMMTopology 没有提供状态的观测生成概率B
+
+  HmmTopology 
+      1 包含了所有音素，保存到类内phones_中，对应topo文件中所有<Forphones>描述了的音素
+      2 每个音素的HMM状态拓扑结构 由phone2idx_和entries_ 共同决定 对应为<TopologyEntry>
+        phone2idx 表明某个音素的拓扑结构在哪个entries_中.
+        entries_ 所有的音素的HMM状态结构 vector<TopologyEntry>
+        TopologyEntry 描述了一个音素的HMM状态拓扑结构 vector<HmmState>
+        HmmState 描述音素内状态的转移概率 A。 vector<pair<int32, BaseFloat>>.
+        pair<目标状态, 转移概率>
+        
+
+  TransitionModel TM
+      kaldi中使用TM描述一个完整HMM模型，包含了HMM拓扑结构HT, 
+      提供了状态转移概率A <logprobs>
+          可以使用其他工具详细查看Transition概率
+      提供了观测生成概率B 高斯模型参数 <Diagmm>
+          每个状态的GMM模型.
+
 
 ** 核心成员 phones_ phone2idx_ entries_
 std::vector<int32> phones_;  // list of all phones we have topology for.  Sorted, uniq.  no epsilon (zero) phone.
@@ -36,20 +130,35 @@ int32 NumPdfClass(int32 phone);
 
 
 
-* DiagGmm
-  DiagGmm 代表混合高斯模型 是一个聚类后状态的pdf-class
-  
-** 核心成员
-  /// Equals log(weight) - 0.5 * (log det(var) + mean*mean*inv(var))
-  gconsts_是一个拟合用系数, 具体就是
-  Vector<BaseFloat> gconsts_;
-  bool valid_gconsts_;   ///< Recompute gconsts_ if false
-  // 
 
-  各个分模型权重
-  Vector<BaseFloat> weights_;        ///< weights (not log).
+* others
+** ParseOptions
+   #include <parse-options.h>
+   http://kaldi-asr.org/doc/classkaldi_1_1ParseOptions.html
+   这个类就是用来 处理命令行选项的.
+   egs
+   gmm-align --transition-scale=10.0 --beam=75 \
+       exp/mono/tree exp/mono/30.mdl data/L.fst \
+       'ark:add-deltas --print-args=false scp:data/train.scp ark:- |' \
+       ark:data/train.tra ark:exp/tri/0.ali
+   其中gmm-align 是命令程序
+   
+   # 命令行参数 包括
+     1 命令行选项 commond-line options
+        --trainsition-scale=10.0 --beam=75 等
+     2 位置参数 positonal arguments
+        剩下的没有 - --描述的参数
 
-  各分模型的转置协方差 均值*inv_vars
-  Matrix<BaseFloat> inv_vars_;       ///< Inverted (diagonal) variances
-  Matrix<BaseFloat> means_invvars_;  ///< Means times inverted variance
+   # ParseOptions 使用
 
+     // Initialize the ParseOptions object with the usage string.
+     ParseOptions po(usage)
+     # 前面先注册可识别的命令行选项.
+     // Register the options with the ParseOptions object.
+     po.Register("binary", &binary, "Write output in binary mode");
+     po.Register("beam", &beam, "Decoding beam");
+     gopts.Register(&po);
+     # 读取命令行参数，如果命令行参数中有不匹配的命令行选项则直接报错exit
+     op.Read(argc, argv);
+     # 获取位置参数.
+     std::string tree_in_filename = po.GetArg(1);

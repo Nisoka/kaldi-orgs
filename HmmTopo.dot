@@ -1,0 +1,10 @@
+digraph HmmTopology{
+        rankdir = LR
+        node[shapre=Mrecord, width=.1, height=.1]
+
+        topo -> HmmTopology
+        
+        HmmTopology -> phone_
+        HmmTopology -> phone2idx_
+        HmmTopology -> entries_
+}
