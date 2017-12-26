@@ -230,6 +230,9 @@
 
 
 * compile-train-graphs.cc
+    构建了每个utt 对应的 fst图 对应的图应该是 从 单因素 -> word 的fst 因为输入只有L.fst 和 对应的words.text
+    那么输入的mdl 被加入到了TrainingGraphCompiler 应该也是有作用的.
+    生成与音频特征对齐的HMM状态序列时要用到每句话的FST。
 
     compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $dir/tree $dir/0.mdl  $lang/L.fst \
     "ark:sym2int.pl --map-oov $oov_sym -f 2- $lang/words.txt < $sdata/JOB/text|" \
@@ -420,6 +423,1058 @@
                opts_.self_loop_scale,
                opts_.reorder,
                &trans2word_fst);
+}
+
+
+* align-equal-compiled & gmm-acc-stats-ali
+  
+** align-equal-compiled
+   align-equal-compiled "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" ark,t:-  | 
+   输入:
+   1 解压获得上步生成的 phone-word fst图， 
+   2 特征
+   输出:
+   # 输出到标准输出, 管道方式给下一个程序. 得到一个对齐后状态序列.
+   # 对齐方式很简单 就是对每个fst简图 随意找到一个可行的路径，
+   # 然后在可增加自环的状态上 增加自环, 最终使状态数量与25ms时间特征 对齐
+   
+
+   gmm-acc-stats-ali --binary=true $dir/0.mdl "$feats" ark:- 
+   $dir/0.JOB.acc || exit 1;
+
+
+    # fst table 所有utt 对应的 phone-word.fst 简图
+    SequentialTableReader<fst::VectorFstHolder> fst_reader(fst_rspecifier);
+    # feature特征
+    RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    # alignment输出, ？？
+    Int32VectorWriter alignment_writer(alignment_wspecifier);
+
+    int32 done = 0, no_feat = 0, error = 0;
+
+    # phone-word.fst
+    for (; !fst_reader.Done(); fst_reader.Next()) {
+      # uut 
+      std::string key = fst_reader.Key();
+      # 判断feature 是否存在key对应的特征.
+      if (!feature_reader.HasKey(key)) {
+        KALDI_WARN << "No features for utterance " << key;
+        no_feat++;
+      } else {
+        # 存在则读取特征，读取对应的fst
+        const Matrix<BaseFloat> &features = feature_reader.Value(key);
+        VectorFst<StdArc> decode_fst(fst_reader.Value());
+
+        # 为了在fst上加上 转移概率.
+        fst_reader.FreeCurrent();  // this stops copy-on-write of the fst
+        // by deleting the fst inside the reader, since we're about to mutate
+        // the fst by adding transition probs.
+
+        VectorFst<StdArc> path;
+        
+        # 对key 获得一个hashkey键.
+        int32 rand_seed = StringHasher()(key); // StringHasher() produces new anonymous
+        // object of type StringHasher; we then call operator () on it, with "key".
+
+        # 简图fst  utt特征行数  hashkey,   输出图.
+        *if(EqualAlign(decode_fst, features.NumRows(), rand_seed, &path)){*
+          #  aligned_seq 是对齐特征
+          std::vector<int32> aligned_seq, words;
+          StdArc::Weight w;
+          # 输入弧图  输出对齐序列, 输出对齐words， 输出图内ARC权重(无用).
+          *GetLinearSymbolSequence(path, &aligned_seq, &words, &w);*
+          # 简单的遍历了path 得到状态序列.
+
+          # 要求对齐特征 与 features对应.
+          KALDI_ASSERT(aligned_seq.size() == features.NumRows());
+          alignment_writer.Write(key, aligned_seq);
+          done++;
+        } else {
+          KALDI_WARN << "AlignEqual: did not align utterence " << key;
+          error++;
+        }
+      }
+    }
+
+*** equalAlign
+
+    bool EqualAlign ( const Fst< Arc > &  ifst,
+        # utt 特征数目 -- 状态数.
+        typename Arc::StateId  length,
+        # 随机数种子
+        int  rand_seed,
+        # 输出路径, 一个单一通路图
+        MutableFst< Arc > *  ofst,
+        # 重复次数
+        int  num_retries = 10 
+    ) 
+
+   808   srand(rand_seed);
+   809   KALDI_ASSERT(ofst->NumStates() == 0);  // make sure ofst empty.
+   810   // make sure all states can reach final-state (or this algorithm may enter
+   811   // infinite loop.
+   812   KALDI_ASSERT(ifst.Properties(kCoAccessible, true) == kCoAccessible);
+   813 
+   814   typedef typename Arc::StateId StateId;
+   815   typedef typename Arc::Weight Weight;
+   816 
+   821   // First select path through ifst.
+   822   vector<StateId> path;
+   823   vector<size_t> arc_offsets;  // arc taken out of each state.
+   824   vector<int> nof_ilabels;
+         # fst状态 
+   826   StateId num_ilabels = 0;
+   827   int retry_no = 0;
+   828 
+   829   // Under normal circumstances, this will be one-pass-only process
+   830   // Multiple tries might be needed in special cases, typically when
+   831   // the number of frames is close to number of transitions from
+   832   // the start node to the final node. It usually happens for really
+   833   // short utterances
+
+   834   do {
+   835     num_ilabels = 0;
+   836     arc_offsets.clear();
+   837     path.clear();
+   838     path.push_back(ifst.Start());
+   839 
+   840     while (1) {
+   841       // Select either an arc or final-prob.
+   842       StateId s = path.back();
+             # 某个状态的所有可能arc
+   843       size_t num_arcs = ifst.NumArcs(s);
+   844       size_t num_arcs_tot = num_arcs;
+             # 如果状态s 的终止权重不为0 说明是终止状态, 增加终止转移弧
+   845       if (ifst.Final(s) != Weight::Zero()) num_arcs_tot++;
+             # 生成一个  状态内 随机的弧index
+   849       size_t arc_offset = static_cast<size_t>(kaldi::RandInt(0, num_arcs_tot-1));
+             # 判断是否是终止转移弧
+   851       if (arc_offset < num_arcs) {  // an actual arc.
+   852         ArcIterator<Fst<Arc> > aiter(ifst, s);
+   853         aiter.Seek(arc_offset);
+   854         const Arc &arc = aiter.Value();
+               # 如果下一个状态还是s 子环, next
+   855         if (arc.nextstate == s) {
+   856           continue;  // don't take this self-loop arc
+   857         } else {
+                 # 不是自环, 讲弧index加入弧队列
+   858           arc_offsets.push_back(arc_offset);
+                 # 状态 增加到path中
+   859           path.push_back(arc.nextstate);
+                 # 弧的输入标签不是epsilon 输入标签数增加
+   860           if (arc.ilabel != 0) num_ilabels++;
+   861         }
+   862       } else {
+               # ------------- 是终止转移弧, 完成一次遍历
+   863         break;  // Chose final-prob.
+   864       }
+   865     }
+           # 输入标签总数 加入到 nof_ilabel中
+   867     nof_ilabels.push_back(num_ilabels);
+         # 判断尝试次数, 主要在后面 一定要让非自环的输入标签数量 < length.
+         # 输入标签数量 要保证< length 才说明正常.
+   868   } while (( ++retry_no < num_retries) && (num_ilabels > length));
+   869 
+   870   if (num_ilabels > length) {
+   871     std::stringstream ilabel_vec;
+   872     std::copy(nof_ilabels.begin(), nof_ilabels.end(),
+   873           std::ostream_iterator<int>(ilabel_vec, ","));
+   874     std::string s = ilabel_vec.str();
+   875     s.erase(s.end() - 1);
+   876     KALDI_WARN << "EqualAlign: the randomly constructed paths lengths: " << s;
+   877     KALDI_WARN << "EqualAlign: utterance has too few frames " << length
+   878                << " to align.";
+   879     return false;  // can't make it shorter by adding self-loops!.
+   880   }
+   881 
+
+   
+   # ========  add self loop =============
+         # path内状态 可增加自环的状态数 23  总状态数为27
+   882   StateId num_self_loops = 0;
+   883   vector<ssize_t> self_loop_offsets(path.size());
+   884   for (size_t i = 0; i < path.size(); i++)
+   885     if ( (self_loop_offsets[i] = FindSelfLoopWithILabel(ifst, path[i]))
+   886          != static_cast<ssize_t>(-1) )
+   887       num_self_loops++;
+
+   894 
+   # length utt 实际状态总数    num_ilables 随机一条路径的状态数.
+   # 100 - 27  = 63； 额外需要63个状态
+   895   StateId num_extra = length - num_ilabels;  // Number of self-loops we need.
+   896 
+
+
+   897   StateId min_num_loops = 0;
+   #     min_num_loops = 63 / 23 = 2
+   898   if (num_extra != 0) min_num_loops = num_extra / num_self_loops;  // prevent div by zero.
+   #     num_with_one_more_loop = 63 - 2*23 = 7
+   899   StateId num_with_one_more_loop = num_extra - (min_num_loops*num_self_loops);
+   900   KALDI_ASSERT(num_with_one_more_loop < num_self_loops || num_self_loops == 0);
+   901 
+   902   ofst->AddState();
+   903   ofst->SetStart(0);
+   904   StateId cur_state = 0;
+   905   StateId counter = 0;  // tell us when we should stop adding one more loop.
+
+
+   #     path 中逐个状态增加self-loop
+   906   for (size_t i = 0; i < path.size(); i++) {
+   907     // First, add any self-loops that are necessary.
+   908     StateId num_loops = 0;
+   #     可以增加自环的状态 增加 min_num_loops + 额外需要增加的自环
+   909     if (self_loop_offsets[i] != static_cast<ssize_t>(-1)) {
+   910       num_loops = min_num_loops + (counter < num_with_one_more_loop ? 1 : 0);
+   911       counter++;
+   912     }
+
+
+   #     为状态增加自环，在path中增加状态路径.
+   913     for (StateId j = 0; j < num_loops; j++) {
+   #     从path中取状态 获取ifst中的所有弧,
+   914       ArcIterator<Fst<Arc> > aiter(ifst, path[i]);
+   915       aiter.Seek(self_loop_offsets[i]);
+   916       Arc arc = aiter.Value();
+   917       KALDI_ASSERT(arc.nextstate == path[i]
+   918              && arc.ilabel != 0);  // make sure self-loop with ilabel.
+   919       StateId next_state = ofst->AddState();
+   #     向 ofst中增加状态
+   920       ofst->AddArc(cur_state, Arc(arc.ilabel, arc.olabel, arc.weight, next_state));
+   921       cur_state = next_state;
+   922     }
+   #     增加非自环 前向转移 next-state 不是自身state了
+   923     if (i+1 < path.size()) {  // add forward transition.
+   924       ArcIterator<Fst<Arc> > aiter(ifst, path[i]);
+   925       aiter.Seek(arc_offsets[i]);
+   926       Arc arc = aiter.Value();
+   927       KALDI_ASSERT(arc.nextstate == path[i+1]);
+   928       StateId next_state = ofst->AddState();
+   929       ofst->AddArc(cur_state, Arc(arc.ilabel, arc.olabel, arc.weight, next_state));
+   930       cur_state = next_state;
+   931     } else {  // add final-prob.
+   932       Weight weight = ifst.Final(path[i]);
+   933       KALDI_ASSERT(weight != Weight::Zero());
+   934       ofst->SetFinal(cur_state, weight);
+   935     }
+   936   }
+   937   return true;   
+
+** gmm-acc-stats-ali
+   const char *usage =
+   "Accumulate stats for GMM training.\n"
+   "Usage:  gmm-acc-stats-ali [options] <model-in> <feature-rspecifier> "
+   "<alignments-rspecifier> <stats-out>\n"
+   
+   # 得到的是所有状态pdf GMM 各个参数的更新累计量 梯度下降需要的更新量
+   "e.g.:\n gmm-acc-stats-ali 1.mdl scp:train.scp ark:1.ali 1.acc\n";
+
+    std::string 
+    # mdl, features, 对齐状态序列,  输出描述符
+    model_filename = po.GetArg(1),
+    feature_rspecifier = po.GetArg(2),
+    alignments_rspecifier = po.GetArg(3),
+    accs_wxfilename = po.GetArg(4);
+    
+    AmDiagGmm am_gmm;
+    TransitionModel trans_model;
+    {
+      bool binary;
+      Input ki(model_filename, &binary);
+      trans_model.Read(ki.Stream(), binary);
+      am_gmm.Read(ki.Stream(), binary);
+    }
+
+    Vector<double> transition_accs;
+    trans_model.InitStats(&transition_accs);
+    # gmm参数更新的 累积量
+    AccumAmDiagGmm gmm_accs;
+    gmm_accs.Init(am_gmm, kGmmAll);
+
+    double tot_like = 0.0;
+    kaldi::int64 tot_t = 0;
+
+    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    RandomAccessInt32VectorReader alignments_reader(alignments_rspecifier);
+
+    int32 num_done = 0, num_err = 0;
+    # 遍历特征 所有语句特征
+    for (; !feature_reader.Done(); feature_reader.Next()) {
+      std::string key = feature_reader.Key();
+      # 读取对应时间的状态
+      if (!alignments_reader.HasKey(key)) {
+        KALDI_WARN << "No alignment for utterance " << key;
+        num_err++;
+      } else {
+        # 某个utt 的 特征value 以及 状态序列
+        const Matrix<BaseFloat> &mat = feature_reader.Value();
+        const std::vector<int32> &alignment = alignments_reader.Value(key);
+
+        if (alignment.size() != mat.NumRows()) {
+          KALDI_WARN << "Alignments has wrong size " << (alignment.size())
+                     << " vs. " << (mat.NumRows());
+          num_err++;
+          continue;
+        }
+
+        # 正常 utt
+        num_done++;
+        # 该 utt的总体对数似然值.
+        BaseFloat tot_like_this_file = 0.0;
+        
+        # 某个utt的 所有状态
+        for (size_t i = 0; i < alignment.size(); i++) {
+
+          # 状态 在对齐状态序列 状态 实际就是转移
+          # 转移模型 累积 tid
+          int32 tid = alignment[i],  // transition identifier.
+              pdf_id = trans_model.TransitionIdToPdf(tid);
+
+          # 将某个tid 累计进入transition_accs
+          # 计算 amm_gmm已获得参数， 某时刻特征, 该状态pdf-id  
+          *trans_model.Accumulate(1.0, tid, &transition_accs);*
+===========================================
+              # 计算统计量
+              void Accumulate(BaseFloat prob, int32 trans_id, Vector<double> *stats) const {
+                  # 某个状态输出转移 tid的统计总数
+                  (*stats)(trans_id) += prob;
+                  // This is trivial and doesn't require class members, but leaves us more open
+                  // to design changes than doing it manually.
+              }
+===========================================
+
+          # 用每个状态的对数似然函数 更新该utt的 整体对数似然
+          *tot_like_this_file += gmm_accs.AccumulateForGmm(am_gmm, mat.Row(i), pdf_id, 1.0);*
+===========================================
+              # data --- mat.Row(i)   该状态的MFCC特征值
+              # pdf-id 通过pdf-id获得对应gmm模型参数.
+              # DiagGmm 某个GMM模型参数. 注意是个混合高斯模型 有多个高斯分量  model.GetPdf(gmm_index)
+              # AmDiagGmm 是所有 GMM模型参数.  model
+              # AccuDiagGmm 保存的是某个GMM模型参数更新量 gmm_accumulators_[gmm_index]
+              # AccuAmDiagGmm 保存所有的参数更新量
+              # 计算后验概率, 返回对数似然值
+              BaseFloat AccumAmDiagGmm::AccumulateForGmm(
+                                        const AmDiagGmm &model, const VectorBase<BaseFloat> &data,
+                                        int32 gmm_index, BaseFloat weight) {
+                  # AccumulateFromDiag 内部计算 model.GetPdf(gmm_index) 该GMM模型的各个高斯分量的后验概率
+                  # 根据状态对应的特征, 进行梯度下降的参数更新方法.                                    
+                  BaseFloat log_like = gmm_accumulators_[gmm_index]->AccumulateFromDiag(model.GetPdf(gmm_index),data, weight);
+                  total_log_like_ += log_like * weight;
+                  total_frames_ += weight;
+                  return log_like;
+              }
+          }
+===========================================
+        tot_like += tot_like_this_file;
+        tot_t += alignment.size();
+        if (num_done % 50 == 0) {
+          KALDI_LOG << "Processed " << num_done << " utterances; for utterance "
+                    << key << " avg. like is "
+                    << (tot_like_this_file/alignment.size())
+                    << " over " << alignment.size() <<" frames.";
+        }
+      }
+    }
+
+    
+    {
+      Output ko(accs_wxfilename, binary);
+      # 1 转移模型累积量？ 写入文件
+      transition_accs.Write(ko.Stream(), binary);
+      # 2 gmm更新累积量 ？ 写入文件
+      gmm_accs.Write(ko.Stream(), binary);
+    }
+
+
+* gmm-align-compiled 
+
+  与align-equal-compiled 的功能相同, 都是为了生成utt 对应的状态序列
+  但是 align-equal-compiled 生成状态序列的操作十分简陋, 只是为了进行一个初始化用的
+  实际的对齐功能应该是 gmm-align-compiled实现的.
+
+  gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$[$beam*4] --careful=$careful "$mdl" \
+        "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" "ark,t:|gzip -c >$dir/ali.JOB.gz" \
+  
+  # mdl, fst, feats,  out_ali_state_seq
+
+   const char *usage =
+        "Align features given [GMM-based] models.\n"
+        "Usage:   gmm-align-compiled [options] <model-in> <graphs-rspecifier> "
+        "<feature-rspecifier> <alignments-wspecifier> [scores-wspecifier]\n"
+        "e.g.: \n"
+        " gmm-align-compiled 1.mdl ark:graphs.fsts scp:train.scp ark:1.ali\n"
+        "or:\n"
+        " compile-train-graphs tree 1.mdl lex.fst 'ark:sym2int.pl -f 2- words.txt text|' \\\n"
+        "   ark:- | gmm-align-compiled 1.mdl ark:- scp:train.scp t, ark:1.ali\n";
+
+    ParseOptions po(usage);
+    AlignConfig align_config;
+    BaseFloat acoustic_scale = 1.0;
+    BaseFloat transition_scale = 1.0;
+    BaseFloat self_loop_scale = 1.0;
+    std::string per_frame_acwt_wspecifier;
+
+    align_config.Register(&po);
+    po.Register("transition-scale", &transition_scale,
+                "Transition-probability scale [relative to acoustics]");
+    po.Register("acoustic-scale", &acoustic_scale,
+                "Scaling factor for acoustic likelihoods");
+    po.Register("self-loop-scale", &self_loop_scale,
+                "Scale of self-loop versus non-self-loop log probs [relative to acoustics]");
+    po.Register("write-per-frame-acoustic-loglikes", &per_frame_acwt_wspecifier,
+                "Wspecifier for table of vectors containing the acoustic log-likelihoods "
+                "per frame for each utterance. E.g. ark:foo/per_frame_logprobs.1.ark");
+    po.Read(argc, argv);
+
+    if (po.NumArgs() < 4 || po.NumArgs() > 5) {
+      po.PrintUsage();
+      exit(1);
+    }
+
+    std::string 
+    model_in_filename = po.GetArg(1),
+    fst_rspecifier = po.GetArg(2),
+    feature_rspecifier = po.GetArg(3),
+    alignment_wspecifier = po.GetArg(4),
+    scores_wspecifier = po.GetOptArg(5);
+
+    TransitionModel trans_model;
+    AmDiagGmm am_gmm;
+    {
+      bool binary;
+      Input ki(model_in_filename, &binary);
+      trans_model.Read(ki.Stream(), binary);
+      am_gmm.Read(ki.Stream(), binary);
+    }
+
+    SequentialTableReader<fst::VectorFstHolder> fst_reader(fst_rspecifier);
+
+    RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);
+
+    # 对齐状态输出文件
+    Int32VectorWriter alignment_writer(alignment_wspecifier);
+
+    BaseFloatWriter scores_writer(scores_wspecifier);
+    BaseFloatVectorWriter per_frame_acwt_writer(per_frame_acwt_wspecifier);
+
+    int num_done = 0, num_err = 0, num_retry = 0;
+    double tot_like = 0.0;
+    kaldi::int64 frame_count = 0;
+
+    # 每个utt  简图fst
+    for (; !fst_reader.Done(); fst_reader.Next()) {
+
+      std::string utt = fst_reader.Key();
+      if (!feature_reader.HasKey(utt)) {
+        num_err++;
+        KALDI_WARN << "No features for utterance " << utt;
+      } else {
+        # utt 特征
+        const Matrix<BaseFloat> &features = feature_reader.Value(utt);
+
+        # utt 简图
+        VectorFst<StdArc> decode_fst(fst_reader.Value());
+
+        fst_reader.FreeCurrent();  // this stops copy-on-write of the fst
+        // by deleting the fst inside the reader, since we're about to mutate
+        // the fst by adding transition probs.
+
+        # 特征数 -- 对应状态数
+        if (features.NumRows() == 0) {
+          KALDI_WARN << "Zero-length utterance: " << utt;
+          num_err++;
+          continue;
+        }
+
+        # Add transition-probs to the FST.
+        {  
+          std::vector<int32> disambig_syms;  // empty.
+          AddTransitionProbs(trans_model, disambig_syms,
+                             transition_scale, self_loop_scale,
+                             &decode_fst);
+        }
+
+        DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features, acoustic_scale);
+
+        KALDI_LOG << utt;
+        AlignUtteranceWrapper(
+                              align_config, 
+                              utt,
+                              acoustic_scale, 
+                              &decode_fst, 
+                              &gmm_decodable,
+                              &alignment_writer, 
+                              &scores_writer,
+                              &num_done, &num_err, &num_retry,
+                              &tot_like, &frame_count, &per_frame_acwt_writer);
+      }
+    }
+
+    KALDI_LOG << "Overall log-likelihood per frame is " << (tot_like/frame_count)
+              << " over " << frame_count<< " frames.";
+    KALDI_LOG << "Retried " << num_retry << " out of "
+              << (num_done + num_err) << " utterances.";
+    KALDI_LOG << "Done " << num_done << ", errors on " << num_err;
+    return (num_done != 0 ? 0 : 1);
+
+
+** 解码对象
+   DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features, acoustic_scale);
+   # 将 am_gmm trans_mdl  feat 等对象保存起来
+
+** AlignUtteranceWrapper
+
+void AlignUtteranceWrapper(
+    const AlignConfig &config,
+    const std::string &utt,
+    BaseFloat acoustic_scale,  // affects scores written to scores_writer, if
+                               // present
+    fst::VectorFst<fst::StdArc> *fst,  // non-const in case config.careful ==
+                                       // true.
+    DecodableInterface *decodable,  // not const but is really an input.
+    Int32VectorWriter *alignment_writer,
+    BaseFloatWriter *scores_writer,
+    int32 *num_done,
+    int32 *num_error,
+    int32 *num_retried,
+    double *tot_like,
+    int64 *frame_count,
+    BaseFloatVectorWriter *per_frame_acwt_writer) {
+
+  if ((config.retry_beam != 0 && config.retry_beam <= config.beam) ||
+      config.beam <= 0.0) {
+    KALDI_ERR << "Beams do not make sense: beam " << config.beam
+              << ", retry-beam " << config.retry_beam;
+  }
+
+  if (fst->Start() == fst::kNoStateId) {
+    KALDI_WARN << "Empty decoding graph for " << utt;
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+
+  fst::StdArc::Label special_symbol = 0;
+  if (config.careful)
+    ModifyGraphForCarefulAlignment(fst);
+
+  FasterDecoderOptions decode_opts;
+  decode_opts.beam = config.beam;
+
+  FasterDecoder decoder(*fst, decode_opts);
+  decoder.Decode(decodable);
+
+  bool ans = decoder.ReachedFinal();  // consider only final states.
+
+  if (!ans && config.retry_beam != 0.0) {
+    if (num_retried != NULL) (*num_retried)++;
+    KALDI_WARN << "Retrying utterance " << utt << " with beam "
+               << config.retry_beam;
+    decode_opts.beam = config.retry_beam;
+    decoder.SetOptions(decode_opts);
+    decoder.Decode(decodable);
+    ans = decoder.ReachedFinal();
+  }
+
+  if (!ans) {  // Still did not reach final state.
+    KALDI_WARN << "Did not successfully decode file " << utt << ", len = "
+               << decodable->NumFramesReady();
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+  fst::VectorFst<LatticeArc> decoded;  // linear FST.
+  decoder.GetBestPath(&decoded);
+  if (decoded.NumStates() == 0) {
+    KALDI_WARN << "Error getting best path from decoder (likely a bug)";
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+  std::vector<int32> alignment;
+  std::vector<int32> words;
+  LatticeWeight weight;
+
+  GetLinearSymbolSequence(decoded, &alignment, &words, &weight);
+  BaseFloat like = -(weight.Value1()+weight.Value2()) / acoustic_scale;
+
+  if (num_done != NULL) (*num_done)++;
+  if (tot_like != NULL) (*tot_like) += like;
+  if (frame_count != NULL) (*frame_count) += decodable->NumFramesReady();
+
+  if (alignment_writer != NULL && alignment_writer->IsOpen())
+    alignment_writer->Write(utt, alignment);
+
+  if (scores_writer != NULL && scores_writer->IsOpen())
+    scores_writer->Write(utt, -(weight.Value1()+weight.Value2()));
+
+  Vector<BaseFloat> per_frame_loglikes;
+  if (per_frame_acwt_writer != NULL && per_frame_acwt_writer->IsOpen()) {
+    GetPerFrameAcousticCosts(decoded, &per_frame_loglikes);
+    per_frame_loglikes.Scale(-1 / acoustic_scale);
+    per_frame_acwt_writer->Write(utt, per_frame_loglikes);
+  }
+}
+   
+
+** 为简图的所有转移修改转移概率A
+
+    AddTransitionProbs(trans_model, disambig_syms, transition_scale, self_loop_scale, &decode_fst);
+  
+void AddTransitionProbs(const TransitionModel &trans_model,
+                        BaseFloat transition_scale,
+                        BaseFloat self_loop_scale,
+                        Lattice *lat) {
+  using namespace fst;
+  int num_tids = trans_model.NumTransitionIds();
+
+  # 遍历 简图中的 ??? 难道是每条可能路径???
+  # 看来是这个意思, 这样所有所经上都增加了对应的 状态转移概率A
+  for (fst::StateIterator<Lattice> siter(*lat);
+       !siter.Done();
+       siter.Next()) 
+
+  {
+    # foreach  Arc???
+    for (MutableArcIterator<Lattice> aiter(lat, siter.Value());
+         !aiter.Done();
+         aiter.Next()) {
+         
+      LatticeArc arc = aiter.Value();
+      LatticeArc::Label l = arc.ilabel;
+      
+      # l 标签正常， 是一个正常转移
+      # a transition-id.
+      if (l >= 1 && l <= num_tids) { 
+      
+        # 前面计算过的 转移概率
+        BaseFloat scaled_log_prob = GetScaledTransitionLogProb(trans_model,
+                                                               l,
+                                                               transition_scale,
+                                                               self_loop_scale);
+        // cost is negated log prob.
+        # 代价值 是 负 log 概率
+        arc.weight.SetValue1(arc.weight.Value1() - scaled_log_prob);
+      }
+      # 更新弧, 主要是增加了权重.
+      aiter.SetValue(arc);
+    }
+  }
+}
+
+
+* gmm-est 
+  
+  通过进行累计统计, 然后更新 转移模型参数
+  更新 GMM模型参数.
+
+  gmm-est --min-gaussian-occupancy=3  --mix-up=$numgauss --power=$power \
+  # postition paramters
+    $dir/0.mdl "gmm-sum-accs - $dir/0.*.acc|" $dir/1.mdl 2> $dir/log/update.0.log || exit 1;
+    # 1             2                            out_3 
+
+    const char *usage =
+        "Do Maximum Likelihood re-estimation of GMM-based acoustic model\n"
+        "Usage:  gmm-est [options] <model-in> <stats-in> <model-out>\n"
+        # 模型  DiagGmm更新量-AccuDiagGmm  输出模型
+        "e.g.: gmm-est 1.mdl 1.acc 2.mdl\n";
+
+    bool binary_write = true;
+    MleTransitionUpdateConfig tcfg;
+    MleDiagGmmOptions gmm_opts;
+    int32 mixup = 0;
+    int32 mixdown = 0;
+    BaseFloat perturb_factor = 0.01;
+    BaseFloat power = 0.2;
+    BaseFloat min_count = 20.0;
+    std::string update_flags_str = "mvwt";
+    std::string occs_out_filename;
+
+    ParseOptions po(usage);
+
+    po.Register("mix-up", &mixup, "Increase number of mixture components to "
+                "this overall target.");
+    po.Register("power", &power, "If mixing up, power to allocate Gaussians to"
+                " states.");
+
+    tcfg.Register(&po);
+    gmm_opts.Register(&po);
+
+    po.Read(argc, argv);
+
+    kaldi::GmmFlagsType update_flags =
+        StringToGmmFlags(update_flags_str);
+
+    std::string 
+    # 0.mdl
+    model_in_filename = po.GetArg(1),
+    # acc AccuDiagGmm DiagGmm的更新统计量
+    stats_filename = po.GetArg(2),
+    # out 1.mdl
+    model_out_filename = po.GetArg(3);
+    
+    # 全部 状体的GMM 
+    AmDiagGmm am_gmm;
+    # 转移模型
+    TransitionModel trans_model;
+
+    {
+      bool binary_read;
+      Input ki(model_in_filename, &binary_read);
+      # 读取 转移模型 以及 GMM参数    0.mdl = 转移模型 + AmDiagGMM
+      trans_model.Read(ki.Stream(), binary_read);
+      am_gmm.Read(ki.Stream(), binary_read);
+    }
+
+    # transition_accs 状态转移统计量
+    Vector<double> transition_accs;
+    # AccumAmDiagGmm 全部GMM的参数更新量
+    AccumAmDiagGmm gmm_accs;
+
+    {
+      bool binary;
+      Input ki(stats_filename, &binary);
+      # 读取统计量
+      transition_accs.Read(ki.Stream(), binary);
+      # 读取参数更新量
+      gmm_accs.Read(ki.Stream(), binary, true);  // true == add; doesn't matter here.
+    }
+
+    # Update transition model.
+    if (update_flags & kGmmTransitions) {  
+
+      BaseFloat objf_impr, count;
+      # 最大似然估计 Max likelihood estimate
+      *trans_model.MleUpdate(transition_accs, tcfg, &objf_impr, &count);*
+      # objf_impr 增加的总体 对数似然概率值
+      KALDI_LOG << "Transition model update: Overall " << (objf_impr/count)
+                << " log-like improvement per frame over " << (count)
+                << " frames.";
+    }
+
+    # Update GMMs.
+    {  
+      BaseFloat objf_impr, count;
+      
+      BaseFloat 
+      tot_like = gmm_accs.TotLogLike(),
+      tot_t = gmm_accs.TotCount();
+      # 根据累积量 更新 am_gmm.
+      *MleAmDiagGmmUpdate(gmm_opts, gmm_accs, update_flags, &am_gmm, &objf_impr, &count);*
+
+      KALDI_LOG << "GMM update: Overall " << (objf_impr/count)
+                << " objective function improvement per frame over "
+                <<  count <<  " frames";
+      KALDI_LOG << "GMM update: Overall avg like per frame = "
+                << (tot_like/tot_t) << " over " << tot_t << " frames.";
+    }
+
+
+
+    if (mixup != 0 || mixdown != 0 || !occs_out_filename.empty()) {
+      // get pdf occupation counts
+      Vector<BaseFloat> pdf_occs;
+      pdf_occs.Resize(gmm_accs.NumAccs());
+      for (int i = 0; i < gmm_accs.NumAccs(); i++)
+        pdf_occs(i) = gmm_accs.GetAcc(i).occupancy().Sum();
+
+      if (mixdown != 0)
+        am_gmm.MergeByCount(pdf_occs, mixdown, power, min_count);
+
+      if (mixup != 0)
+        am_gmm.SplitByCount(pdf_occs, mixup, perturb_factor,
+                            power, min_count);
+
+      if (!occs_out_filename.empty()) {
+        bool binary = false;
+        WriteKaldiObject(pdf_occs, occs_out_filename, binary);
+      }
+    }
+
+    # 输出 转移模型 + am_gmm => 1.mdl
+    {
+      Output ko(model_out_filename, binary_write);
+      trans_model.Write(ko.Stream(), binary_write);
+      am_gmm.Write(ko.Stream(), binary_write);
+    }
+
+
+** 转移模型更新转移概率 权重 最大似然估计 MapUpdate
+
+   trans_model.MleUpdate(transition_accs, tcfg, &objf_impr, &count);
+   # 转移统计量   tcfg 配置   ？？   ？？
+
+void TransitionModel::MapUpdate(const Vector<double> &stats,
+                                const MapTransitionUpdateConfig &cfg,
+                                BaseFloat *objf_impr_out,
+                                BaseFloat *count_out) {
+  KALDI_ASSERT(cfg.tau > 0.0);
+  if (cfg.share_for_pdfs) {
+    MapUpdateShared(stats, cfg, objf_impr_out, count_out);
+    return;
+  }
+  BaseFloat count_sum = 0.0, objf_impr_sum = 0.0;
+  # 所有转移总数 == 转移ids + 1
+  KALDI_ASSERT(stats.Dim() == NumTransitionIds()+1);
+
+  # 遍历转移状态
+  for (int32 tstate = 1; tstate <= NumTransitionStates(); tstate++) {
+    # 该转移状态对应的可能转移数 
+    # 一个转移状态可以包含多个转移.
+    int32 n = NumTransitionIndices(tstate);
+    # return static_cast<int32>(state2id_[trans_state+1]-state2id_[trans_state]);
+
+    KALDI_ASSERT(n>=1);
+    # 如果一个状态只统计见到了一个转移, 那么不需要更新该状态的转移概率。
+    # no point updating if only one transition...
+    if (n > 1) {  
+      Vector<double> counts(n);
+      # 遍历所有转移
+      for (int32 tidx = 0; tidx < n; tidx++) {
+        # 某个转移状态内的转移  tid = find(tstate, tidx)
+        int32 tid = PairToTransitionId(tstate, tidx);
+        # 统计tid
+        counts(tidx) = stats(tid);
+      }
+      
+      double tstate_tot = counts.Sum();
+      count_sum += tstate_tot;
+
+      Vector<BaseFloat> old_probs(n), new_probs(n);
+
+      # 获得原本 转移概率
+      for (int32 tidx = 0; tidx < n; tidx++) {
+        int32 tid = PairToTransitionId(tstate, tidx);
+        old_probs(tidx) = new_probs(tidx) = GetTransitionProb(tid);
+      }
+
+      # new_probs(x1) = [n(x1) + p(x1)*cfg.tau]/(cfg.tau + tstate_tot)
+      for (int32 tidx = 0; tidx < n; tidx++)
+        new_probs(tidx) = (counts(tidx) + cfg.tau * old_probs(tidx)) /
+            (cfg.tau + tstate_tot);
+
+      # every transition-index. 计算的是什么？？？
+      for (int32 tidx = 0; tidx < n; tidx++) {
+        # 
+        double objf_change = counts(tidx) * (Log(new_probs(tidx)) - Log(old_probs(tidx)));
+        objf_impr_sum += objf_change;
+      }
+
+      # 计算转移权重  ------ log(prob)
+      for (int32 tidx = 0; tidx < n; tidx++) {
+        int32 tid = PairToTransitionId(tstate, tidx);
+        log_probs_(tid) = Log(new_probs(tidx));
+      }
+    }
+  }
+
+  ComputeDerivedOfProbs();
+}
+
+
+** 根据AccumAmDiagGmm 参数更新量 更新 DiagGmm参数
+  void MleAmDiagGmmUpdate (const MleDiagGmmOptions &config,        # 更新配置
+                         const AccumAmDiagGmm &am_diag_gmm_acc,    # 更新统计量
+                         GmmFlagsType flags,                       # 更新标记
+                         AmDiagGmm *am_gmm,                        # 返回am_gmm参数
+                         BaseFloat *obj_change_out,                # 总体优化成果
+                         BaseFloat *count_out) {                   # 总数???
+
+
+  # 要求 更新统计量 一定等于 GMM个数
+  KALDI_ASSERT(am_diag_gmm_acc.NumAccs() == am_gmm->NumPdfs());
+
+  if (obj_change_out != NULL) *obj_change_out = 0.0;
+  if (count_out != NULL) *count_out = 0.0;
+
+  
+  BaseFloat 
+  tot_obj_change = 0.0, 
+  tot_count = 0.0;
+
+  int32 
+  tot_elems_floored = 0, 
+  tot_gauss_floored = 0,
+  tot_gauss_removed = 0;
+
+  # 遍历所有 参数更新量
+  for (int32 i = 0; i < am_diag_gmm_acc.NumAccs(); i++) {
+  
+    BaseFloat   obj_change, count;
+    int32 
+    elems_floored, 
+    gauss_floored, 
+    gauss_removed;
+    
+    # computing the maximum-likelihood estimates of the parameters of a Gaussian mixture model
+    # 计算第i个混合高斯模型GMM 的 最大似然估计, 并且更新GMM参数.
+    MleDiagGmmUpdate(config, am_diag_gmm_acc.GetAcc(i), flags,
+                     &(am_gmm->GetPdf(i)),
+                     &obj_change, 
+                     &count, 
+                     &elems_floored,
+                     &gauss_floored, 
+                     &gauss_removed);
+
+    tot_obj_change += obj_change;
+    tot_count += count;
+    tot_elems_floored += elems_floored;
+    tot_gauss_floored += gauss_floored;
+    tot_gauss_removed += gauss_removed;
+  }
+
+
+  if (obj_change_out != NULL) *obj_change_out = tot_obj_change;
+  if (count_out != NULL) *count_out = tot_count;
+  KALDI_LOG << tot_elems_floored << " variance elements floored in "
+            << tot_gauss_floored << " Gaussians, out of "
+            <<  am_gmm->NumGauss();
+  if (config.remove_low_count_gaussians) {
+    KALDI_LOG << "Removed " << tot_gauss_removed
+              << " Gaussians due to counts < --min-gaussian-occupancy="
+              <<  config.min_gaussian_occupancy
+              << " and --remove-low-count-gaussians=true";
+  }
+}
+
+
+***  MleDiagGmmUpdate 计算某个高斯混合模型的最大似然估计值
+
+void MleDiagGmmUpdate(
+
+const MleDiagGmmOptions &config,      # 计算配置
+const AccumDiagGmm &diag_gmm_acc,     # 该高斯模型 参数更新量
+GmmFlagsType flags,                   # 
+DiagGmm *gmm,                         # 对应的 混合高斯模型
+BaseFloat *obj_change_out,            # 输出结果...
+BaseFloat *count_out,
+int32 *floored_elements_out,
+int32 *floored_gaussians_out,
+int32 *removed_gaussians_out) 
+
+{
+  KALDI_ASSERT(gmm != NULL);
+
+
+  # 混合数 必须相同
+  KALDI_ASSERT(diag_gmm_acc.NumGauss() == gmm->NumGauss() &&  diag_gmm_acc.Dim() == gmm->Dim());
+  # 混合数
+  int32 num_gauss = gmm->NumGauss();
+  double occ_sum = diag_gmm_acc.occupancy().Sum();
+
+  int32 
+  elements_floored = 0, 
+  gauss_floored = 0;
+
+  // remember old objective value
+  # 计算Gconsts
+  gmm->ComputeGconsts();
+  # 均值方差乘积？？？ 后续求解需要的计算值.
+  BaseFloat obj_old = MlObjective(*gmm, diag_gmm_acc);
+
+  # First get the gmm in "normal" representation (not the exponential-model form).
+  DiagGmmNormal ngmm(*gmm);
+
+  std::vector<int32> to_remove;
+  # 每个高斯分量
+  for (int32 i = 0; i < num_gauss; i++) {
+  
+    double occ = diag_gmm_acc.occupancy()(i);
+    double prob;
+    # 计算分量权重?
+    if (occ_sum > 0.0)
+      prob = occ / occ_sum;
+    else
+      prob = 1.0 / num_gauss;
+
+    if (occ > static_cast<double>(config.min_gaussian_occupancy)
+        && prob > static_cast<double>(config.min_gaussian_weight)) {
+      # 分量权重
+      ngmm.weights_(i) = prob;
+
+      // copy old mean for later normalizations
+      Vector<double> old_mean(ngmm.means_.Row(i));
+
+      # update mean, then variance, as far as there are accumulators
+      # 根据 参数更新量 更新计算 均值
+      if (diag_gmm_acc.Flags() & (kGmmMeans|kGmmVariances)) {
+        *Vector<double> mean(diag_gmm_acc.mean_accumulator().Row(i));*
+        mean.Scale(1.0 / occ);
+        // transfer to estimate
+        ngmm.means_.CopyRowFromVec(mean, i);
+      }
+
+      # 根据 参数更新量 更新计算 协方差
+      if (diag_gmm_acc.Flags() & kGmmVariances) {
+        KALDI_ASSERT(diag_gmm_acc.Flags() & kGmmMeans);
+        # 协方差参数更新量
+        Vector<double> var(diag_gmm_acc.variance_accumulator().Row(i));
+        var.Scale(1.0 / occ);
+        # 计算 - 均值平方
+        var.AddVec2(-1.0, ngmm.means_.Row(i));  // subtract squared means.
+
+        // if we intend to only update the variances, we need to compensate by
+        // adding the difference between the new and old mean
+        if (!(flags & kGmmMeans)) {
+          old_mean.AddVec(-1.0, ngmm.means_.Row(i));
+          var.AddVec2(1.0, old_mean);
+        }
+
+        int32 floored;
+        if (config.variance_floor_vector.Dim() != 0) {
+          floored = var.ApplyFloor(config.variance_floor_vector);
+        } else {
+          floored = var.ApplyFloor(config.min_variance);
+        }
+        if (floored != 0) {
+          elements_floored += floored;
+          gauss_floored++;
+        }
+        # transfer to estimate
+        ngmm.vars_.CopyRowFromVec(var, i);
+      }
+    } else {  // Insufficient occupancy.
+      if (config.remove_low_count_gaussians &&
+          static_cast<int32>(to_remove.size()) < num_gauss-1) {
+        // remove the component, unless it is the last one.
+        KALDI_WARN << "Too little data - removing Gaussian (weight "
+                   << std::fixed << prob
+                   << ", occupation count " << std::fixed << diag_gmm_acc.occupancy()(i)
+                   << ", vector size " << gmm->Dim() << ")";
+        to_remove.push_back(i);
+      } else {
+        KALDI_WARN << "Gaussian has too little data but not removing it because"
+                   << (config.remove_low_count_gaussians ?
+                       " it is the last Gaussian: i = "
+                       : " remove-low-count-gaussians == false: g = ") << i
+                   << ", occ = " << diag_gmm_acc.occupancy()(i) << ", weight = " << prob;
+        ngmm.weights_(i) =
+            std::max(prob, static_cast<double>(config.min_gaussian_weight));
+      }
+    }
+  }
+
+  # 更新了 Normal gmm 将更新后参数 拷贝进入gmm。
+  // copy to natural representation according to flags
+  ngmm.CopyToDiagGmm(gmm, flags);
+
+  gmm->ComputeGconsts();  // or MlObjective will fail.
+  BaseFloat obj_new = MlObjective(*gmm, diag_gmm_acc);
+
+  if (obj_change_out)
+    *obj_change_out = (obj_new - obj_old);
+  if (count_out) *count_out = occ_sum;
+  if (floored_elements_out) *floored_elements_out = elements_floored;
+  if (floored_gaussians_out) *floored_gaussians_out = gauss_floored;
+
+  if (to_remove.size() > 0) {
+    gmm->RemoveComponents(to_remove, true /*renormalize weights*/);
+    gmm->ComputeGconsts();
+  }
+  if (removed_gaussians_out != NULL) *removed_gaussians_out = to_remove.size();
+
+  if (gauss_floored > 0)
+    KALDI_VLOG(2) << gauss_floored << " variances floored in " << gauss_floored
+                  << " Gaussians.";
 }
 
 
