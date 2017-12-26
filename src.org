@@ -940,12 +940,14 @@ void AlignUtteranceWrapper(
     int64 *frame_count,
     BaseFloatVectorWriter *per_frame_acwt_writer) {
 
+  # config.retry_beam = 40, config.beam = 10
   if ((config.retry_beam != 0 && config.retry_beam <= config.beam) ||
       config.beam <= 0.0) {
     KALDI_ERR << "Beams do not make sense: beam " << config.beam
               << ", retry-beam " << config.retry_beam;
   }
 
+  # 首个状态
   if (fst->Start() == fst::kNoStateId) {
     KALDI_WARN << "Empty decoding graph for " << utt;
     if (num_error != NULL) (*num_error)++;
@@ -953,14 +955,20 @@ void AlignUtteranceWrapper(
   }
 
 
+  # Arc 标签
   fst::StdArc::Label special_symbol = 0;
+
   if (config.careful)
     ModifyGraphForCarefulAlignment(fst);
 
+  # 快速解码 选项配置？？？
   FasterDecoderOptions decode_opts;
+  # 解码beam?
   decode_opts.beam = config.beam;
 
+  # 解码器？ 简图fst
   FasterDecoder decoder(*fst, decode_opts);
+  # 进行解码
   decoder.Decode(decodable);
 
   bool ans = decoder.ReachedFinal();  // consider only final states.
