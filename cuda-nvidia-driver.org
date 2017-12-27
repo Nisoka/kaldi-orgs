@@ -1,0 +1,6 @@
+Nvidia 驱动安装 OK
+# 注意 一定要求 nvidia驱动匹配上 cuda要求驱动
+GT730 的驱动版本最高为384
+cuda9.1 要求驱动387以上, 有些显卡不支持.
+cuda9.0 支持384, 
+http://blog.csdn.net/cosmoshua/article/details/76644029
