@@ -22,6 +22,11 @@ sum-tree-stats $dir/treeacc $dir/*.treeacc 2>$dir/log/sum_tree_acc.log || exit 1
 
 
 * acc-tree-stats
+  # 统计 训练决策数需要的统计量
+  # input 特征 对齐的状态序列 HMM-GMM模型
+  # outpu 决策数统计量
+  # Context width 和 central position用来识别上下文环境
+  # 转移模型 用来获得pdf-id 和 音素.
   /** @brief Accumulate tree statistics for decision tree training. The
 program reads in a feature archive, and the corresponding alignments,
 and generates the sufficient statistics for the decision tree
@@ -30,9 +35,6 @@ identify the contexts.Transition model is used as an input to identify
 the PDF's and the phones.  */
 
 int main(int argc, char *argv[]) {
-  using namespace kaldi;
-  typedef kaldi::int32 int32;
-  try {
     const char *usage =
         "Accumulate statistics for phonetic-context tree building.\n"
         "Usage:  acc-tree-stats [options] <model-in> <features-rspecifier> <alignments-rspecifier> <tree-accs-out>\n"
@@ -43,9 +45,9 @@ int main(int argc, char *argv[]) {
         " acc-tree-stats 1.mdl scp:train.scp ark:1.ali 1.tacc\n";
 
     bool binary = true;
-    # 计算 决策树需要的 统计信息 选项.
+    # 计算 决策树需要的 统计信息 选项. 
+    # Context-width = 3 central postion = 1, 标准三音素窗。
     AccumulateTreeStatsOptions opts;
-
 
     std::string
     model_filename = po.GetArg(1),
@@ -53,7 +55,6 @@ int main(int argc, char *argv[]) {
     # 对齐状态序列
     alignment_rspecifier = po.GetArg(3),
     accs_out_wxfilename = po.GetOptArg(4);
-
 
     # 统计 决策树统计信息
     AccumulateTreeStatsInfo acc_tree_stats_info(opts);
@@ -71,9 +72,10 @@ int main(int argc, char *argv[]) {
     # 对齐状态reader
     RandomAccessInt32VectorReader alignment_reader(alignment_rspecifier);
 
-    # 绑定树 用的统计量 EventType -- <三音素, 状态>  某个确定状态
-    #                   GaussClusterable             该状态对应的特征向量个数、特征向量累加、特征向量平方和累加.
-    *std::map<EventType, GaussClusterable*> tree_stats;*
+    # 绑定树 用的统计量 
+    # EventType -- <三音素, 状态>  某个确定状态
+    # GaussClusterable  该状态对应的特征向量个数、特征向量累加、特征向量平方和累加.
+    std::map<EventType, GaussClusterable*> tree_stats;
     int num_done = 0, num_no_alignment = 0, num_other_error = 0;
     # foreach utt
     for (; !feature_reader.Done(); feature_reader.Next()) {
@@ -142,21 +144,11 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
   # 划分得到多个 Vector<音素- vector<状态id> > 
   # 将trans-ids 转化为 以phone为分割的 状态序列. 
   bool ans = SplitToPhones(trans_model, alignment, &split_alignment);
-  if (!ans) {
-    KALDI_WARN << "AccumulateTreeStats: alignment appears to be bad, not using it";
-    return;
-  }
-
   int32 cur_pos = 0;
-  # dim
-  int32 dim = features.NumCols();
-  # utt 内 帧数--特征序列数   == 对齐得到的trans-ids 序列数
-  KALDI_ASSERT(features.NumRows() == static_cast<int32>(alignment.size()));
-  
-  # 每个分割好的音素.
+  # 每个分割好的音素. context_width = 3 , central_postion = 1 
   for (int32 i = -info.context_width; i < static_cast<int32>(split_alignment.size()); i++) {
     // consider window starting at i, only if i+info.central_position is within list of phones.
-
+    # 形成三音素上下文环境
     if (i + info.central_position >= 0 &&
         i + info.central_position < static_cast<int32>(split_alignment.size())) {
 
@@ -171,7 +163,6 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
       bool is_ctx_dep = !std::binary_search(info.ci_phones.begin(),
                                             info.ci_phones.end(),
                                             central_phone);
-
       EventType evec;
       # 音素窗内某个音素
       for (int32 j = 0; j < info.context_width; j++) {
@@ -186,17 +177,8 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
           phone = 0;  
         // we also set the phone arbitrarily to 0
 
-        // Don't add stuff to the event that we don't "allow" to be asked, due
-        // to the central phone being context-independent: check "is_ctx_dep".
-        // Why not just set the value to zero in this
-        // case?  It's for safety.  By omitting the key from the event, we
-        // ensure that there is no way a question can ever be asked that might
-        // give an inconsistent answer in tree-training versus graph-building.
-        // [setting it to zero would have the same effect given the "normal"
-        // recipe but might be less robust to changes in tree-building recipe].
-
         if (is_ctx_dep || j == info.central_position)
-          # 将<contex-width-index, phone> 加入 evec
+          # 将<contex-width-index, phone> 加入 evec  获得可查找的音素位置.
           evec.push_back(std::make_pair(static_cast<EventKeyType>(j), static_cast<EventValueType>(phone)));
       }
       # 某个音素内的所有状态-trans-ids
@@ -213,7 +195,7 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
         evec_more.push_back(pr);
 
         std::sort(evec_more.begin(), evec_more.end());  // these must be sorted!
-        # 如果某个对应的HMM状态 的统计为0 构建一个高斯分量.
+        # 如果某个三音素的HMM状态 构建统计量.
         if (stats->count(evec_more) == 0)
           (*stats)[evec_more] = new GaussClusterable(dim, info.var_floor);
 
@@ -226,6 +208,72 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
   }
   KALDI_ASSERT(cur_pos == static_cast<int32>(alignment.size()));
 }
+
+
+** SplitToPhonesInternal 转化到音素序列
+   static bool kaldi::SplitToPhonesInternal ( const TransitionModel &  trans_model,
+                                              const std::vector< int32 > &  alignment,
+                                              bool  reordered,
+                                              std::vector< std::vector< int32 > > *  split_output 
+                                              ) 
+
+  618   std::vector<size_t> end_points;  // points at which phones end [in an
+  619   // stl iterator sense, i.e. actually one past the last transition-id within
+  620   // each phone]..
+
+  622   bool was_ok = true;
+        # foreach 每帧状态
+  623   for (size_t i = 0; i < alignment.size(); i++) {
+  624     int32 trans_id = alignment[i];
+          # 正常音素分割点
+  625     if (trans_model.IsFinal(trans_id)) {  // is final-prob
+  626       if (!reordered) end_points.push_back(i+1);
+  627       else {  // reordered.
+  628         while (i+1 < alignment.size() &&
+  629               trans_model.IsSelfLoop(alignment[i+1])) {
+  630           KALDI_ASSERT(trans_model.TransitionIdToTransitionState(alignment[i]) ==
+  631                  trans_model.TransitionIdToTransitionState(alignment[i+1]));
+  632           i++;
+  633         }
+  634         end_points.push_back(i+1);
+  635       }
+          # 错误情况
+  636     } else if (i+1 == alignment.size()) {
+  637       // need to have an end-point at the actual end.
+  638       // but this is an error- should have been detected already.
+  639       was_ok = false;
+  640       end_points.push_back(i+1);
+          # 状态判断
+  641     } else {
+  642       int32 this_state = trans_model.TransitionIdToTransitionState(alignment[i]),
+  643           next_state = trans_model.TransitionIdToTransitionState(alignment[i+1]);
+  644       if (this_state == next_state) continue;  // optimization.
+  645       int32 this_phone = trans_model.TransitionStateToPhone(this_state),
+  646           next_phone = trans_model.TransitionStateToPhone(next_state);
+  647       if (this_phone != next_phone) {
+  650         was_ok = false;
+  651         end_points.push_back(i+1);
+  652       }
+  653     }
+  654   }
+        # 将属于各自音素的状态 划归到音素队列中，形成 <音素 <状态>> 的结构
+  656   size_t cur_point = 0;
+  657   for (size_t i = 0; i < end_points.size(); i++) {
+  658     split_output->push_back(std::vector<int32>());
+  662     int32 trans_state =
+  663       trans_model.TransitionIdToTransitionState(alignment[cur_point]);
+  664     int32 phone = trans_model.TransitionStateToPhone(trans_state);
+  665     int32 forward_pdf_class = trans_model.GetTopo().TopologyForPhone(phone)[0].forward_pdf_class;
+  666     if (forward_pdf_class != kNoPdf)  // initial-state of the current phone is emitting
+  667       if (trans_model.TransitionStateToHmmState(trans_state) != 0)
+  668         was_ok = false;
+          # 划归状态到音素操作
+  669     for (size_t j = cur_point; j < end_points[i]; j++)
+  670       split_output->back().push_back(alignment[j]);
+  671     cur_point = end_points[i];
+  672   }
+  673   return was_ok;
+  674 }
 
 
 * sum-tree-stats
@@ -244,17 +292,10 @@ int main(int argc, char *argv[]) {
     ParseOptions po(usage);
     bool binary = true;
 
-    po.Register("binary", &binary, "Write output in binary mode");
-    po.Read(argc, argv);
 
-    if (po.NumArgs() < 2) {
-      po.PrintUsage();
-      exit(1);
-    }
-
-    # 决策树统计量
+    # 统计量
     std::map<EventType, Clusterable*> tree_stats;
-    # 综合统计量writer
+    # 统计量writer
     std::string tree_stats_wxfilename = po.GetArg(1);
 
     // A reminder on what BuildTreeStatsType is:
