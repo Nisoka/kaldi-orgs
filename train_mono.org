@@ -871,7 +871,7 @@
         # utt 特征
         const Matrix<BaseFloat> &features = feature_reader.Value(utt);
 
-        # utt 简图
+        # utt 简图 以Arc组成的向量 描述的 FST图.
         VectorFst<StdArc> decode_fst(fst_reader.Value());
 
         fst_reader.FreeCurrent();  // this stops copy-on-write of the fst
@@ -917,116 +917,9 @@
     return (num_done != 0 ? 0 : 1);
 
 
-** 解码对象
-   DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features, acoustic_scale);
-   # 将 am_gmm trans_mdl  feat 等对象保存起来
-
-** AlignUtteranceWrapper
-
-void AlignUtteranceWrapper(
-    const AlignConfig &config,
-    const std::string &utt,
-    BaseFloat acoustic_scale,  // affects scores written to scores_writer, if
-                               // present
-    fst::VectorFst<fst::StdArc> *fst,  // non-const in case config.careful ==
-                                       // true.
-    DecodableInterface *decodable,  // not const but is really an input.
-    Int32VectorWriter *alignment_writer,
-    BaseFloatWriter *scores_writer,
-    int32 *num_done,
-    int32 *num_error,
-    int32 *num_retried,
-    double *tot_like,
-    int64 *frame_count,
-    BaseFloatVectorWriter *per_frame_acwt_writer) {
-
-  # config.retry_beam = 40, config.beam = 10
-  if ((config.retry_beam != 0 && config.retry_beam <= config.beam) ||
-      config.beam <= 0.0) {
-    KALDI_ERR << "Beams do not make sense: beam " << config.beam
-              << ", retry-beam " << config.retry_beam;
-  }
-
-  # 首个状态
-  if (fst->Start() == fst::kNoStateId) {
-    KALDI_WARN << "Empty decoding graph for " << utt;
-    if (num_error != NULL) (*num_error)++;
-    return;
-  }
-
-
-  # Arc 标签
-  fst::StdArc::Label special_symbol = 0;
-
-  if (config.careful)
-    ModifyGraphForCarefulAlignment(fst);
-
-  # 快速解码 选项配置？？？
-  FasterDecoderOptions decode_opts;
-  # 解码beam?
-  decode_opts.beam = config.beam;
-
-  # 解码器？ 简图fst
-  FasterDecoder decoder(*fst, decode_opts);
-  # 进行解码
-  decoder.Decode(decodable);
-
-  bool ans = decoder.ReachedFinal();  // consider only final states.
-
-  if (!ans && config.retry_beam != 0.0) {
-    if (num_retried != NULL) (*num_retried)++;
-    KALDI_WARN << "Retrying utterance " << utt << " with beam "
-               << config.retry_beam;
-    decode_opts.beam = config.retry_beam;
-    decoder.SetOptions(decode_opts);
-    decoder.Decode(decodable);
-    ans = decoder.ReachedFinal();
-  }
-
-  if (!ans) {  // Still did not reach final state.
-    KALDI_WARN << "Did not successfully decode file " << utt << ", len = "
-               << decodable->NumFramesReady();
-    if (num_error != NULL) (*num_error)++;
-    return;
-  }
-
-  fst::VectorFst<LatticeArc> decoded;  // linear FST.
-  decoder.GetBestPath(&decoded);
-  if (decoded.NumStates() == 0) {
-    KALDI_WARN << "Error getting best path from decoder (likely a bug)";
-    if (num_error != NULL) (*num_error)++;
-    return;
-  }
-
-  std::vector<int32> alignment;
-  std::vector<int32> words;
-  LatticeWeight weight;
-
-  GetLinearSymbolSequence(decoded, &alignment, &words, &weight);
-  BaseFloat like = -(weight.Value1()+weight.Value2()) / acoustic_scale;
-
-  if (num_done != NULL) (*num_done)++;
-  if (tot_like != NULL) (*tot_like) += like;
-  if (frame_count != NULL) (*frame_count) += decodable->NumFramesReady();
-
-  if (alignment_writer != NULL && alignment_writer->IsOpen())
-    alignment_writer->Write(utt, alignment);
-
-  if (scores_writer != NULL && scores_writer->IsOpen())
-    scores_writer->Write(utt, -(weight.Value1()+weight.Value2()));
-
-  Vector<BaseFloat> per_frame_loglikes;
-  if (per_frame_acwt_writer != NULL && per_frame_acwt_writer->IsOpen()) {
-    GetPerFrameAcousticCosts(decoded, &per_frame_loglikes);
-    per_frame_loglikes.Scale(-1 / acoustic_scale);
-    per_frame_acwt_writer->Write(utt, per_frame_loglikes);
-  }
-}
-   
-
 ** 为简图的所有转移修改转移概率A
 
-    AddTransitionProbs(trans_model, disambig_syms, transition_scale, self_loop_scale, &decode_fst);
+# AddTransitionProbs(trans_model, disambig_syms, transition_scale, self_loop_scale, &decode_fst);
   
 void AddTransitionProbs(const TransitionModel &trans_model,
                         BaseFloat transition_scale,
@@ -1068,6 +961,116 @@ void AddTransitionProbs(const TransitionModel &trans_model,
     }
   }
 }
+
+** 解码对象
+   DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features, acoustic_scale);
+   # 将 am_gmm trans_mdl  feat 等对象保存起来
+
+** AlignUtteranceWrapper
+
+void AlignUtteranceWrapper(
+    const AlignConfig &config,
+    const std::string &utt,
+    BaseFloat acoustic_scale,  // affects scores written to scores_writer, if
+                               // present
+    fst::VectorFst<fst::StdArc> *fst,  // non-const in case config.careful ==
+                                       // true.
+    DecodableInterface *decodable,  // not const but is really an input.
+    Int32VectorWriter *alignment_writer,
+    BaseFloatWriter *scores_writer,
+    int32 *num_done,
+    int32 *num_error,
+    int32 *num_retried,
+    double *tot_like,
+    int64 *frame_count,
+    BaseFloatVectorWriter *per_frame_acwt_writer) {
+
+  # config.retry_beam = 40, config.beam = 10
+  if ((config.retry_beam != 0 && config.retry_beam <= config.beam) ||
+      config.beam <= 0.0) {
+    KALDI_ERR << "Beams do not make sense: beam " << config.beam
+              << ", retry-beam " << config.retry_beam;
+  }
+
+  # 通过首个状态判断是否正常.
+  if (fst->Start() == fst::kNoStateId) {
+    KALDI_WARN << "Empty decoding graph for " << utt;
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+
+
+  if (config.careful)
+    ModifyGraphForCarefulAlignment(fst);
+
+  # 快速解码 选项配置？？？
+  FasterDecoderOptions decode_opts;
+  # 解码beam?
+  decode_opts.beam = config.beam;
+
+  # 解码器？ 简图fst
+  FasterDecoder decoder(*fst, decode_opts);
+  # 进行解码
+  http://m.blog.csdn.net/sinat_35674501/article/details/73470867  [good]  
+  http://blog.csdn.net/fandaoerji/article/details/44853853  [not so good]
+  decoder.Decode(decodable);
+
+  # 判断是否到达终止状态
+  bool ans = decoder.ReachedFinal();  // consider only final states.
+
+  # 重新解码
+  if (!ans && config.retry_beam != 0.0) {
+    if (num_retried != NULL) (*num_retried)++;
+    KALDI_WARN << "Retrying utterance " << utt << " with beam "
+               << config.retry_beam;
+    decode_opts.beam = config.retry_beam;
+    decoder.SetOptions(decode_opts);
+    decoder.Decode(decodable);
+    
+    ans = decoder.ReachedFinal();
+  }
+  # 判断是否到达终止状态 Still did not reach final state.
+  if (!ans) {  // 
+    KALDI_WARN << "Did not successfully decode file " << utt << ", len = "
+               << decodable->NumFramesReady();
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+  fst::VectorFst<LatticeArc> decoded;  // linear FST.
+  decoder.GetBestPath(&decoded);
+  if (decoded.NumStates() == 0) {
+    KALDI_WARN << "Error getting best path from decoder (likely a bug)";
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+  std::vector<int32> alignment;
+  std::vector<int32> words;
+  LatticeWeight weight;
+
+  GetLinearSymbolSequence(decoded, &alignment, &words, &weight);
+  BaseFloat like = -(weight.Value1()+weight.Value2()) / acoustic_scale;
+
+  if (num_done != NULL) (*num_done)++;
+  if (tot_like != NULL) (*tot_like) += like;
+  if (frame_count != NULL) (*frame_count) += decodable->NumFramesReady();
+
+  if (alignment_writer != NULL && alignment_writer->IsOpen())
+    alignment_writer->Write(utt, alignment);
+
+  if (scores_writer != NULL && scores_writer->IsOpen())
+    scores_writer->Write(utt, -(weight.Value1()+weight.Value2()));
+
+  Vector<BaseFloat> per_frame_loglikes;
+  if (per_frame_acwt_writer != NULL && per_frame_acwt_writer->IsOpen()) {
+    GetPerFrameAcousticCosts(decoded, &per_frame_loglikes);
+    per_frame_loglikes.Scale(-1 / acoustic_scale);
+    per_frame_acwt_writer->Write(utt, per_frame_loglikes);
+  }
+}
+   
 
 
 * gmm-est 
@@ -1489,3 +1492,7 @@ int32 *removed_gaussians_out)
 * Others
 
   1 OpenFst --- StdArc Arc VectorFst
+    VectorFst 应该就是一个描述FST用的 Vector
+    Arc 就是弧的概念
+    输入标签一般是用的 transition-ids, 本身是可以用 phone-state，但是在使用上
+    有时候状态并不那么好用, 使用能够获得更多信息的transition-id。
