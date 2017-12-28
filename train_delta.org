@@ -16,10 +16,18 @@ alidir=$5
 dir=$6
 
 
-acc-tree-stats --ci-phones=$ciphonelist $alidir/final.mdl "$feats" "ark:gunzip -c $alidir/ali.JOB.gz|" $dir/JOB.treeacc || exit 1;
+acc-tree-stats --ci-phones=$ciphonelist $alidir/final.mdl "$feats" "ark:gunzip -c $alidir/ali.JOB.gz|" $dir/JOB.treeacc 
 
-sum-tree-stats $dir/treeacc $dir/*.treeacc 2>$dir/log/sum_tree_acc.log || exit 1;
+sum-tree-stats $dir/treeacc $dir/*.treeacc 
 
+cluster-phones $context_opts $dir/treeacc $lang/phones/sets.int  $dir/questions.int 
+#               null (3, 1)   决策数统计量   音素变体            输出问题集合(音素分割树)
+
+compile-questions $context_opts $lang/topo $dir/questions.int $dir/questions.qst  ？？？？？
+#                               topo结构   音素分割树          输出问题???x
+
+build-tree --max-leaves=$numleaves  $dir/treeacc $lang/phones/roots.int $dir/questions.qst $lang/topo $dir/tree
+# 最大节点数                     统计量         roots.int            qst   topo     ==> tree
 
 * acc-tree-stats
   # 统计 训练决策数需要的统计量
@@ -112,7 +120,7 @@ int main(int argc, char *argv[]) {
     
     BuildTreeStatsType stats;  // vectorized form.
 
-    # foreach state-stats？？？ 保存的和 刚刚计算没什么区别, 可能这里更好使用吧.
+    # 将 <EventType, GaussClusterable> 保存到文件中.
     for (std::map<EventType, GaussClusterable*>::const_iterator iter = tree_stats.begin();
          iter != tree_stats.end();
          ++iter) {
@@ -300,18 +308,24 @@ int main(int argc, char *argv[]) {
 
     // A reminder on what BuildTreeStatsType is:
     // typedef std::vector<std::pair<EventType, Clusterable*> > BuildTreeStatsType;
-    
+    # arg 2 第三个参数 第一个输入统计量
     for (int32 arg = 2; arg <= po.NumArgs(); arg++) {
       std::string tree_stats_rxfilename = po.GetArg(arg);
       bool binary_in;
       Input ki(tree_stats_rxfilename, &binary_in);
+
+      # 统计量<EventType, GaussClusterable>
       BuildTreeStatsType stats_array;
       GaussClusterable example; // Lets ReadBuildTreeStats know which type to read..
+
+      # 读取统计量<EventType, GaussClusterable> 到 stats_array
       ReadBuildTreeStats(ki.Stream(), binary_in, example, &stats_array);
+      
       for (BuildTreeStatsType::iterator iter = stats_array.begin();
            iter != stats_array.end(); ++iter) {
         EventType e = iter->first;
         Clusterable *c = iter->second;
+        # 获得e进行综合统计
         std::map<EventType, Clusterable*>::iterator map_iter = tree_stats.find(e);
         if (map_iter == tree_stats.end()) { // Not already present.
           tree_stats[e] = c;
@@ -322,8 +336,8 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    # 写入综合统计量
     BuildTreeStatsType stats;  // vectorized form.
-
     for (std::map<EventType, Clusterable*>::const_iterator iter = tree_stats.begin();  
         iter != tree_stats.end();
          ++iter) {
@@ -347,6 +361,720 @@ int main(int argc, char *argv[]) {
   
 
 
-* 
- EventMap
+* cluster-phones
+  # 音素窗配置， 决策数统计量， 音素变体集合.
+int main(int argc, char *argv[]) {
+  using namespace kaldi;
+  try {
+    using namespace kaldi;
+    typedef kaldi::int32 int32;
+
+    const char *usage =
+        "Cluster phones (or sets of phones) into sets for various purposes\n"
+        "Usage:  cluster-phones [options] <tree-stats-in> <phone-sets-in> <clustered-phones-out>\n"
+        "e.g.: \n"
+        " cluster-phones 1.tacc phonesets.txt questions.txt\n";
+    // Format of phonesets.txt is e.g.
+    // 1
+    // 2 3 4
+    // 5 6
+    // ...
+    // Format of questions.txt output is similar, but with more lines (and the same phone
+    // may appear on multiple lines).
+
+    // bool binary = true;
+    int32 P = 1, N = 3; // Note: N does not matter.
+    # central postion.
+    std::string pdf_class_list_str = "1";  // 1 is just the central position of 3.
+    std::string mode = "questions";
+    int32 num_classes = -1;
+
+    std::string 
+    # 统计量
+    stats_rxfilename = po.GetArg(1),
+    # 音素集合
+    phone_sets_rxfilename = po.GetArg(2),
+    # 输出writer
+    phone_sets_wxfilename = po.GetArg(3);
+
+
+    BuildTreeStatsType stats;
+    {  // Read tree stats.
+      bool binary_in;
+      GaussClusterable gc;  // dummy needed to provide type.
+      Input ki(stats_rxfilename, &binary_in);
+      # 统计量 -> stats
+      ReadBuildTreeStats(ki.Stream(), binary_in, gc, &stats);
+    }
+
+    # ???
+    std::vector<int32> pdf_class_list;
+    # 按： 分割字符串 pdf-class-list = 1
+    if (!SplitStringToIntegers(pdf_class_list_str, ":", false, &pdf_class_list) || pdf_class_list.empty()) {
+      KALDI_ERR << "Invalid pdf-class-list string [expecting colon-separated list of integers]: " 
+                 << pdf_class_list_str;
+    }
+    
+    
+    std::vector<std::vector< int32> > phone_sets;
+    # 读取sets.int 获得音素变体结合  <集合<音素变体>>
+    if (!ReadIntegerVectorVectorSimple(phone_sets_rxfilename, &phone_sets)) ;
+
+    # ========
+    if (mode == "questions") {
+      if (num_classes != -1)
+        KALDI_ERR << "num-classes option is not (currently) compatible "
+            "with \"questions\" mode.";
+
+      std::vector<std::vector<int32> > phone_sets_out;
+      # in   统计量、 音素变体集合、1、1（中心状态、中心音素）
+      # out 聚类音素集合输出. phones_sets_out, 音素划分树结构, 从顶层全部音素 进行划分到一个节点的音素集合.
+      AutomaticallyObtainQuestions(stats,
+                                   phone_sets,
+                                   pdf_class_list,
+                                   P,
+                                   &phone_sets_out);
+    } else if (mode == "k-means") {
+    }
+
+    # write聚类后音素集合
+    if (!WriteIntegerVectorVectorSimple(phone_sets_wxfilename, phone_sets_out))
+      KALDI_ERR << "Error writing questions to "
+                 << PrintableWxfilename(phone_sets_wxfilename);
+    else
+      KALDI_LOG << "Wrote questions to "<<phone_sets_wxfilename;
+
+    DeleteBuildTreeStats(&stats);
+}
+
+
+** AutomaticallyObjtainQuestion
+
+void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
+                                  const std::vector<std::vector<int32> > &phone_sets_in,
+                                  const std::vector<int32> &all_pdf_classes_in,
+                                  int32 P,
+                                  std::vector<std::vector<int32> > *questions_out) 
+# stats   phone_set_in  state-pos, phone-pos (根据统计量 以及初始的变体音素集合，用 中心因素的中心状态进行聚类)
+# 输出聚类后问题
+{
+  std::vector<std::vector<int32> > phone_sets(phone_sets_in);
+  std::vector<int32> phones;
+
+  # 读取所有音素 ==> phones
+  for (size_t i = 0; i < phone_sets.size() ;i++) {
+    std::sort(phone_sets[i].begin(), phone_sets[i].end());
+    for (size_t j = 0; j < phone_sets[i].size(); j++)
+      phones.push_back(phone_sets[i][j]);
+  }
+  std::sort(phones.begin(), phones.end());
+
+
+  # 1
+  std::vector<int32> all_pdf_classes(all_pdf_classes_in);
+
+  # filter 统计量, 只要中心状态的统计量 --> retained_stats
+  BuildTreeStatsType retained_stats;
+  FilterStatsByKey(stats, kPdfClass, all_pdf_classes,
+                   true,  // retain only the listed positions
+                   &retained_stats);
+
+
+  std::vector<BuildTreeStatsType> split_stats;  // split by phone.
+  # 从 retained_stats , 获得中心音素 划分音素
+  SplitStatsByKey(retained_stats, P, &split_stats);
+
+  std::vector<Clusterable*> summed_stats;  // summed up by phone.
+  # 按音素累计所有中心状态
+  SumStatsVec(split_stats, &summed_stats);
+
+  # 最大音素
+  int32 max_phone = phones.back();
+  if (static_cast<int32>(summed_stats.size()) < max_phone+1) {
+    // this can happen if the last phone had no data.. if we are using
+    // stress-marked, position-marked phones, this can happen.  The later
+    // code will assume that a summed_stats entry exists for all phones.
+    summed_stats.resize(max_phone+1, NULL);
+  }
+
+  # check
+  for (int32 i = 0; static_cast<size_t>(i) < summed_stats.size(); i++) {  // A check.
+    if (summed_stats[i] != NULL &&
+        !binary_search(phones.begin(), phones.end(), i)) {
+      KALDI_WARN << "Phone "<< i << " is present in stats but is not in phone list [make sure you intended this].";
+    }
+  }
+
+  EnsureClusterableVectorNotNull(&summed_stats);  // make sure no NULL pointers in summed_stats.
+  // will replace them with pointers to empty stats.
+
+  # 按照phone_sets 中的集合方式集合
+  std::vector<Clusterable*> summed_stats_per_set(phone_sets.size(), NULL);  // summed up by set.
+  for (size_t i = 0; i < phone_sets.size(); i++) {
+    const std::vector<int32> &this_set = phone_sets[i];
+    summed_stats_per_set[i] = summed_stats[this_set[0]]->Copy();
+    for (size_t j = 1; j < this_set.size(); j++)
+      summed_stats_per_set[i]->Add(*(summed_stats[this_set[j]]));
+  }
+
+
+  # 进行音素聚类
+  TreeClusterOptions topts;
+  topts.kmeans_cfg.num_tries = 10;  // This is a slow-but-accurate setting,
+  std::vector<int32> assignments;  // assignment of phones to clusters. dim == summed_stats.size().
+  std::vector<int32> clust_assignments;  // Parent of each cluster.  Dim == #clusters.
+  int32 num_leaves;  // number of leaf-level clusters.
+  # 音素聚类结果.
+  TreeCluster(summed_stats_per_set,
+              summed_stats_per_set.size(),  // max-#clust is all of the points.
+              NULL,  // don't need the clusters out.
+              &assignments,
+              &clust_assignments,
+              &num_leaves,
+              topts);
+
+  // process the information obtained by TreeCluster into the
+  // form we want at output.
+
+
+  # 根据聚类结果, 进行输出得到, 
+  # questions_out
+  # 通过聚类算法得到的 对音素的划分树结构.
+  ObtainSetsOfPhones(phone_sets,
+                     assignments,
+                     clust_assignments,
+                     num_leaves,
+                     questions_out);
+
+  // The memory in summed_stats was newly allocated. [the other algorithms
+  // used here do not allocate].
+  DeletePointers(&summed_stats);
+  DeletePointers(&summed_stats_per_set);
+}
+
+***  TreeCluster
+     # 音素变体集合 进行聚类
+
+     TreeCluster(
+     # in  
+     # 按phone_set为集合 统计得到 集合内中心状态统计量
+     # 音素变体集合总数
+     summed_stats_per_set,
+     summed_stats_per_set.size(),  // max-#clust is all of the points.
+     NULL,  // don't need the clusters out.
+     # out
+     # 某个音素变体集合 属于某个cluster
+     &assignments,
+     # 所有节点cluster - id, 
+     # 叶子节点 0 - cnt_leaf, 
+     # 非叶子节点 cnt_leaf ---- clust_assignments.size()
+     # top 节点 == clust_assignments.size()
+     &clust_assignments,
+     &num_leaves,
+     topts);
+
+**** SplitStatsByKey()
+    # 将状态按照某个音素进行聚类 得到 <音素 <中心状态s>>
+void SplitStatsByKey(const BuildTreeStatsType &stats_in, EventKeyType key, std::vector<BuildTreeStatsType> *stats_out) {
+  BuildTreeStatsType::const_iterator iter, end = stats_in.end();
+  size_t size = 0;
+  // This loop works out size of output vector.
+  for (iter = stats_in.begin(); iter != end; ++iter) {
+    const EventType &evec = iter->first;
+    EventValueType val;
+    # 中心状态中 所有属于中心音素的状态大小(全部都是)
+    # val 保存音素id
+    if (! EventMap::Lookup(evec, key, &val)) // no such key.
+      KALDI_ERR << "SplitStats: key "<< key << " is not present in event vector " << EventTypeToString(evec);
+    # 最终获得训练中得到的最大的音素id, 做数组大小
+    size = std::max(size, (size_t)(val+1));
+  }
+
+  stats_out->resize(size);
+  // This loop splits up the stats.
+  for (iter = stats_in.begin(); iter != end; ++iter) {
+    const EventType &evec = iter->first;
+    EventValueType val;
+    # 将状态按中心音素 => stats_out.
+    EventMap::Lookup(evec, key, &val);  // will not fail.
+    (*stats_out)[val].push_back(*iter);
+  }
+}
+
+
+
+
+***  ObtainSetsOfPhones
+根据 assignment clust-assignment 
+将所有音素放入到最顶层节点
+按问题将音素 分割放入到子节点
+继续将音素向下分割, 完成音素的聚类.
+
+static void ObtainSetsOfPhones(const std::vector<std::vector<int32> > &phone_sets,  // the original phone sets, may
+                               // just be individual phones.
+                               const std::vector<int32> &assignments,  // phone-sets->clusters
+                               const std::vector<int32> &clust_assignments,  // clust->parent
+                               int32 num_leaves,  // number of clusters present..
+                               std::vector<std::vector<int32> > *sets_out) {
+
+  # 聚类结果 <cluster < phones >>
+  std::vector<std::vector<int32> > raw_sets(clust_assignments.size());
+
+  # 所有音素变体
+  for (size_t i = 0; i < assignments.size(); i++) {
+    # 某个音素变体属于的某个cluster
+    int32 clust = assignments[i];  // this is an index into phone_sets.
+    for (size_t j = 0; j < phone_sets[i].size(); j++) {
+      // and not just a hole.
+      # 将对应的音素变体都加入到 cluster中
+      raw_sets[clust].push_back(phone_sets[i][j]);
+    }
+  }
+
+  // for all clusters including the top-level cluster:
+  // [note that the top-level cluster contains all phones, but it may actually
+  //  be useful because sometimes we cluster just the non-silence phones, so
+  //  the list of all phones is a way of asking about silence in such a way
+  // that epsilon (end-or-begin-of-utterance) gets lumped with silence.
+  # 每个簇
+  for (int32 j = 0; j < static_cast<int32>(clust_assignments.size()); j++) {
+    # 父节点
+    int32 parent = clust_assignments[j];
+    # 某个cluster的所有变体phone
+    std::sort(raw_sets[j].begin(), raw_sets[j].end());
+    # 按树结构 将音素都安排到节点上, 越高节点安排的音素越多
+    if (parent < static_cast<int32>(clust_assignments.size())-1) {  // parent is not out of range [i.e. not the top one]...
+      // add all j's phones to its parent.
+      raw_sets[parent].insert(raw_sets[parent].end(),
+                              raw_sets[j].begin(),
+                              raw_sets[j].end());
+    }
+  }
+
+  // Reverse the 'raw_sets' so the most important things (top-level questions)
+  // appear at the front... this will end up mattering because of the
+  // --truncate-leftmost-questions option to compile-questions.
+  std::reverse(raw_sets.begin(), raw_sets.end());
+
+  // Now add the original sets-of-phones to the raw sets, to make sure all of
+  // these are present.  (The main reason they might be absent is if the stats
+  // are empty, but we want to ensure they are all there regardless).  
+  // note these will be actual singleton sets if the sets-of-phones each contain just one
+  // phone, which in some sense is the normal situation.
+  for (size_t i = 0; i < phone_sets.size(); i++) {
+    raw_sets.push_back(phone_sets[i]);
+  }
+
+  // Remove duplicate sets from "raw_sets".
+  RemoveDuplicates(&raw_sets);
+  sets_out->reserve(raw_sets.size());
+
+  for (size_t i = 0; i < raw_sets.size(); i++)
+    if (! raw_sets[i].empty())  // if the empty set is present, remove it...
+      sets_out->push_back(raw_sets[i]);
+
+
+
+* compile-question
+
+int main(int argc, char *argv[]) {
+  using namespace kaldi;
+  try {
+    using namespace kaldi;
+    typedef kaldi::int32 int32;
+
+    const char *usage =
+        "Compile questions\n"
+        "Usage:  compile-questions [options] <topo> <questions-text-file> <questions-out>\n"
+        "e.g.: \n"
+        " compile-questions questions.txt questions.qst\n";
+    bool binary = true;
+    int32 P = 1, N = 3;
+    int32 num_iters_refine = 0;
+
+    std::string
+    topo_filename = po.GetArg(1),
+    questions_rxfilename = po.GetArg(2),
+    # writer
+    questions_out_filename = po.GetArg(3);
+
+    HmmTopology topo;  // just needed for checking, and to get the
+    ReadKaldiObject(topo_filename, &topo);
+
+    std::vector<std::vector<int32> > questions;  // sets of phones.
+    # read question     <phones_set<phone-id>>
+    if (!ReadIntegerVectorVectorSimple(questions_rxfilename, &questions))
+      KALDI_ERR << "Could not read questions from "
+                 << PrintableRxfilename(questions_rxfilename);
+
+    # phones_set-
+    for (size_t i = 0; i < questions.size(); i++) {
+      std::sort(questions[i].begin(), questions[i].end());
+      if (!IsSortedAndUniq(questions[i]))
+        KALDI_ERR << "Questions contain duplicate phones";
+    }
+
+    size_t nq = static_cast<int32>(questions.size());
+    SortAndUniq(&questions);
+    if (questions.size() != nq)
+      KALDI_WARN << (nq-questions.size())
+                 << " duplicate questions present in " << questions_rxfilename;
+
+    # 检查 topo中的所有音素都在至少一个问题中, 并返回所有音素中最大的pdf-class？？？
+    // ProcessTopo checks that all phones in the topo are
+    // represented in at least one questions (else warns), and
+    // returns the max # pdf classes in any given phone (normally 3).
+    int32 max_num_pdfclasses = ProcessTopo(topo, questions);
+
+    Questions qo;
+    # 0
+    QuestionsForKey phone_opts(num_iters_refine);
+    // the questions-options corresponding to keys 0, 1, .. N-1 which
+    // represent the phonetic context positions (including the central phone).
+    # 音素窗N=3, 根 是所有位置0,1,2的集合是全部音素
+    for (int32 n = 0; n < N; n++) {
+      KALDI_LOG << "Setting questions for phonetic-context position "<< n;
+      phone_opts.initial_questions = questions;
+      qo.SetQuestionsOf(n, phone_opts);
+    }
+
+    # 0
+    QuestionsForKey pdfclass_opts(num_iters_refine);
+    
+    std::vector<std::vector<int32> > pdfclass_questions(max_num_pdfclasses-1);
+    # 每个可能状态index
+    for (int32 i = 0; i < max_num_pdfclasses - 1; i++)
+      # 从0 - 状态index
+      for (int32 j = 0; j <= i; j++)
+        pdfclass_questions[i].push_back(j);
+    // E.g. if max_num_pdfclasses == 3,  pdfclass_questions is now [ [0], [0, 1] ].  
+    pdfclass_opts.initial_questions = pdfclass_questions;
+    # -1， ？？？
+    qo.SetQuestionsOf(kPdfClass, pdfclass_opts);
+    WriteKaldiObject(qo, questions_out_filename, binary);
+}
+
+
+
+* build-tree
+int main(int argc, char *argv[]) {
+  using namespace kaldi;
+  const char *usage =
+        "Train decision tree\n"
+        "Usage:  build-tree [options] <tree-stats-in> <roots-file> <questions-file> <topo-file> <tree-out>\n"
+  
+  "e.g.: \n"
+  " build-tree treeacc roots.txt 1.qst topo tree\n";
+
+
+    bool binary = true;
+    #  CONTEXT_WIDTH  CENTREL POSTION
+    int32 P = 1, N = 3;
+
+    BaseFloat thresh = 300.0;
+    BaseFloat cluster_thresh = -1.0;  // negative means use smallest split in splitting phase as thresh.
+    int32 max_leaves = 0;
+    std::string occs_out_filename;
+
+
+    po.Read(argc, argv);
+
+    if (po.NumArgs() != 5) {
+      po.PrintUsage();
+      exit(1);
+    }
+
+    std::string 
+    stats_filename = po.GetArg(1),
+    roots_filename = po.GetArg(2),
+    questions_filename = po.GetArg(3),
+    topo_filename = po.GetArg(4),
+    tree_out_filename = po.GetArg(5);
+
+
+    // Following 2 variables derived from roots file.
+    // phone_sets is sets of phones that share their roots.
+    // Just one phone each for normal systems.
+
+    std::vector<std::vector<int32> > phone_sets;
+    std::vector<bool> is_shared_root;
+    std::vector<bool> is_split_root;
+
+    {
+      Input ki(roots_filename.c_str());
+      ReadRootsFile(ki.Stream(), &phone_sets, &is_shared_root, &is_split_root);
+    }
+
+    HmmTopology topo;
+    ReadKaldiObject(topo_filename, &topo);
+
+    # 统计量
+    BuildTreeStatsType stats;
+    {
+      bool binary_in;
+      GaussClusterable gc;  // dummy needed to provide type.
+      Input ki(stats_filename, &binary_in);
+      ReadBuildTreeStats(ki.Stream(), binary_in, gc, &stats);
+    }
+    KALDI_LOG << "Number of separate statistics is " << stats.size();
+
+    # 问题集合
+    Questions qo;
+    {
+      qo.Read(ki.Stream(), binary_in);
+    }
+
+
+    std::vector<int32> phone2num_pdf_classes;
+    topo.GetPhoneToNumPdfClasses(&phone2num_pdf_classes);
+
+    EventMap *to_pdf = NULL;
+
+
+    # //////// Build the tree. ////////////
+    to_pdf = BuildTree(qo,
+                       phone_sets,
+                       phone2num_pdf_classes,
+                       is_shared_root,
+                       is_split_root,
+                       stats,
+                       thresh,
+                       max_leaves,
+                       cluster_thresh,
+                       # 1
+                       P);   
+
+    # This block is to warn about low counts.
+    { 
+
+    }
+
+    # 根据构建的树 构建ctx_dep 对象 写文件
+    ContextDependency ctx_dep(N, P, to_pdf);  // takes ownership
+    WriteKaldiObject(ctx_dep, tree_out_filename, binary);
+
+    # This block is just doing some checks.
+
+    KALDI_LOG << "Wrote tree";
+
+    DeleteBuildTreeStats(&stats);
+}
+
+** Build tree
+
+   # 
+   EventMap *BuildTree(Questions &qopts,                                   # question
+                    const std::vector<std::vector<int32> > &phone_sets,    # roots
+                    const std::vector<int32> &phone2num_pdf_classes,       # 每个音素的状态
+                    const std::vector<bool> &share_roots,                  # roots中是否进行共享
+                    const std::vector<bool> &do_split,                     # 是否进行分列
+                    const BuildTreeStatsType &stats,                       # 音素决策统计量
+                    BaseFloat thresh,
+                    int32 max_leaves,
+                    BaseFloat cluster_thresh,  // typically == thresh.  If negative, use smallest split.
+                    int32 P) {
+
+  // the inputs will be further checked in GetStubMap.
+  int32 num_leaves = 0;  // allocator for leaves.
+
+  # ########################################################
+  # 构建状态绑定树基础
+  EventMap *tree_stub = GetStubMap(P,
+                                   phone_sets,
+                                   phone2num_pdf_classes,
+                                   share_roots,
+                                   &num_leaves);
+
+  BaseFloat impr;
+  BaseFloat smallest_split = 1.0e+10;
+
+  # 全部插入到 nonsplit_phones
+  std::vector<int32> nonsplit_phones;
+  for (size_t i = 0; i < phone_sets.size(); i++)
+    if (!do_split[i])
+      nonsplit_phones.insert(nonsplit_phones.end(), phone_sets[i].begin(), phone_sets[i].end());
+
+  std::sort(nonsplit_phones.begin(), nonsplit_phones.end());
+
+  KALDI_ASSERT(IsSortedAndUniq(nonsplit_phones));
+
+
+
+# #############################################  
+  BuildTreeStatsType filtered_stats;
+  # 过滤统计量.
+  FilterStatsByKey(stats, P, nonsplit_phones, false,  // retain only those not in "nonsplit_phones"
+                   &filtered_stats);
+
+  EventMap *tree_split = SplitDecisionTree(*tree_stub,
+                                           filtered_stats,
+                                           qopts, thresh, max_leaves,
+                                           &num_leaves, &impr, &smallest_split);
+
+  if (cluster_thresh < 0.0) {
+    KALDI_LOG <<  "Setting clustering threshold to smallest split " << smallest_split;
+    cluster_thresh = smallest_split;
+  }
+
+  BaseFloat normalizer = SumNormalizer(stats),
+      impr_normalized = impr / normalizer,
+      normalizer_filt = SumNormalizer(filtered_stats),
+      impr_normalized_filt = impr / normalizer_filt;
+
+  KALDI_VLOG(1) <<  "After decision tree split, num-leaves = " << num_leaves
+                << ", like-impr = " << impr_normalized << " per frame over "
+                << normalizer << " frames.";
+
+  KALDI_VLOG(1) <<  "Including just phones that were split, improvement is "
+                << impr_normalized_filt << " per frame over "
+                << normalizer_filt << " frames.";
+
+
+  if (cluster_thresh != 0.0) {   // Cluster the tree.
+    BaseFloat objf_before_cluster = ObjfGivenMap(stats, *tree_split);
+
+    // Now do the clustering.
+    int32 num_removed = 0;
+    EventMap *tree_clustered = ClusterEventMapRestrictedByMap(*tree_split,
+                                                              stats,
+                                                              cluster_thresh,
+                                                              *tree_stub,
+                                                              &num_removed);
+    KALDI_LOG <<  "BuildTree: removed "<< num_removed << " leaves.";
+
+    int32 num_leaves = 0;
+    EventMap *tree_renumbered = RenumberEventMap(*tree_clustered, &num_leaves);
+
+    BaseFloat objf_after_cluster = ObjfGivenMap(stats, *tree_renumbered);
+
+}
+
+
+***  GetStubMap
+
+# 从roots.int 的音素集合开始 为每一行构建一个叶子节点, 作为状态绑定数的基础
+EventMap *GetStubMap(int32 P,
+                     const std::vector<std::vector<int32> > &phone_sets,    
+                     const std::vector<int32> &phone2num_pdf_classes,
+                     const std::vector<bool> &share_roots,
+                     int32 *num_leaves_out) 
+# POSTION = 1
+# rooots
+# 音素含有状态数 
+# bool 是否共享
+# 输出叶节点数
+
+{
+
+  // Initially create a single leaf for each phone set.
+  # roots音素集合中 包含最多的音素集合的音素数目
+  size_t max_set_size = 0;
+  # 所有音素中的最大音素id??
+  int32 highest_numbered_phone = 0;
+  for (size_t i = 0; i < phone_sets.size(); i++) {
+    max_set_size = std::max(max_set_size, phone_sets[i].size());
+    
+    highest_numbered_phone =
+        std::max(highest_numbered_phone,
+                 # 音素中的最大值
+                 * std::max_element(phone_sets[i].begin(), phone_sets[i].end()));
+  }
+
+  if (phone_sets.size() == 1) {  // there is only one set so the recursion finishes.
+    if (share_roots[0]) {  // if "shared roots" return a single leaf.
+      return new ConstantEventMap( (*num_leaves_out)++ );
+    } else {  // not sharing roots -> work out the length and return a
+             // TableEventMap splitting on length.
+      EventAnswerType max_len = 0;
+      for (size_t i = 0; i < phone_sets[0].size(); i++) {
+        EventAnswerType len;
+        EventValueType phone = phone_sets[0][i];
+        KALDI_ASSERT(static_cast<size_t>(phone) < phone2num_pdf_classes.size());
+        len = phone2num_pdf_classes[phone];
+        KALDI_ASSERT(len > 0);
+        if (i == 0) max_len = len;
+        else {
+          if (len != max_len) {
+            KALDI_WARN << "Mismatching lengths within a phone set: " << len
+                       << " vs. " << max_len << " [unusual, but not necessarily fatal]. ";
+            max_len = std::max(len, max_len);
+          }
+        }
+      }
+      std::map<EventValueType, EventAnswerType> m;
+      for (EventAnswerType p = 0; p < max_len; p++)
+        m[p] = (*num_leaves_out)++;
+      return new TableEventMap(kPdfClass,  // split on hmm-position
+                               m);
+    }
+  }
+  # 所有因素集合中都只有一个音素 并且集合总数 < 小于两倍的最大音素号.???
+  else if (max_set_size == 1 && static_cast<int32>(phone_sets.size()) <= 2*highest_numbered_phone) {
+    // create table map splitting on phone-- more efficient.
+    // the part after the && checks that this would not contain a very sparse vector.
+    # Map ... 
+    std::map<EventValueType, EventMap*> m;
+
+    for (size_t i = 0; i < phone_sets.size(); i++) {
+      std::vector<std::vector<int32> > phone_sets_tmp;
+      phone_sets_tmp.push_back(phone_sets[i]);
+      # 某个集合是否共享
+      std::vector<bool> share_roots_tmp;
+      share_roots_tmp.push_back(share_roots[i]);
+      EventMap *this_stub = GetStubMap(P, phone_sets_tmp, phone2num_pdf_classes,
+                                       share_roots_tmp,
+                                       num_leaves_out);
+      KALDI_ASSERT(m.count(phone_sets_tmp[0][0]) == 0);
+      m[phone_sets_tmp[0][0]] = this_stub;
+    }
+    return new TableEventMap(P, m);
+  }
+
+  else {
+    // Do a split.  Recurse.
+    # half_size
+    size_t half_sz = phone_sets.size() / 2;
+
+    # 取一般 得到 一般的音素集合 以及对应集合是否shared
+    std::vector<std::vector<int32> >::const_iterator half_phones =
+        phone_sets.begin() + half_sz;  
+    std::vector<bool>::const_iterator half_share =
+        share_roots.begin() + half_sz;
+
+    std::vector<std::vector<int32> > phone_sets_1, phone_sets_2;
+    std::vector<bool> share_roots_1, share_roots_2;
+
+    phone_sets_1.insert(phone_sets_1.end(), phone_sets.begin(), half_phones);
+    phone_sets_2.insert(phone_sets_2.end(), half_phones, phone_sets.end());
+    share_roots_1.insert(share_roots_1.end(), share_roots.begin(), half_share);
+    share_roots_2.insert(share_roots_2.end(), half_share, share_roots.end());
+    # 无理由分半划分
+    EventMap *map1 = GetStubMap(P, phone_sets_1, phone2num_pdf_classes, share_roots_1, num_leaves_out);
+    EventMap *map2 = GetStubMap(P, phone_sets_2, phone2num_pdf_classes, share_roots_2, num_leaves_out);
+
+    # EventType <EventKeyType, EventValueType>
+    std::vector<EventKeyType> all_in_first_set;
+
+    # 每个集合每个音素
+    for (size_t i = 0; i < half_sz; i++)
+      for (size_t j = 0; j < phone_sets[i].size(); j++)
+        all_in_first_set.push_back(phone_sets[i][j]);
+
+    std::sort(all_in_first_set.begin(), all_in_first_set.end());
+    return new SplitEventMap(P, all_in_first_set, map1, map2);
+  }
+}
+
+
+* classes
+  
+  EventMap EventType
+  GaussCluterable
+  BuildTreeStatsType stats;  // vectorized form.
+  
+  音素聚类 
+  Node
+  TreeClusterer
+  构造函数 以及 DoSplit  以及 聚类信息.
+ 
  
