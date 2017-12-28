@@ -136,19 +136,20 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
                          const Matrix<BaseFloat> &features,
                          std::map<EventType, GaussClusterable*> *stats) {
 
-  std::vector<std::vector<int32> > split_alignment;
   # SplitToPhones 将utt 对齐trans-ids 根据对应的音素 进行split划分, 
   # 划分得到多个 Vector<音素- vector<状态id> > 
   # 将trans-ids 转化为 以phone为分割的 状态序列. 
+  std::vector<std::vector<int32> > split_alignment;
   bool ans = SplitToPhones(trans_model, alignment, &split_alignment);
+
+
   int32 cur_pos = 0;
-  # 每个分割好的音素. context_width = 3 , central_postion = 1 
+  # 每个分割好的句子. context_width = 3 , central_postion = 1 . 根据时序形成三音素上下文环境
+  # 这时 每个状态就是三音素内状态, 模型从单音素转化为三音素
   for (int32 i = -info.context_width; i < static_cast<int32>(split_alignment.size()); i++) {
-    // consider window starting at i, only if i+info.central_position is within list of phones.
     # 形成三音素上下文环境
     if (i + info.central_position >= 0 &&
         i + info.central_position < static_cast<int32>(split_alignment.size())) {
-
       # 获得中心音素
       int32 central_phone = MapPhone(
                       # 音素映射map
@@ -160,22 +161,21 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
       bool is_ctx_dep = !std::binary_search(info.ci_phones.begin(),
                                             info.ci_phones.end(),
                                             central_phone);
+
       EventType evec;
-      # 音素窗内某个音素
+      # 音素窗内某个音素     形成音素窗
       for (int32 j = 0; j < info.context_width; j++) {
         int32 phone;
         if (i + j >= 0 && i + j < static_cast<int32>(split_alignment.size()))
-          # 音素窗内 三个音素
           phone =
               MapPhone(info.phone_map,
                        trans_model.TransitionIdToPhone(split_alignment[i+j][0]));
         else
-          # ContextDependency class uses 0 to mean "out of window";
           phone = 0;  
         // we also set the phone arbitrarily to 0
 
+        # 将<contex-width-index, phone> 加入 evec  得到某个状态的 EventTyep
         if (is_ctx_dep || j == info.central_position)
-          # 将<contex-width-index, phone> 加入 evec  获得可查找的音素位置.
           evec.push_back(std::make_pair(static_cast<EventKeyType>(j), static_cast<EventValueType>(phone)));
       }
       # 某个音素内的所有状态-trans-ids
@@ -192,11 +192,11 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
         evec_more.push_back(pr);
 
         std::sort(evec_more.begin(), evec_more.end());  // these must be sorted!
-        # 如果某个三音素的HMM状态 构建统计量.
+        # 为三音素的HMM状态 构建统计量.
         if (stats->count(evec_more) == 0)
           (*stats)[evec_more] = new GaussClusterable(dim, info.var_floor);
 
-        # 增加统计
+        # 增加统计 features 特征 -------------------
         BaseFloat weight = 1.0;
         (*stats)[evec_more]->AddStats(features.Row(cur_pos), weight);
         cur_pos++;
@@ -396,7 +396,7 @@ int main(int argc, char *argv[]) {
       ReadBuildTreeStats(ki.Stream(), binary_in, gc, &stats);
     }
 
-    # ???
+    # 聚类音素使用的状态 的状态index
     std::vector<int32> pdf_class_list;
     # 按： 分割字符串 pdf-class-list = 1
     if (!SplitStringToIntegers(pdf_class_list_str, ":", false, &pdf_class_list) || pdf_class_list.empty()) {
@@ -417,7 +417,8 @@ int main(int argc, char *argv[]) {
 
       std::vector<std::vector<int32> > phone_sets_out;
       # in   统计量、 音素变体集合、1、1（中心状态、中心音素）
-      # out 聚类音素集合输出. phones_sets_out, 音素划分树结构, 从顶层全部音素 进行划分到一个节点的音素集合.
+      # out 聚类音素集合输出. phones_sets_out, 
+      # 音素划分树结构, 从顶层全部音素 进行划分到一个节点的音素集合.
       AutomaticallyObtainQuestions(stats,
                                    phone_sets,
                                    pdf_class_list,
@@ -459,7 +460,7 @@ void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
   std::sort(phones.begin(), phones.end());
 
 
-  # 1
+  # 只使用中心状态 all_pdf_classes = <1>
   std::vector<int32> all_pdf_classes(all_pdf_classes_in);
 
   # filter 统计量, 只要中心状态的统计量 --> retained_stats
@@ -468,13 +469,12 @@ void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
                    true,  // retain only the listed positions
                    &retained_stats);
 
-
+  # 从 retained_stats , 按中心音素 划分三音素
   std::vector<BuildTreeStatsType> split_stats;  // split by phone.
-  # 从 retained_stats , 获得中心音素 划分音素
   SplitStatsByKey(retained_stats, P, &split_stats);
 
-  std::vector<Clusterable*> summed_stats;  // summed up by phone.
   # 按音素累计所有中心状态
+  std::vector<Clusterable*> summed_stats;  // summed up by phone.
   SumStatsVec(split_stats, &summed_stats);
 
   # 最大音素
@@ -497,7 +497,7 @@ void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
   EnsureClusterableVectorNotNull(&summed_stats);  // make sure no NULL pointers in summed_stats.
   // will replace them with pointers to empty stats.
 
-  # 按照phone_sets 中的集合方式集合
+  # 按照phone_sets 中的方式将变体音素进行 综合统计
   std::vector<Clusterable*> summed_stats_per_set(phone_sets.size(), NULL);  // summed up by set.
   for (size_t i = 0; i < phone_sets.size(); i++) {
     const std::vector<int32> &this_set = phone_sets[i];
@@ -510,10 +510,13 @@ void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
   # 进行音素聚类
   TreeClusterOptions topts;
   topts.kmeans_cfg.num_tries = 10;  // This is a slow-but-accurate setting,
+  # 每个音素 指定属于某个cluster
   std::vector<int32> assignments;  // assignment of phones to clusters. dim == summed_stats.size().
+  # 每个cluster的父节点
   std::vector<int32> clust_assignments;  // Parent of each cluster.  Dim == #clusters.
+
   int32 num_leaves;  // number of leaf-level clusters.
-  # 音素聚类结果.
+  # 执行聚类
   TreeCluster(summed_stats_per_set,
               summed_stats_per_set.size(),  // max-#clust is all of the points.
               NULL,  // don't need the clusters out.
@@ -543,7 +546,6 @@ void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
 
 ***  TreeCluster
      # 音素变体集合 进行聚类
-
      TreeCluster(
      # in  
      # 按phone_set为集合 统计得到 集合内中心状态统计量
@@ -561,6 +563,73 @@ void AutomaticallyObtainQuestions(BuildTreeStatsType &stats,
      &clust_assignments,
      &num_leaves,
      topts);
+
+  TreeClusterer(const std::vector<Clusterable*> &points,
+                int32 max_clust,
+                TreeClusterOptions cfg):
+      points_(points), max_clust_(max_clust), ans_(0.0), cfg_(cfg)
+  {
+    KALDI_ASSERT(cfg_.branch_factor > 1);
+    Init();
+  }
+
+  BaseFloat Cluster(std::vector<Clusterable*> *clusters_out,
+                    std::vector<int32> *assignments_out,
+                    std::vector<int32> *clust_assignments_out,
+                    int32 *num_leaves_out) {
+    # 循环优先队列queue 取出最大划分方法 对对应的Node进行继续划分
+    while (static_cast<int32>(leaf_nodes_.size()) < max_clust_ && !queue_.empty()) {
+      std::pair<BaseFloat, Node*> pr = queue_.top();
+      queue_.pop();
+      ans_ += pr.first;
+      # 划分操作
+      DoSplit(pr.second);
+    }
+
+    CreateOutput(clusters_out, assignments_out, clust_assignments_out,
+                 num_leaves_out);
+    return ans_;
+  }
+
+  void DoSplit(Node *node) {
+    KALDI_ASSERT(node->is_leaf && node->leaf.best_split > cfg_.thresh*0.999);  // 0.999 is to avoid potential floating-point weirdness under compiler optimizations.
+    KALDI_ASSERT(node->children.size() == 0);
+    node->children.resize(cfg_.branch_factor);
+    for (int32 i = 0;i < cfg_.branch_factor;i++) {
+      Node *child = new Node;
+      node->children[i] = child;
+      child->is_leaf = true;
+      child->parent = node;
+      child->node_total = node->leaf.clusters[i];
+      if (i == 0) {
+        child->index = node->index;  // assign node's own index in leaf_nodes_ to 1st child.
+        leaf_nodes_[child->index] = child;
+      } else {
+        child->index = leaf_nodes_.size();  // generate new indices for other children.
+        leaf_nodes_.push_back(child);
+      }
+    }
+
+    KALDI_ASSERT(node->leaf.assignments.size() == node->leaf.points.size());
+    KALDI_ASSERT(node->leaf.point_indices.size() == node->leaf.points.size());
+    for (int32 i = 0; i < static_cast<int32>(node->leaf.points.size()); i++) {
+      int32 child_index = node->leaf.assignments[i];
+      KALDI_ASSERT(child_index < static_cast<int32>(cfg_.branch_factor));
+      node->children[child_index]->leaf.points.push_back(node->leaf.points[i]);
+      node->children[child_index]->leaf.point_indices.push_back(node->leaf.point_indices[i]);
+    }
+    node->leaf.points.clear();
+    node->leaf.point_indices.clear();
+    node->leaf.clusters.clear();  // already assigned pointers to children.
+    node->leaf.assignments.clear();
+    node->is_leaf = false;
+    node->index = nonleaf_nodes_.size();  // new index at end of nonleaf_nodes_.
+    nonleaf_nodes_.push_back(node);
+
+    # 对新节点进行计算可能的划分操作. 并将可能的划分加入优先队列等待划分
+    for (int32 i = 0;i < static_cast<int32>(cfg_.branch_factor);i++)
+      FindBestSplit(node->children[i]);
+  }
 
 **** SplitStatsByKey()
     # 将状态按照某个音素进行聚类 得到 <音素 <中心状态s>>
@@ -594,6 +663,7 @@ void SplitStatsByKey(const BuildTreeStatsType &stats_in, EventKeyType key, std::
 
 
 ***  ObtainSetsOfPhones
+ObtainSetsOfPhones
 根据 assignment clust-assignment 
 将所有音素放入到最顶层节点
 按问题将音素 分割放入到子节点
@@ -886,7 +956,7 @@ int main(int argc, char *argv[]) {
   FilterStatsByKey(stats, P, nonsplit_phones, false,  // retain only those not in "nonsplit_phones"
                    &filtered_stats);
 
-  # 在 tree_sub 基础熵 根据过滤后统计量, 问题 门限  要求节点数 进行状态绑定
+  # 在 tree_sub 基础上 根据过滤后统计量, 问题 门限  要求节点数 进行状态绑定
   EventMap *tree_split = SplitDecisionTree(*tree_stub,
                                            filtered_stats,
                                            qopts, thresh, max_leaves,
@@ -966,7 +1036,9 @@ EventMap *GetStubMap(int32 P,
                  * std::max_element(phone_sets[i].begin(), phone_sets[i].end()));
   }
 
+  # 当分类到达终止时, 只有一个roots的音素集合, 说明到达 状态决策树的树根
   if (phone_sets.size() == 1) {  // there is only one set so the recursion finishes.
+    # 是否共享根 是 用CE 否则 TE
     if (share_roots[0]) {  // if "shared roots" return a single leaf.
       return new ConstantEventMap( (*num_leaves_out)++ );
     } else {  // not sharing roots -> work out the length and return a
@@ -994,7 +1066,7 @@ EventMap *GetStubMap(int32 P,
                                m);
     }
   }
-  # 所有因素集合中都只有一个音素 并且集合总数 < 小于两倍的最大音素号.???
+  # 有多个音素集合但所有因素集合中都只有一个音素  直接使用TE 分类
   else if (max_set_size == 1 && static_cast<int32>(phone_sets.size()) <= 2*highest_numbered_phone) {
     // create table map splitting on phone-- more efficient.
     // the part after the && checks that this would not contain a very sparse vector.
@@ -1015,7 +1087,7 @@ EventMap *GetStubMap(int32 P,
     }
     return new TableEventMap(P, m);
   }
-
+  # 还可继续划分时, 直接进行二分化分  ==== SE
   else {
     // Do a split.  Recurse.
     # half_size
@@ -1078,7 +1150,7 @@ EventMap *SplitDecisionTree(const EventMap &input_map,
 
     KALDI_ASSERT(split_stats.size() != 0);
     builders.resize(split_stats.size());  // size == #leaves.
-    # 基本树 roots每行音素的 节点、统计量 构建一个叶子节点？？？
+    # 对tree_sub的基本树 roots每行音素的 节点、统计量 构建一个DTS
     for (size_t i = 0;i < split_stats.size();i++) {
       EventAnswerType leaf = static_cast<EventAnswerType>(i);
       if (split_stats[i].size() == 0) num_empty_leaves++;
@@ -1126,7 +1198,7 @@ EventMap *SplitDecisionTree(const EventMap &input_map,
     for (size_t i = 0; i < sub_trees.size();i++) 
         sub_trees[i] = builders[i]->GetMap();
 
-    # 追加到 基本树上 如此从基本树 得到了完整的 状态绑定树.
+    # 将状态决策树的结果追加到 tree_sub基本树上 如此从基本树 得到了完整的 状态绑定树.
     answer = input_map.Copy(sub_trees);
     for (size_t i = 0; i < sub_trees.size();i++) delete sub_trees[i];
   }
