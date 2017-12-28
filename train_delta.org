@@ -755,7 +755,6 @@ int main(int argc, char *argv[]) {
 }
 
 
-
 * build-tree
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -775,14 +774,6 @@ int main(int argc, char *argv[]) {
     BaseFloat cluster_thresh = -1.0;  // negative means use smallest split in splitting phase as thresh.
     int32 max_leaves = 0;
     std::string occs_out_filename;
-
-
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 5) {
-      po.PrintUsage();
-      exit(1);
-    }
 
     std::string 
     stats_filename = po.GetArg(1),
@@ -906,11 +897,17 @@ int main(int argc, char *argv[]) {
   FilterStatsByKey(stats, P, nonsplit_phones, false,  // retain only those not in "nonsplit_phones"
                    &filtered_stats);
 
+  # 在 tree_sub 基础熵 根据过滤后统计量, 问题 门限  要求节点数 进行状态绑定
   EventMap *tree_split = SplitDecisionTree(*tree_stub,
                                            filtered_stats,
                                            qopts, thresh, max_leaves,
                                            &num_leaves, &impr, &smallest_split);
 
+
+
+
+
+ #    ?????????????????????????????? 
   if (cluster_thresh < 0.0) {
     KALDI_LOG <<  "Setting clustering threshold to smallest split " << smallest_split;
     cluster_thresh = smallest_split;
@@ -1059,10 +1056,96 @@ EventMap *GetStubMap(int32 P,
     for (size_t i = 0; i < half_sz; i++)
       for (size_t j = 0; j < phone_sets[i].size(); j++)
         all_in_first_set.push_back(phone_sets[i][j]);
-
+        
     std::sort(all_in_first_set.begin(), all_in_first_set.end());
     return new SplitEventMap(P, all_in_first_set, map1, map2);
   }
+}
+
+
+***  SplitDecisionTree
+EventMap *SplitDecisionTree(const EventMap &input_map,
+                            const BuildTreeStatsType &stats,
+                            Questions &q_opts,
+                            BaseFloat thresh,
+                            int32 max_leaves,  // max_leaves<=0 -> no maximum.
+                            int32 *num_leaves,
+                            BaseFloat *obj_impr_out,
+                            BaseFloat *smallest_split_change_out) 
+{
+
+
+  int32 num_empty_leaves = 0;
+  BaseFloat like_impr = 0.0;
+  BaseFloat smallest_split_change = 1.0e+20;
+
+  std::vector<DecisionTreeSplitter*> builders;
+
+  {  // set up "builders" [one for each current leaf].  This array is never extended.
+    // the structures generated during splitting remain as trees at each array location.
+    std::vector<BuildTreeStatsType> split_stats;
+    # 讲stats 按照 状态绑定基础树 上的 roots每行音素 进行划分 状态绑定统计量. --> split_stats
+    SplitStatsByMap(stats, input_map, &split_stats);
+
+    KALDI_ASSERT(split_stats.size() != 0);
+    builders.resize(split_stats.size());  // size == #leaves.
+    # 基本树 roots每行音素的 节点、统计量 构建一个叶子节点？？？
+    for (size_t i = 0;i < split_stats.size();i++) {
+      EventAnswerType leaf = static_cast<EventAnswerType>(i);
+      if (split_stats[i].size() == 0) num_empty_leaves++;
+      # 为该叶子节点构建一个 DecisionTreeSplitter， 后面用来构建状态绑定过程树.
+      builders[i] = new DecisionTreeSplitter(leaf, split_stats[i], q_opts);
+    }
+  }
+
+  {  // Do the splitting.
+    int32 count = 0;
+    # queue < <float, size_t>> <最优化分对似然度的提升,  某个集合(not leaf-id)>
+    std::priority_queue<std::pair<BaseFloat, size_t> > queue;  
+
+    // Initialize queue.
+    for (size_t i = 0; i < builders.size(); i++)
+      queue.push(std::make_pair(builders[i]->BestSplit(), i));
+
+    # 似然度 > 门限 && 节点数还不够多
+    while (queue.top().first > thresh
+          && (max_leaves<=0 || *num_leaves < max_leaves)) {
+
+      smallest_split_change = std::min(smallest_split_change, queue.top().first);
+      # 某个集合
+      size_t i = queue.top().second;
+      like_impr += queue.top().first;
+      # #######################################
+      # 根据问题等 进行决策, 划分状态  
+      # 决策树 划分操作  按问题划分, 判断划分后结果熵增
+      builders[i]->DoSplit(num_leaves);
+      queue.pop();
+      queue.push(std::make_pair(builders[i]->BestSplit(), i));
+      count++;
+    }
+    KALDI_LOG << "DoDecisionTreeSplit: split "<< count << " times, #leaves now " << (*num_leaves);
+  }
+
+  if (smallest_split_change_out)
+    *smallest_split_change_out = smallest_split_change;
+
+  # // Create the output EventMap  状态绑定树
+  EventMap *answer = NULL;
+  {  
+    std::vector<EventMap*> sub_trees(builders.size());
+    # 根据绑定结果 用 EventMap表示.
+    for (size_t i = 0; i < sub_trees.size();i++) 
+        sub_trees[i] = builders[i]->GetMap();
+
+    # 追加到 基本树上 如此从基本树 得到了完整的 状态绑定树.
+    answer = input_map.Copy(sub_trees);
+    for (size_t i = 0; i < sub_trees.size();i++) delete sub_trees[i];
+  }
+
+  // Free up memory.
+  for (size_t i = 0;i < builders.size();i++) delete builders[i];
+  if (obj_impr_out != NULL) *obj_impr_out = like_impr;
+  return answer;
 }
 
 
