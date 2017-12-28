@@ -4,8 +4,6 @@ steps/train_deltas.sh --boost-silence 1.25 --cmd "$train_cmd" \
 
 # 决策树叶节点总数 2000 绑定状态数
 numleaves = $1 
-# 高斯总数   平均每个状态5个混合数??? 编译后看看
-totgauss=$2
 # mfcc/train/
 data=$3
 # lang/ 拓扑结构、发音词典、其他发音、所有词words.txt
@@ -17,15 +15,13 @@ dir=$6
 
 
 acc-tree-stats --ci-phones=$ciphonelist $alidir/final.mdl "$feats" "ark:gunzip -c $alidir/ali.JOB.gz|" $dir/JOB.treeacc 
-
+#                                       单音素训练结果     特征          对齐结果                      ===> 统计量
 sum-tree-stats $dir/treeacc $dir/*.treeacc 
-
+#               统计量        综合统计量
 cluster-phones $context_opts $dir/treeacc $lang/phones/sets.int  $dir/questions.int 
 #               null (3, 1)   决策数统计量   音素变体            输出问题集合(音素分割树)
-
 compile-questions $context_opts $lang/topo $dir/questions.int $dir/questions.qst  ？？？？？
 #                               topo结构   音素分割树          输出问题???x
-
 build-tree --max-leaves=$numleaves  $dir/treeacc $lang/phones/roots.int $dir/questions.qst $lang/topo $dir/tree
 # 最大节点数                     统计量         roots.int            qst   topo     ==> tree
 
@@ -48,9 +44,9 @@ int main(int argc, char *argv[]) {
         "Usage:  acc-tree-stats [options] <model-in> <features-rspecifier> <alignments-rspecifier> <tree-accs-out>\n"
         "e.g.: \n"
 
-        # 输入 HMM-GMM模型   特征  对齐的状态序列   
-        # 输出 计算统计量
-        " acc-tree-stats 1.mdl scp:train.scp ark:1.ali 1.tacc\n";
+    # 输入 HMM-GMM模型   特征  对齐的状态序列   
+    # 输出 计算统计量
+    " acc-tree-stats 1.mdl scp:train.scp ark:1.ali 1.tacc\n";
 
     bool binary = true;
     # 计算 决策树需要的 统计信息 选项. 
@@ -85,24 +81,17 @@ int main(int argc, char *argv[]) {
     # GaussClusterable  该状态对应的特征向量个数、特征向量累加、特征向量平方和累加.
     std::map<EventType, GaussClusterable*> tree_stats;
     int num_done = 0, num_no_alignment = 0, num_other_error = 0;
-    # foreach utt
+    # 每段语音
     for (; !feature_reader.Done(); feature_reader.Next()) {
-      # utt feature
+      # 语音id
       std::string key = feature_reader.Key();
-      # align states
       if (!alignment_reader.HasKey(key)) {
         num_no_alignment++;
       } else {
-        # utt feature is mat (frame X 39)
+        # 某段语音 的特征
         const Matrix<BaseFloat> &mat = feature_reader.Value();
         # vector<trans-ids>  对齐的转移id
         const std::vector<int32> &alignment = alignment_reader.Value(key);
-        
-        if (alignment.size() != mat.NumRows()) {
-          KALDI_WARN << "Alignments has wrong size "<< (alignment.size())<<" vs. "<< (mat.NumRows());
-          num_other_error++;
-          continue;
-        }
 
         # 根据统计模型、对齐的trans-ids、特征mat 以及统计用参数, 
         # 计算统计信息  --- > tree_stats
@@ -308,7 +297,7 @@ int main(int argc, char *argv[]) {
 
     // A reminder on what BuildTreeStatsType is:
     // typedef std::vector<std::pair<EventType, Clusterable*> > BuildTreeStatsType;
-    # arg 2 第三个参数 第一个输入统计量
+    # arg 2 第一个输入统计量
     for (int32 arg = 2; arg <= po.NumArgs(); arg++) {
       std::string tree_stats_rxfilename = po.GetArg(arg);
       bool binary_in;
@@ -676,7 +665,7 @@ static void ObtainSetsOfPhones(const std::vector<std::vector<int32> > &phone_set
 
 
 * compile-question
-
+  将问题转为qst模式?? 具体没看
 int main(int argc, char *argv[]) {
   using namespace kaldi;
   try {
