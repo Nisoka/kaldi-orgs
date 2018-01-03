@@ -1017,7 +1017,7 @@ int main(int argc, char *argv[]) {
   FilterStatsByKey(stats, P, nonsplit_phones, false,  // retain only those not in "nonsplit_phones"
                    &filtered_stats);
 
-  # 在 tree_sub 基础上 根据过滤后统计量, 问题 门限  要求节点数 进行状态绑定
+  # 在 tree_sub 基础上 根据过滤后统计量, 问题 门限  要求节点数 进行状态绑定 得到 准决策树tree_split
   *EventMap *tree_split* = SplitDecisionTree(*tree_stub,
                                            filtered_stats,
                                            qopts, thresh, max_leaves,
@@ -1519,6 +1519,7 @@ EventMap *ClusterEventMapRestrictedByMap(const EventMap &e_in,
   # 先按照 tree_stub 基本树划分 得到基本树统计量
   SplitStatsByMap(stats, e_restrict, &split_stats);
 
+  # split_stats 对每个基本树的统计量进行划分
   for (size_t i = 0; i < split_stats.size(); i++) {
     if (!split_stats[i].empty())
       # 按照e_in 准决策树进行统计量划分
@@ -1555,11 +1556,12 @@ int ClusterEventMapGetMapping(const EventMap &e_in,
 
   // First map stats
 
+  # vector<多个叶节点 <每个叶节点包含的所有EventType的统计量>>
   # split  使用准决策树 进行将从 roots行音素变体出发的统计量 划分到叶子节点
   std::vector<BuildTreeStatsType> split_stats;
   SplitStatsByMap(stats, e_in, &split_stats);
 
-  # 求和roots行音素子树 的 每个叶子节点的统计量
+  # 汇总roots行音素子树 的 每个叶子节点的多个状态的统计量
   std::vector<Clusterable*> summed_stats;
   SumStatsVec(split_stats, &summed_stats);
 
@@ -1571,6 +1573,8 @@ int ClusterEventMapGetMapping(const EventMap &e_in,
   # summed_stats.size() == 该roots行子树 的所有叶子节点
   for (size_t i = 0;i < summed_stats.size();i++) {
     if (summed_stats[i] != NULL) {
+      # indexes保存该准决策树叶子节点的 index
+      # summed_stats_contiguous 保存每个叶节点的汇总统计量
       indexes.push_back(i);
       summed_stats_contiguous.push_back(summed_stats[i]);
       if (i > max_index) max_index = i;
@@ -1579,9 +1583,10 @@ int ClusterEventMapGetMapping(const EventMap &e_in,
 
   std::vector<int32> assignments;
   BaseFloat 
+  # 汇总正则化
   normalizer = SumClusterableNormalizer(summed_stats_contiguous), 
   change;
-
+  # 
   change = ClusterBottomUp(summed_stats_contiguous,
                            thresh,
                            0,  // no min-clust: use threshold for now.
@@ -1615,6 +1620,81 @@ int ClusterEventMapGetMapping(const EventMap &e_in,
   }
   DeletePointers(&summed_stats);
   return num_combined;
+}
+
+
+
+# # in:
+#     points    准基本树叶子节点 汇总统计量
+#     max_merge_thresh  门限, 门限内的两个叶子节点可以绑定.(限制的是两个统计量的距离, 相似度)
+#     min_clust  最少需要绑定的数量
+#     clusters_out 汇总输出, 一般不需要
+# # out:
+#     assignment 节点绑定    绑定结果, 多个叶子节点 如果assignment保存index相同说明被绑定
+#     BaseFloat 输出绑定后增益
+
+BaseFloat ClusterBottomUp(const std::vector<Clusterable*> &points,
+                          BaseFloat max_merge_thresh,
+                          int32 min_clust,
+                          std::vector<Clusterable*> *clusters_out,
+                          std::vector<int32> *assignments_out) {
+  # 当前roots行准决策子树 的 节点总数
+  int32 npoints = points.size();
+  // make sure fits in uint_smaller and does not hit the -1 which is reserved.
+
+  # 构造初始化, 统计量 绑定门限 最小绑定数目, 绑定后统计量输出(no need) 绑定结果
+  BottomUpClusterer bc(points, max_merge_thresh, min_clust, clusters_out, assignments_out);
+  BaseFloat ans = bc.Cluster();
+  return ans;
+}
+
+
+BaseFloat BottomUpClusterer::Cluster() {
+
+  KALDI_VLOG(2) << "Initializing cluster assignments.";
+  InitializeAssignments();
+  # clusters_ 保存统计量
+  # assignment 保存绑定信息, 初始化对应每个叶子节点
+  # 317   clusters_->resize(npoints_);
+  # 318   assignments_->resize(npoints_);
+  # 319   for (int32 i = 0; i < npoints_; i++) {  // initialize as 1-1 mapping.
+  # 320     (*clusters_)[i] = points_[i]->Copy();
+  # 321     (*assignments_)[i] = i;
+  # 322   }
+  # 323 }
+
+
+  KALDI_VLOG(2) << "Setting initial distances.";
+  SetInitialDistances();
+  # 计算两个统计量的区别, 区别较小的 加入到queue_队列中, 等待被绑定
+  # 326   for (int32 i = 0; i < npoints_; i++) {
+  # 327     for (int32 j = 0; j < i; j++) {
+  # 328       BaseFloat dist = (*clusters_)[i]->Distance(*((*clusters_)[j]));
+  # 329       dist_vec_[(i * (i - 1)) / 2 + j] = dist;
+  # 330       if (dist <= max_merge_thresh_)
+  # 331         queue_.push(std::make_pair(dist, std::make_pair(static_cast<uint_smaller>(i),
+  # 332             static_cast<uint_smaller>(j))));
+  # 333     }
+  # 334   }
+  # 335 }
+
+  KALDI_VLOG(2) << "Clustering...";
+  while (nclusters_ > min_clust_ && !queue_.empty()) {
+    std::pair<BaseFloat, std::pair<uint_smaller, uint_smaller> > pr = queue_.top();
+    BaseFloat dist = pr.first;
+    int32 i = (int32) pr.second.first, j = (int32) pr.second.second;
+    queue_.pop();
+    # 绑定两个叶子节点
+    # 将assignment 设置为靠后的节点index 实现绑定两个叶子节点
+    # 并将绑定的统计量增加到 目标节点上, 删除被绑定节点统计量
+    # 更新与目标相关的统计量距离
+    *if (CanMerge(i, j, dist)) MergeClusters(i, j);*
+  }
+  KALDI_VLOG(2) << "Renumbering clusters to contiguous numbers.";
+  # 更新assignment, 某个叶节点 绑定到目标节点上.  [1, 2, 3, 4, 5, 6] ---> [1, 2, 6, 6, 5, 6]
+  # 完成绑定， 并且具有对应的统计量
+  Renumber();
+  return ans_;
 }
 
 
