@@ -1,0 +1,21 @@
+digraph TreeTied{
+        node[shapre=Mrecord, width=.1, height=.1]
+
+        SE0 -> {SE1, SE2}
+        SE1 -> {SE3, SE4}
+        SE2 -> {SE5, SE6}
+
+        SE3 -> {CE0, CE1, CE2}
+        SE4 -> {CE3, CE4, CE5}
+        SE5 -> {CE6, CE7, CE8}
+        SE6 -> {CE9, CE10, CE11}
+
+        {CE0, CE1} -> TIE0
+        {CE2} -> TIE1
+        {CE3, CE4, CE5} -> TIE2
+        {CE6} -> TIE3
+        {CE7} -> TIE4
+        {CE8} -> TIE5
+        {CE9} -> TIE6
+        {CE10, CE11} -> TIE7
+}
