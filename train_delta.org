@@ -1041,7 +1041,7 @@ int main(int argc, char *argv[]) {
   impr_normalized_filt = impr / normalizer_filt;
 
 
-  # 聚类绑定 ================
+  # 状态绑定 ================
   if (cluster_thresh != 0.0) {   // Cluster the tree.
     BaseFloat objf_before_cluster = ObjfGivenMap(stats, *tree_split);
 
@@ -1282,6 +1282,29 @@ EventMap *SplitDecisionTree(const EventMap &input_map,
   return answer;
 }
 
+void SplitStatsByKey(const BuildTreeStatsType &stats_in, EventKeyType key, std::vector<BuildTreeStatsType> *stats_out) {
+
+  BuildTreeStatsType::const_iterator iter, end = stats_in.end();
+  stats_out->clear();
+  size_t size = 0;
+  # This loop works out size of output vector.
+  for (iter = stats_in.begin(); iter != end; ++iter) {
+    const EventType &evec = iter->first;
+    EventValueType val;
+    if (! EventMap::Lookup(evec, key, &val)) // no such key.
+      KALDI_ERR << "SplitStats: key "<< key << " is not present in event vector " << EventTypeToString(evec);
+    size = std::max(size, (size_t)(val+1));
+  }
+  stats_out->resize(size);
+  // This loop splits up the stats.
+  for (iter = stats_in.begin(); iter != end; ++iter) {
+    const EventType &evec = iter->first;
+    EventValueType val;
+    EventMap::Lookup(evec, key, &val);  // will not fail.
+    (*stats_out)[val].push_back(*iter);
+  }
+}
+
 
 **** FindBestSplitForKey
     # 按某个key （-1, 0, 1, 2）进行特征划分. 是否属于某个question集合, 是的话划分为两部分 yes_set_out & .
@@ -1300,8 +1323,9 @@ BaseFloat FindBestSplitForKey(const BuildTreeStatsType &stats,
 　std::vector<Clusterable*> summed_stats;
   {  // compute summed_stats
     std::vector<BuildTreeStatsType> split_stats;
-    # 每个音素的统计量
+    # 每个音素的统计量的所有状态的统计量
     SplitStatsByKey(stats, key, &split_stats);
+    # 总和音素的所有统计量 -> summed_stats
     SumStatsVec(split_stats, &summed_stats);
   }
 
@@ -1312,7 +1336,7 @@ BaseFloat FindBestSplitForKey(const BuildTreeStatsType &stats,
                                                q_opts, key, &yes_set);
 
 
-  // find best basic question.
+  # find best basic question.
   # 所有音素的 assignment
   std::vector<int32> assignments(summed_stats.size(), 0);  // assigns to "no" (0) by default.
 
@@ -1391,29 +1415,21 @@ BaseFloat ComputeInitialSplit(const std::vector<Clusterable*> &summed_stats,
 
   # foreach question
   for (size_t i = 0; i < questions_of_this_key.size(); i++) {
-
     #  yes_set 一个可能的问题 -- 音素集合。
     const std::vector<EventValueType> &yes_set = questions_of_this_key[i];
-
     # size -- 所有可能的集合
     std::vector<int32> assignments(summed_stats.size(), 0);  // 0 is index of "no".
     std::vector<Clusterable*> clusters(2);  // no and yes clusters.
-
     # question 中集合的 每个音素
     for (std::vector<EventValueType>::const_iterator iter = yes_set.begin(); iter != yes_set.end(); ++iter) {
       KALDI_ASSERT(*iter>=0);
 
       if (*iter < (EventValueType)assignments.size()) assignments[*iter] = 1;
     }
-
-
-
-
-
     # 进行熵增计算
-    *kaldi::AddToClustersOptimized(summed_stats, assignments, *total, &clusters);*
-    *BaseFloat this_objf = SumClusterableObjf(clusters);*
-
+    kaldi::AddToClustersOptimized(summed_stats, assignments, *total, &clusters);
+    BaseFloat this_objf = SumClusterableObjf(clusters);
+    # 选择增益最大的 音素集合.
     BaseFloat this_objf_change = this_objf - unsplit_objf;
     if (this_objf_change > best_objf_change) {
       best_objf_change = this_objf_change;
@@ -1538,11 +1554,6 @@ EventMap *ClusterEventMapRestrictedByMap(const EventMap &e_in,
 
 
 
-
-int ClusterEventMapGetMapping(const EventMap &e_in,
-                              const BuildTreeStatsType &stats,
-                              BaseFloat thresh,
-                              std::vector<EventMap*> *mapping) {
 # 是对某个 roots 行子树 进行的再聚类
 
 # # in:
@@ -1553,6 +1564,10 @@ int ClusterEventMapGetMapping(const EventMap &e_in,
 # # out
 #     mapping   对该roots行的子树聚类结果
 
+int ClusterEventMapGetMapping(const EventMap &e_in,
+                              const BuildTreeStatsType &stats,
+                              BaseFloat thresh,
+                              std::vector<EventMap*> *mapping) {
 
   // First map stats
 
@@ -1688,7 +1703,7 @@ BaseFloat BottomUpClusterer::Cluster() {
     # 将assignment 设置为靠后的节点index 实现绑定两个叶子节点
     # 并将绑定的统计量增加到 目标节点上, 删除被绑定节点统计量
     # 更新与目标相关的统计量距离
-    *if (CanMerge(i, j, dist)) MergeClusters(i, j);*
+    if (CanMerge(i, j, dist)) MergeClusters(i, j);
   }
   KALDI_VLOG(2) << "Renumbering clusters to contiguous numbers.";
   # 更新assignment, 某个叶节点 绑定到目标节点上.  [1, 2, 3, 4, 5, 6] ---> [1, 2, 6, 6, 5, 6]
@@ -1697,6 +1712,42 @@ BaseFloat BottomUpClusterer::Cluster() {
   return ans_;
 }
 
+# 判断是否能够合并了两个叶子节点
+bool BottomUpClusterer::CanMerge(int32 i, int32 j, BaseFloat dist) {
+  KALDI_ASSERT(i != j && i < npoints_ && j < npoints_);
+  if ((*clusters_)[i] == NULL || (*clusters_)[j] == NULL)
+    return false;
+  BaseFloat cached_dist = dist_vec_[(i * (i - 1)) / 2 + j];
+  return (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
+}
+
+
+# MergeCluster(i, j)
+# 合并两个叶子节点, 将其中一个叶子节点j的统计量传递给目标节点i， 删除节点j的统计量， 并设置j的assignment = i.
+# 更新叶子节点距离.
+
+void BottomUpClusterer::MergeClusters(int32 i, int32 j) {
+  KALDI_ASSERT(i != j && i < npoints_ && j < npoints_);
+  (*clusters_)[i]->Add(*((*clusters_)[j]));
+  delete (*clusters_)[j];
+  (*clusters_)[j] = NULL;
+  // note that we may have to follow the chain within "assignment_" to get
+  // final assignments.
+  (*assignments_)[j] = i;
+  // subtract negated objective function change, i.e. add objective function
+  // change.
+  ans_ -= dist_vec_[(i * (i - 1)) / 2 + j];
+  nclusters_--;
+  // Now update "distances".
+  for (int32 k = 0; k < npoints_; k++) {
+    if (k != i && (*clusters_)[k] != NULL) {
+      if (k < i)
+        SetDistance(i, k);  // SetDistance requires k < i.
+      else
+        SetDistance(k, i);
+    }
+  }
+}
 
 * classes
   

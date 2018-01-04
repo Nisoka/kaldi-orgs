@@ -1,4 +1,10 @@
 * gmm-init-mono.cc
+
+  std::string topo_filename = po.GetArg(1);
+  int dim = atoi(po.GetArg(2).c_str());
+  std::string model_filename = po.GetArg(3);
+  std::string tree_filename = po.GetArg(4);
+
   Vector<BaseFloat> glob_inv_var(dim);
   # 39 dim Vector inv_var 转置的对角协方差
   Vector<BaseFloat> glob_mean(dim); 
