@@ -2,5 +2,39 @@ Nvidia 驱动安装 OK
 # 注意 一定要求 nvidia驱动匹配上 cuda要求驱动
 GT730 的驱动版本最高为384
 cuda9.1 要求驱动387以上, 有些显卡不支持.
-cuda9.0 支持384, 
+cuda9.0 支持384, 一般可以支持
+但是 当尝试使用kaldi时 发现, 使用cuda9.0 运行kaldi的程序不成功
+切换为cuda8.0 kaldi测试脚本运行成功!
 http://blog.csdn.net/cosmoshua/article/details/76644029
+
+
+
+
+questions:
+在HOME安装cuda时, 禁用nouveau驱动(blacklist.conf)时 重启后 鼠标 键盘无响应,只能CTRL+ALT+DEL
+能有相应, 确定是图形界面gnome的问题 
+
+考虑开机不进入gnome 直接启动进入命令行界面
+又因为 ubuntu现在不支持简单修改 /etc/default/grub 就进入命令行启动
+
+1
+注释掉 GRUB_CMDLINE_LINUX_DEFAULT=”quiet” 这行， 
+即 #GRUB_CMDLINE_LINUX_DEFAULT=”quiet”
+2
+把GRUB_CMDLINE_LINUX=”" 改为 GRUB_CMDLINE_LINUX=”text”
+3
+去掉 #GRUB_TERMINAL=console 的注释，即 GRUB_TERMINAL=console
+4
+sudo update-grub  
+5
+新版本的ubuntu 需要增加
+sudo systemctrl set-default multi-user.target 后reboot才可用
+
+6 完成操作希望 开机启动图形界面时 执行
+sudo systemctl set-default graphical.target
+https://jingyan.baidu.com/article/948f5924ee2a5dd80ff5f9e4.html
+http://blog.csdn.net/jun2016425/article/details/53100963
+
+
+安装低版本的gcc
+http://blog.csdn.net/zyxlinux888/article/details/6709036
