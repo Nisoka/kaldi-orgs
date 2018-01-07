@@ -87,7 +87,7 @@ void SpliceFrames(const MatrixBase<BaseFloat> &input_features,
 // transform-feats $dir/0.mat ark:- ark:-
 // 利用0.mat 将输入的feat 进行lda 降维 得到 40维特征,
 // 最后进行了一个叫什么 LogDet的计算 不知道具体作用.
-int main(int argc, char *argv[]) {
+int transform_feats(int argc, char *argv[]) {
     using namespace kaldi;
 
     const char *usage =
@@ -280,7 +280,7 @@ void MatrixBase<Real>::AddMatMat(const Real alpha,
 //   out: 修改为 每帧用 对应的 多个可能的vector<trans-id, probability> 来表示
 /** @brief Convert alignments to viterbi style posteriors. The aligned
     symbol gets a weight of 1.0 */
-int main(int argc, char *argv[]) {
+int ali_to_post(int argc, char *argv[]) {
   using namespace kaldi;
   typedef kaldi::int32 int32;
   
@@ -351,7 +351,7 @@ void AlignmentToPosterior(const std::vector<int32> &ali,
 // //out:
 // ark:-  为sil 音素 增加了silence_scale 权重变换的 postritor。
 
-int main(int argc, char *argv[]) {
+int weight_silence_post(int argc, char *argv[]) {
   using namespace kaldi;
   typedef kaldi::int32 int32;
     const char *usage =
@@ -462,7 +462,7 @@ void WeightSilencePost(const TransitionModel &trans_model,
     (and may potentially contain the current transformation),
     the un-transformed features and state posterior probabilities
 */
-int main(int argc, char *argv[]) {
+int acc_lda(int argc, char *argv[]) {
   using namespace kaldi;
   typedef kaldi::int32 int32;
   
@@ -606,7 +606,7 @@ void LdaEstimate::Accumulate(const VectorBase<BaseFloat> &data,
 // out: 0.mat
 // full.mat???
 
-int main(int argc, char *argv[]) {  
+int est_lda(int argc, char *argv[]) {  
   using namespace kaldi;
   typedef kaldi::int32 int32;
     const char *usage =
@@ -673,11 +673,9 @@ int main(int argc, char *argv[]) {
 // ===================================
 // 按照新的 feats 重新构建决策树.
 // ===================================
-
-
-
-// 注意此时 feats特征已经 与 原本gmm参数的特征不同, 原本GMM适用的特征
-// 已经经过升维后 lda进行降维, 需要重新估计GMM参数.
+// 此时 feats特征已经 与 原本gmm参数的特征不同, 原本GMM适用的特征
+// 已经经过升维后 lda进行降维,
+// 特征发生改变, 原本的音素聚类问题需要改变, 状态绑定决策树需要修改, GMM需要修改.
 
 // 计算 状态-MFCC统计量  in final.mdl  MFCC   ali_gz  --->  状态-MFCC统计量
 // acc-tree-stats $context_opts --ci-phones=$ciphonelist $alidir/final.mdl "$feats" 
@@ -685,28 +683,20 @@ int main(int argc, char *argv[]) {
 // 将*.treeacc 总和一下 --> treeacc
 // sum-tree-stats $dir/treeacc $dir/*.treeacc || exit 1;
 
-//   rm $dir/*.treeacc
-// fi
-
 
 // 重新应用一遍决策树构建过程.
-// if [ $stage -le -3 ] && $train_tree; then
-//   echo "$0: Getting questions for tree clustering."
-
 //   # preparing questions, roots file... 聚类音素, 获得音素簇集合 -- 问题
 //   cluster-phones $context_opts $dir/treeacc $lang/phones/sets.int \
 //     $dir/questions.int 2> $dir/log/questions.log || exit 1;
-//   cat $lang/phones/extra_questions.int >> $dir/questions.int
+
 //   # 将问题 转化为 qst形式..... 没啥用.
 //   compile-questions $context_opts $lang/topo $dir/questions.int \
 //     $dir/questions.qst 2>$dir/log/compile_questions.log || exit 1;
 
 //   echo "$0: Building the tree"  构建决策树
-//   $cmd $dir/log/build_tree.log \
 //     build-tree $context_opts --verbose=1 --max-leaves=$numleaves \
 //     --cluster-thresh=$cluster_thresh $dir/treeacc $lang/phones/roots.int \
 //     $dir/questions.qst $lang/topo $dir/tree || exit 1;
-// fi
 
 
 
@@ -715,160 +705,541 @@ int main(int argc, char *argv[]) {
 
 
 
-
+// gmm-init-model 是根据状态绑定决策树的 pdf-id情况, 对每个pdf-id进行GMM参数估计
 // $dir/tree 是 决策树状态绑定之后的决策树
 //                                           状态绑定决策树  统计量  topo      ---> model
 // gmm-init-model  --write-occs=$dir/1.occs  $dir/tree $dir/treeacc $lang/topo $dir/1.mdl 
 
 
 //转换原对齐 trans-id --> pdf-id
+// Converting alignments from $alidir to use current tree"
+//     convert-ali $alidir/final.mdl $dir/1.mdl $dir/tree      "ark:gunzip -c $alidir/ali.JOB.gz|" "ark:|gzip -c >$dir/ali.JOB.gz"
+// in:
+//     old model
+//     new model
+//     状态绑定决策树
+//     输入对齐pdf-id
+// out:
+//     输出对齐 pdf-id
 
-// if [ $stage -le -1 ]; then
-//   # Convert the alignments.
-//   echo "$0: Converting alignments from $alidir to use current tree"
-//   $cmd JOB=1:$nj $dir/log/convert.JOB.log \
-//     convert-ali $alidir/final.mdl $dir/1.mdl $dir/tree \
-//      "ark:gunzip -c $alidir/ali.JOB.gz|" "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
-// fi
+
+int convert_ali(int argc, char *argv[]) {
+  using namespace kaldi;
+  typedef kaldi::int32 int32;
+    const char *usage =
+        "Convert alignments from one decision-tree/model to another\n"
+        "Usage:  convert-ali  [options] <old-model> <new-model> <new-tree> "
+        "<old-alignments-rspecifier> <new-alignments-wspecifier>\n"
+        "e.g.: \n"
+        " convert-ali old/final.mdl new/0.mdl new/tree ark:old/ali.1 ark:new/ali.1\n";
+
+    int32 frame_subsampling_factor = 1;
+    bool reorder = true;
+    bool repeat_frames = false;
+
+    std::string phone_map_rxfilename;
+
+    std::string old_model_filename = po.GetArg(1);
+    std::string new_model_filename = po.GetArg(2);
+    std::string new_tree_filename = po.GetArg(3);
+    std::string old_alignments_rspecifier = po.GetArg(4);
+    std::string new_alignments_wspecifier = po.GetArg(5);
+
+    std::vector<int32> phone_map;
+    if (phone_map_rxfilename != "") {  // read phone map.
+      ReadPhoneMap(phone_map_rxfilename,
+                   &phone_map);
+    }
+
+    SequentialInt32VectorReader alignment_reader(old_alignments_rspecifier);
+    Int32VectorWriter alignment_writer(new_alignments_wspecifier);
+
+    TransitionModel old_trans_model;
+    ReadKaldiObject(old_model_filename, &old_trans_model);
+
+    TransitionModel new_trans_model;
+    ReadKaldiObject(new_model_filename, &new_trans_model);
+
+    // check 要求topo结构不能改变. topo 结构是描述一种 声学模型的结构, 必须保持一致
+    if (!(old_trans_model.GetTopo() == new_trans_model.GetTopo()))
+      KALDI_WARN << "Toplogies of models are not equal: "
+                 << "conversion may not be correct or may fail.";
+
+
+    ContextDependency new_ctx_dep;  // the tree.
+    ReadKaldiObject(new_tree_filename, &new_ctx_dep);
+
+    int num_success = 0, num_fail = 0;
+
+    // foreach utt ali 
+    for (; !alignment_reader.Done(); alignment_reader.Next()) {
+      std::string key = alignment_reader.Key();
+      
+      const std::vector<int32> &old_alignment = alignment_reader.Value();
+      std::vector<int32> new_alignment;
+
+      //根据旧的对齐Vector <trans-id> 通过old_model 和 new_model new_tree 得到 新的对齐 Vector<trans-id>
+      if (ConvertAlignment(old_trans_model,
+                           new_trans_model,
+                           new_ctx_dep,
+                           old_alignment,
+                           frame_subsampling_factor,  // 1
+                           repeat_frames,             // false
+                           reorder,                   // true
+                           (phone_map_rxfilename != "" ? &phone_map : NULL), // NULL 
+                           &new_alignment)) {
+        alignment_writer.Write(key, new_alignment);
+        num_success++;
+      } else {
+      }
+    }
+}
+
+
+
+bool ConvertAlignment(const TransitionModel &old_trans_model,
+                      const TransitionModel &new_trans_model,
+                      const ContextDependencyInterface &new_ctx_dep,
+                      const std::vector<int32> &old_alignment,
+                      int32 subsample_factor,  // 1
+                      bool repeat_frames,      // false
+                      bool new_is_reordered,   // true
+                      const std::vector<int32> *phone_map,  // NULL
+                      std::vector<int32> *new_alignment) {
+  if (!repeat_frames || subsample_factor == 1) {
+    return ConvertAlignmentInternal(old_trans_model,
+                                    new_trans_model,
+                                    new_ctx_dep,
+                                    old_alignment,
+                                    subsample_factor - 1,
+                                    subsample_factor,
+                                    new_is_reordered,
+                                    phone_map,
+                                    new_alignment);
+    // The value "subsample_factor - 1" for conversion_shift above ensures the
+    // alignments have the same length as the output of 'subsample-feats'
+  } else {
+    std::vector<std::vector<int32> > shifted_alignments(subsample_factor);
+    for (int32 conversion_shift = subsample_factor - 1;
+         conversion_shift >= 0; conversion_shift--) {
+      if (!ConvertAlignmentInternal(old_trans_model,
+                                    new_trans_model,
+                                    new_ctx_dep,
+                                    old_alignment,
+                                    conversion_shift,
+                                    subsample_factor,
+                                    new_is_reordered,
+                                    phone_map,
+                                    &shifted_alignments[conversion_shift]))
+        return false;
+    }
+    KALDI_ASSERT(new_alignment != NULL);
+    new_alignment->clear();
+    new_alignment->reserve(old_alignment.size());
+    int32 max_shifted_ali_length = (old_alignment.size() / subsample_factor)
+        + (old_alignment.size() % subsample_factor);
+    for (int32 i = 0; i < max_shifted_ali_length; i++)
+      for (int32 conversion_shift = subsample_factor - 1;
+           conversion_shift >= 0; conversion_shift--)
+        if (i < static_cast<int32>(shifted_alignments[conversion_shift].size()))
+          new_alignment->push_back(shifted_alignments[conversion_shift][i]);
+  }
+  KALDI_ASSERT(new_alignment->size() == old_alignment.size());
+  return true;
+}
+
+
+
+static bool ConvertAlignmentInternal(const TransitionModel &old_trans_model,
+                      const TransitionModel &new_trans_model,
+                      const ContextDependencyInterface &new_ctx_dep,
+                      const std::vector<int32> &old_alignment,
+                      int32 conversion_shift,  // 0
+                      int32 subsample_factor,  // 1
+                      bool new_is_reordered,   // true
+                      const std::vector<int32> *phone_map,  // NULL
+                      std::vector<int32> *new_alignment) {
+
+  bool old_is_reordered = IsReordered(old_trans_model, old_alignment);
+  new_alignment->clear();
+  new_alignment->reserve(old_alignment.size());
+
+  // 根据oldmodel oldalignment --- > 按照phones 序列进行分组了的对齐结果
+  std::vector<std::vector<int32> > old_split;  // split into phones.
+  if (!SplitToPhones(old_trans_model, old_alignment, &old_split))
+    return false;
+
+  // phone_cnt
+  int32 phone_sequence_length = old_split.size();
+  std::vector<int32> mapped_phones(phone_sequence_length);
+  for (size_t i = 0; i < phone_sequence_length; i++) {
+    // 获得对应音素
+    mapped_phones[i] = old_trans_model.TransitionIdToPhone(old_split[i][0]);
+    if (phone_map != NULL) {  // Map the phone sequence.
+      int32 sz = phone_map->size();
+      if (mapped_phones[i] < 0 || mapped_phones[i] >= sz ||
+          (*phone_map)[mapped_phones[i]] == -1)
+        KALDI_ERR << "ConvertAlignment: could not map phone " << mapped_phones[i];
+      mapped_phones[i] = (*phone_map)[mapped_phones[i]];
+    }
+  }
+
+  // the sizes of each element of 'new_split' indicate the length of alignment
+  // that we want for each phone in the new sequence.
+  std::vector<std::vector<int32> > new_split(phone_sequence_length);
+  if (subsample_factor == 1 &&
+      old_trans_model.GetTopo() == new_trans_model.GetTopo()) {
+    // we know the old phone lengths will be fine.
+    for (size_t i = 0; i < phone_sequence_length; i++)
+      new_split[i].resize(old_split[i].size());
+  } else {
+    // .. they may not be fine.
+
+  }
+
+  int32
+      N = new_ctx_dep.ContextWidth(),
+      P = new_ctx_dep.CentralPosition();
+
+  // by starting at -N and going to phone_sequence_length + N,
+  // we're being generous and not bothering to work out the exact array bounds.
+  // foreach 三音素窗中的每个音素
+  for (int32 win_start = -N;
+       win_start < static_cast<int32>(phone_sequence_length + N);
+       win_start++) {  // start of a context window.
+
+    // central_pos 中心音素 --实际音素  cetral_pos是逐个增加的
+    int32 central_pos = win_start + P;
+    if (static_cast<size_t>(central_pos) < phone_sequence_length) {
+      // i.e. if (central_pos >= 0 && central_pos < phone_sequence_length)
+
+      // 构建一个三音素窗,利用三音素结构 通过决策树找到对应的新的pdf-id
+      std::vector<int32> new_phone_window(N, 0);
+      for (int32 offset = 0; offset < N; offset++)
+        if (static_cast<size_t>(win_start+offset) < phone_sequence_length)
+          new_phone_window[offset] = mapped_phones[win_start+offset];
+
+      // old_alignment_for_phone -- 保存centralphone内 旧的trans-id
+      const std::vector<int32> &old_alignment_for_phone = old_split[central_pos];
+      // 保存新的 音素内trans-id
+      std::vector<int32> &new_alignment_for_phone = new_split[central_pos];
+
+      // 每个音素的 根据旧的 对齐 transi-id 获得 对齐 trans-id
+      ConvertAlignmentForPhone(old_trans_model, new_trans_model, new_ctx_dep,
+                               old_alignment_for_phone, new_phone_window,
+                               old_is_reordered, new_is_reordered,
+                               &new_alignment_for_phone);
+      // 
+      new_alignment->insert(new_alignment->end(),
+                            new_alignment_for_phone.begin(),
+                            new_alignment_for_phone.end());
+    }
+  }
+  KALDI_ASSERT(new_alignment->size() ==
+               (old_alignment.size() + conversion_shift)/subsample_factor);
+  return true;
+}
+
+// 获得按照内部音素 为边界划分的对齐
+// in:
+// trans-mdl   转移模型, 保存的 state  pdf-id phone 之间关系
+// aligenment  原本一句utt的对齐pdf-id
+// out:
+// split_output  通过音素边界状态 IsFinal 的判断, 得到将对齐按照phone进行设置组的 Vector<phoneVecotr<pdf-id, pdf-id>>
+static bool SplitToPhonesInternal(const TransitionModel &trans_model,
+                                  const std::vector<int32> &alignment,
+                                  bool reordered,
+                                  std::vector<std::vector<int32> > *split_output) {
+  if (alignment.empty()) return true;  // nothing to split.
+  std::vector<size_t> end_points;  // points at which phones end [in an
+  // stl iterator sense, i.e. actually one past the last transition-id within
+  // each phone]..
+
+  bool was_ok = true;
+  // foreach trans-id, 得到每个phone的终止帧 frame
+  // end_points 保存每个phone的音素最后一帧
+  for (size_t i = 0; i < alignment.size(); i++) {
+    int32 trans_id = alignment[i];
+    if (trans_model.IsFinal(trans_id)) {  // is final-prob
+      if (!reordered) end_points.push_back(i+1);
+      else {  // reordered.
+        while (i+1 < alignment.size() &&
+              trans_model.IsSelfLoop(alignment[i+1])) {
+          KALDI_ASSERT(trans_model.TransitionIdToTransitionState(alignment[i]) ==
+                 trans_model.TransitionIdToTransitionState(alignment[i+1]));
+          i++;
+        }
+        end_points.push_back(i+1);
+      }
+    } else if (i+1 == alignment.size()) {
+      // need to have an end-point at the actual end.
+      // but this is an error- should have been detected already.
+      was_ok = false;
+      end_points.push_back(i+1);
+    } else {
+      int32 this_state = trans_model.TransitionIdToTransitionState(alignment[i]),
+          next_state = trans_model.TransitionIdToTransitionState(alignment[i+1]);
+      if (this_state == next_state) continue;  // optimization.
+      int32 this_phone = trans_model.TransitionStateToPhone(this_state),
+          next_phone = trans_model.TransitionStateToPhone(next_state);
+      if (this_phone != next_phone) {
+        // The phone changed, but this is an error-- we should have detected this via the
+        // IsFinal check.
+        was_ok = false;
+        end_points.push_back(i+1);
+      }
+    }
+  }
+
+
+  //cur_point 保存当前待识别音素的 起始帧, end_points[i] 保存当前phone的终止帧
+  size_t cur_point = 0;
+  // 根据phone 终止帧 序列 获得phone
+  // foreach phoneframes!!!!! 
+  for (size_t i = 0; i < end_points.size(); i++) {
+    split_output->push_back(std::vector<int32>());
+    // The next if-statement checks if the initial trans-id at the current end
+    // point is the initial-state of the current phone if that initial-state
+    // is emitting (a cursory check that the alignment is plausible).
+    int32 trans_state =
+      trans_model.TransitionIdToTransitionState(alignment[cur_point]);
+    int32 phone = trans_model.TransitionStateToPhone(trans_state);
+    int32 forward_pdf_class = trans_model.GetTopo().TopologyForPhone(phone)[0].forward_pdf_class;
+    
+    if (forward_pdf_class != kNoPdf)  // initial-state of the current phone is emitting
+      if (trans_model.TransitionStateToHmmState(trans_state) != 0)
+        was_ok = false;
+    // phone frames, 按音素划分对齐的trans-id
+    for (size_t j = cur_point; j < end_points[i]; j++)
+      split_output->back().push_back(alignment[j]);
+    
+    cur_point = end_points[i];
+  }
+  return was_ok;
+}
+
+
+static inline void ConvertAlignmentForPhone(
+    const TransitionModel &old_trans_model,
+    const TransitionModel &new_trans_model,
+    const ContextDependencyInterface &new_ctx_dep,
+    const std::vector<int32> &old_phone_alignment,
+    const std::vector<int32> &new_phone_window,
+    bool old_is_reordered,
+    bool new_is_reordered,
+    std::vector<int32> *new_phone_alignment) {
+  
+  int32 alignment_size = old_phone_alignment.size();
+  static bool warned_topology = false;
+  
+  int32 P = new_ctx_dep.CentralPosition(),
+      old_central_phone = old_trans_model.TransitionIdToPhone(old_phone_alignment[0]),
+      new_central_phone = new_phone_window[P];
+  
+  const HmmTopology &old_topo = old_trans_model.GetTopo(),
+      &new_topo = new_trans_model.GetTopo();
+
+
+
+  int32 new_num_pdf_classes = new_topo.NumPdfClasses(new_central_phone);
+  std::vector<int32> pdf_ids(new_num_pdf_classes);  // Indexed by pdf-class
+
+  // 根据三音素窗 以及 状态绑定决策树 计算实际音素的不同 pdf-class 的 new pdf-id.
+  for (int32 pdf_class = 0; pdf_class < new_num_pdf_classes; pdf_class++) {
+    if (!new_ctx_dep.Compute(new_phone_window, pdf_class,
+                             &(pdf_ids[pdf_class]))) {
+      std::ostringstream ss;
+      WriteIntegerVector(ss, false, new_phone_window);
+      KALDI_ERR << "tree did not succeed in converting phone window "
+                << ss.str();
+    }
+  }
+
+  // the topologies and lengths match -> we can directly transfer the alignment.
+  // aligenment 中保存的是 trans-id. 通过trans-id 得到对应的 pdf-class
+  for (int32 j = 0; j < alignment_size; j++) {
+    
+    int32 old_tid = old_phone_alignment[j],
+        old_tstate = old_trans_model.TransitionIdToTransitionState(old_tid);
+    // 内部通过topo结果获得 pdf-class
+    int32 forward_pdf_class =
+        old_trans_model.TransitionStateToForwardPdfClass(old_tstate),
+        self_loop_pdf_class =
+        old_trans_model.TransitionStateToSelfLoopPdfClass(old_tstate);
+    int32 hmm_state = old_trans_model.TransitionIdToHmmState(old_tid);
+    int32 trans_idx = old_trans_model.TransitionIdToTransitionIndex(old_tid);
+
+    // 根据pdf-class 获得新的pdf-id
+    int32 new_forward_pdf = pdf_ids[forward_pdf_class];
+    int32 new_self_loop_pdf = pdf_ids[self_loop_pdf_class];
+
+    // 根据phone, hmm-state, pdf-id 通过超照对应的tuple 获得新的trans-state
+    int32 new_trans_state =
+        new_trans_model.TupleToTransitionState(new_central_phone, hmm_state,
+                                               new_forward_pdf, new_self_loop_pdf);
+    
+    // 一个确定的trans-state 可能会具有多个trans-index 进而得到不同的trans-id.
+    // 完成一个音素的所有状态的对齐结果 --- new_aligenment  verctor<trans-id>.
+    int32 new_tid =
+        new_trans_model.PairToTransitionId(new_trans_state, trans_idx);
+    
+    (*new_phone_alignment)[j] = new_tid;
+  }
+
+  if (new_is_reordered != old_is_reordered)
+    ChangeReorderingOfAlignment(new_trans_model, new_phone_alignment);
+}
+
+
+
 
 
 
 //为每个utt  构建 phone -> word fst图
-// if [ $stage -le 0 ] && [ "$realign_iters" != "" ]; then
-//   echo "$0: Compiling graphs of transcripts"
-//   $cmd JOB=1:$nj $dir/log/compile_graphs.JOB.log \
-//     compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $dir/tree $dir/1.mdl  $lang/L.fst  \
+// in:
+// 决策树
+// trans-model
+// L.fst
+// utt word标注
+// :
+// 根据 状态绑定决策树 转移模型 L.fst 以及utt的word标注, 找到对应每个 utt的phone为基本状态的fst图.
+// out:
+// utt 解码fst
+
+// Compiling graphs of transcripts
+// compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $dir/tree $dir/1.mdl  $lang/L.fst \
 //      "ark:utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt < $data/split$nj/JOB/text |" \
-//       "ark:|gzip -c >$dir/fsts.JOB.gz" || exit 1;
-// fi
+//       "ark:|gzip -c >$dir/fsts.JOB.gz"
 
 
 
 while [ $x -lt $num_iters ]; do
   echo Training pass $x
-  // 1 根据utt的图, feats特征  ==> 生成trans-id对齐信.息
+      // in:
+      // 转移模型
+      // utt的fst图
+      // feats特征
+      // out:
+      // 对齐的trans-id 序列
   gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
     "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" \
     "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
 
   // 2 根据trans-id对齐信息, 转化为 pdf-id对齐信息， 然后增加silence权重.
-    if [ $stage -le $x ]; then
-      echo "$0: Estimating MLLT"
-      $cmd JOB=1:$nj $dir/log/macc.$x.JOB.log \
-        ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:- \| \
-        weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \| \
+   echo "$0: Estimating MLLT"
+   
+   ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:- \| \
+   weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \| \
+   gmm-acc-mllt --rand-prune=$randprune  $dir/$x.mdl "$feats" ark:- $dir/$x.JOB.macc || exit 1;
 
-       // 
-        gmm-acc-mllt --rand-prune=$randprune  $dir/$x.mdl "$feats" ark:- $dir/$x.JOB.macc \
+   est-mllt $dir/$x.mat.new $dir/$x.*.macc 2> $dir/log/mupdate.$x.log || exit 1;
 
-      est-mllt $dir/$x.mat.new $dir/$x.*.macc 2> $dir/log/mupdate.$x.log || exit 1;
+   gmm-transform-means  $dir/$x.mat.new $dir/$x.mdl $dir/$x.mdl 
 
-      gmm-transform-means  $dir/$x.mat.new $dir/$x.mdl $dir/$x.mdl \
-
-      compose-transforms --print-args=false $dir/$x.mat.new $dir/$cur_lda_iter.mat $dir/$x.mat || exit 1;
-      rm $dir/$x.*.macc
-    fi
+   compose-transforms --print-args=false $dir/$x.mat.new $dir/$cur_lda_iter.mat $dir/$x.mat || exit 1;
 
       // 多次迭代的 mllt mat矩阵 $x.mat.
     feats="$splicedfeats transform-feats $dir/$x.mat ark:- ark:- |"
     cur_lda_iter=$x
 
-  if [ $stage -le $x ]; then
-    $cmd JOB=1:$nj $dir/log/acc.$x.JOB.log \
-      gmm-acc-stats-ali  $dir/$x.mdl "$feats" \
+    gmm-acc-stats-ali  $dir/$x.mdl "$feats" \
       "ark,s,cs:gunzip -c $dir/ali.JOB.gz|" $dir/$x.JOB.acc || exit 1;
-    $cmd $dir/log/update.$x.log \
-      gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss --power=$power \
-        $dir/$x.mdl "gmm-sum-accs - $dir/$x.*.acc |" $dir/$[$x+1].mdl || exit 1;
-    rm $dir/$x.mdl $dir/$x.*.acc $dir/$x.occs
-  fi
+
+    gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss --power=$power \
+      $dir/$x.mdl "gmm-sum-accs - $dir/$x.*.acc |" $dir/$[$x+1].mdl || exit 1;
+  
   [ $x -le $max_iter_inc ] && numgauss=$[$numgauss+$incgauss];
   x=$[$x+1];
 done
 
 
-// gmm-acc-mllt.cc 
-int main(int argc, char *argv[]) {
+
+// 将对齐trans-id 转化为 多个可能的<trans-id, prob>
+// ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:- \| \
+// weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \|        \
+// gmm-acc-mllt --rand-prune=$randprune  $dir/$x.mdl "$feats" ark:- $dir/$x.JOB.macc || exit 1;
+
+int gmm_acc_mllt(int argc, char *argv[]) {
   using namespace kaldi;
-    const char *usage =
-        "Accumulate MLLT (global STC) statistics\n"
-        "Usage:  gmm-acc-mllt [options] <model-in> <feature-rspecifier> <posteriors-rspecifier> <stats-out>\n"
-        "e.g.: \n"
-        " gmm-acc-mllt 1.mdl scp:train.scp ark:1.post 1.macc\n";
+  const char *usage =
+      "Accumulate MLLT (global STC) statistics\n"
+      "Usage:  gmm-acc-mllt [options] <model-in> <feature-rspecifier> <posteriors-rspecifier> <stats-out>\n"
+      "e.g.: \n"
+      " gmm-acc-mllt 1.mdl scp:train.scp ark:1.post 1.macc\n";
 
-    ParseOptions po(usage);
-    bool binary = true;
-    BaseFloat rand_prune = 0.25;
-    po.Register("binary", &binary, "Write output in binary mode");
-    po.Register("rand-prune", &rand_prune, "Randomized pruning parameter to speed up "
-                "accumulation (larger -> more pruning.  May exceed one).");
-    po.Read(argc, argv);
+  ParseOptions po(usage);
+  bool binary = true;
+  BaseFloat rand_prune = 0.25;
+  po.Register("binary", &binary, "Write output in binary mode");
+  po.Register("rand-prune", &rand_prune, "Randomized pruning parameter to speed up "
+              "accumulation (larger -> more pruning.  May exceed one).");
+  po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
-      po.PrintUsage();
-      exit(1);
-    }
+  if (po.NumArgs() != 4) {
+    po.PrintUsage();
+    exit(1);
+  }
 
-    std::string model_filename = po.GetArg(1),
-        feature_rspecifier = po.GetArg(2),
-        posteriors_rspecifier = po.GetArg(3),
-        accs_wxfilename = po.GetArg(4);
+  std::string model_filename = po.GetArg(1),
+      feature_rspecifier = po.GetArg(2),
+      posteriors_rspecifier = po.GetArg(3),
+      accs_wxfilename = po.GetArg(4);
 
-    using namespace kaldi;
-    typedef kaldi::int32 int32;
+  using namespace kaldi;
+  typedef kaldi::int32 int32;
 
-    AmDiagGmm am_gmm;
-    TransitionModel trans_model;
-    {
-      bool binary;
-      Input ki(model_filename, &binary);
-      trans_model.Read(ki.Stream(), binary);
-      am_gmm.Read(ki.Stream(), binary);
-    }
+  AmDiagGmm am_gmm;
+  TransitionModel trans_model;
+  {
+    bool binary;
+    Input ki(model_filename, &binary);
+    trans_model.Read(ki.Stream(), binary);
+    am_gmm.Read(ki.Stream(), binary);
+  }
 
-    MlltAccs mllt_accs(am_gmm.Dim(), rand_prune);
+  MlltAccs mllt_accs(am_gmm.Dim(), rand_prune);
 
-    double tot_like = 0.0;
-    double tot_t = 0.0;
+  double tot_like = 0.0;
+  double tot_t = 0.0;
 
-    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
-    RandomAccessPosteriorReader posteriors_reader(posteriors_rspecifier);
+  SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+  RandomAccessPosteriorReader posteriors_reader(posteriors_rspecifier);
 
-    int32 num_done = 0, num_no_posterior = 0, num_other_error = 0;
-    for (; !feature_reader.Done(); feature_reader.Next()) {
-      std::string key = feature_reader.Key();
-      if (!posteriors_reader.HasKey(key)) {
-        num_no_posterior++;
-      } else {
-        const Matrix<BaseFloat> &mat = feature_reader.Value();
-        const Posterior &posterior = posteriors_reader.Value(key);
+  int32 num_done = 0, num_no_posterior = 0, num_other_error = 0;
+  for (; !feature_reader.Done(); feature_reader.Next()) {
+    std::string key = feature_reader.Key();
+    if (!posteriors_reader.HasKey(key)) {
+      num_no_posterior++;
+    } else {
+      const Matrix<BaseFloat> &mat = feature_reader.Value();
+      const Posterior &posterior = posteriors_reader.Value(key);
 
-        if (static_cast<int32>(posterior.size()) != mat.NumRows()) {
-          KALDI_WARN << "Posterior vector has wrong size "<< (posterior.size()) << " vs. "<< (mat.NumRows());
-          num_other_error++;
-          continue;
+      if (static_cast<int32>(posterior.size()) != mat.NumRows()) {
+        KALDI_WARN << "Posterior vector has wrong size "<< (posterior.size()) << " vs. "<< (mat.NumRows());
+        num_other_error++;
+        continue;
+      }
+
+      num_done++;
+      BaseFloat tot_like_this_file = 0.0, tot_weight = 0.0;
+
+      Posterior pdf_posterior;
+      ConvertPosteriorToPdfs(trans_model, posterior, &pdf_posterior);
+      for (size_t i = 0; i < posterior.size(); i++) {
+        for (size_t j = 0; j < pdf_posterior[i].size(); j++) {
+          int32 pdf_id = pdf_posterior[i][j].first;
+          BaseFloat weight = pdf_posterior[i][j].second;
+
+          tot_like_this_file += mllt_accs.AccumulateFromGmm(am_gmm.GetPdf(pdf_id),
+                                                            mat.Row(i),
+                                                            weight) * weight;
+          tot_weight += weight;
         }
-
-        num_done++;
-        BaseFloat tot_like_this_file = 0.0, tot_weight = 0.0;
-
-        Posterior pdf_posterior;
-        ConvertPosteriorToPdfs(trans_model, posterior, &pdf_posterior);
-        for (size_t i = 0; i < posterior.size(); i++) {
-          for (size_t j = 0; j < pdf_posterior[i].size(); j++) {
-            int32 pdf_id = pdf_posterior[i][j].first;
-            BaseFloat weight = pdf_posterior[i][j].second;
-
-            tot_like_this_file += mllt_accs.AccumulateFromGmm(am_gmm.GetPdf(pdf_id),
-                                                              mat.Row(i),
-                                                              weight) * weight;
-            tot_weight += weight;
-          }
-        }
+      }
     }
 
-
-    WriteKaldiObject(mllt_accs, accs_wxfilename, binary);
+  }
+  WriteKaldiObject(mllt_accs, accs_wxfilename, binary);
 }
 
 
