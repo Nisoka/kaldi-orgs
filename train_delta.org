@@ -30,8 +30,8 @@ build-tree --max-leaves=$numleaves  $dir/treeacc $lang/phones/roots.int $dir/que
 
 * acc-tree-stats
   # 统计 训练决策数需要的统计量
-  # input 特征 对齐的状态序列 HMM-GMM模型
-  # outpu 决策数统计量
+  # in HMM-GMM模型   特征  对齐的状态序列   
+  # out 计算统计量   map<EventType, GaussClusterable> 所有状态的 统计量
   # Context width 和 central position用来识别上下文环境
   # 转移模型 用来获得pdf-id 和 音素.
   /** @brief Accumulate tree statistics for decision tree training. The
@@ -198,7 +198,7 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
           evec.push_back(std::make_pair(static_cast<EventKeyType>(j), static_cast<EventValueType>(phone)));
       }
 
-      # 某个音素内的所有状态-trans-ids
+      # 某个音素内的所有状态-trans-ids (phone, HMM-state, pdf-class)??
       for (int32 j = 0; j < static_cast<int32>(split_alignment[i+info.central_position].size());j++) {
         # for central phone of this window...
         EventType evec_more(evec);
@@ -295,7 +295,8 @@ void AccumulateTreeStats(const TransitionModel &trans_model,
 
 
 * sum-tree-stats
-
+  # in: 状态的MFCC统计量(并行多任务得到的)
+  # out: 汇总后统计量
 int main(int argc, char *argv[]) {
   using namespace kaldi;
   typedef kaldi::int32 int32;
@@ -318,7 +319,8 @@ int main(int argc, char *argv[]) {
 
     // A reminder on what BuildTreeStatsType is:
     // typedef std::vector<std::pair<EventType, Clusterable*> > BuildTreeStatsType;
-    # arg 2 第一个输入统计量
+  
+    # 多个并行任务的 状态 特征统计量.
     for (int32 arg = 2; arg <= po.NumArgs(); arg++) {
       std::string tree_stats_rxfilename = po.GetArg(arg);
       bool binary_in;
@@ -341,6 +343,7 @@ int main(int argc, char *argv[]) {
         # 获得e进行综合统计
         *std::map<EventType, Clusterable*>::iterator map_iter = tree_stats.find(e);*
 
+        # e 在 tree_stats 中还不存在, 则先构建一个<EventType, Clusterable> 对象加入到map中 等待总和统计.
         if (map_iter == tree_stats.end()) { // Not already present.
           *tree_stats[e] = c;*
         } else {
@@ -379,7 +382,7 @@ int main(int argc, char *argv[]) {
 
 * cluster-phones
   # in:
-  #   音素窗配置， 决策数统计量， 音素变体集合.
+  #   音素窗配置， 状态-MFCC统计量， 音素变体集合.
   # out:
   #   输出聚类的音素集合
 int main(int argc, char *argv[]) {
@@ -776,6 +779,7 @@ static void ObtainSetsOfPhones(const std::vector<std::vector<int32> > &phone_set
 
 
 * compile-question
+  # in: 构造的txt类型的问题  --> question.qst 类型的问题集合
   将问题转为qst模式?? 具体没看
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -787,6 +791,7 @@ int main(int argc, char *argv[]) {
         "Compile questions\n"
         "Usage:  compile-questions [options] <topo> <questions-text-file> <questions-out>\n"
         "e.g.: \n"
+
         " compile-questions questions.txt questions.qst\n";
     bool binary = true;
     int32 P = 1, N = 3;
@@ -877,7 +882,8 @@ int main(int argc, char *argv[]) {
 
 
 * build-tree
-** main
+  # in:  状态MFCC统计量  roots.txt  问题-音素集合 topo
+  # out: 状态绑定决策树  GetStubMap 基本树----  SplitDecisionTree 准决策树----- ClusterEventMapRestrictedByMap 状态绑定决策树
 int main(int argc, char *argv[]) {
   using namespace kaldi;
   const char *usage =
@@ -887,7 +893,6 @@ int main(int argc, char *argv[]) {
   "e.g.: \n"
   " build-tree treeacc roots.txt 1.qst topo tree\n";
 
-
     bool binary = true;
     #  CONTEXT_WIDTH  CENTREL POSTION
     int32 P = 1, N = 3;
@@ -896,18 +901,6 @@ int main(int argc, char *argv[]) {
     BaseFloat cluster_thresh = -1.0;  // negative means use smallest split in splitting phase as thresh.
     int32 max_leaves = 0;
     std::string occs_out_filename;
-
-    std::string 
-    stats_filename = po.GetArg(1),
-    roots_filename = po.GetArg(2),
-    questions_filename = po.GetArg(3),
-    topo_filename = po.GetArg(4),
-    tree_out_filename = po.GetArg(5);
-
-
-    // Following 2 variables derived from roots file.
-    // phone_sets is sets of phones that share their roots.
-    // Just one phone each for normal systems.
 
     std::vector<std::vector<int32> > phone_sets;
     std::vector<bool> is_shared_root;
@@ -1748,6 +1741,7 @@ void BottomUpClusterer::MergeClusters(int32 i, int32 j) {
     }
   }
 }
+
 
 * classes
   

@@ -49,17 +49,12 @@ void shellParamters(){
 }
 
 
-
-
-
-
-
 /* splicedfeats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | splice-feats $splice_opts ark:- ark:- |"
 
  # Note: $feats gets overwritten later in the script.
  feats="$splicedfeats transform-feats $dir/0.mat ark:- ark:- |" */
 
-// splice-feats 扩展特征向量, 将原本每帧D维向量, 变为 (1+8) = 9xD维.  eg frame=4 (0,1,2,3 + 4 + 5,6,7,8)
+// splice-feats 扩展一句utt特征向量, 将原本每帧D维向量, 变为 (1+8) = 9xD维.  eg frame=4 (0,1,2,3 + 4 + 5,6,7,8)
 void SpliceFrames(const MatrixBase<BaseFloat> &input_features,
                   int32 left_context,  //4
                   int32 right_context, //4
@@ -89,12 +84,10 @@ void SpliceFrames(const MatrixBase<BaseFloat> &input_features,
 }
 
 
-
-
 // transform-feats $dir/0.mat ark:- ark:-
-// used in the bottom
+// 利用0.mat 将输入的feat 进行lda 降维 得到 40维特征,
+// 最后进行了一个叫什么 LogDet的计算 不知道具体作用.
 int main(int argc, char *argv[]) {
-  try {
     using namespace kaldi;
 
     const char *usage =
@@ -108,14 +101,6 @@ int main(int argc, char *argv[]) {
         
     ParseOptions po(usage);
     std::string utt2spk_rspecifier;
-    po.Register("utt2spk", &utt2spk_rspecifier, "rspecifier for utterance to speaker map");
-
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 3) {
-      po.PrintUsage();
-      exit(1);
-    }
 
     std::string transform_rspecifier_or_rxfilename = po.GetArg(1);
     std::string feat_rspecifier = po.GetArg(2);
@@ -126,23 +111,16 @@ int main(int argc, char *argv[]) {
 
     RandomAccessBaseFloatMatrixReaderMapped transform_reader;
     bool use_global_transform;
+
+    //通过 ark:- 读取的splicedfeats  是 所有utt特征
     Matrix<BaseFloat> global_transform;
 
-    // read to global_transform ???
-    if (ClassifyRspecifier(transform_rspecifier_or_rxfilename, NULL, NULL)
-       == kNoRspecifier) {
+    if (ClassifyRspecifier(transform_rspecifier_or_rxfilename, NULL, NULL) == kNoRspecifier) {
       // not an rspecifier -> interpret as rxfilename....
       use_global_transform = true;
       ReadKaldiObject(transform_rspecifier_or_rxfilename, &global_transform);
     } else {  // an rspecifier -> not a global transform.
-      use_global_transform = false;
-      if (!transform_reader.Open(transform_rspecifier_or_rxfilename,
-                                 utt2spk_rspecifier)) {
-        KALDI_ERR << "Problem opening transforms with rspecifier "
-                  << '"' << transform_rspecifier_or_rxfilename << '"'
-                  << " and utt2spk rspecifier "
-                  << '"' << utt2spk_rspecifier << '"';
-      }
+
     }
 
     enum { Unknown, Logdet, PseudoLogdet, DimIncrease };
@@ -150,23 +128,30 @@ int main(int argc, char *argv[]) {
     double tot_t = 0.0, tot_logdet = 0.0;  // to compute average logdet weighted by time...
     int32 num_done = 0, num_error = 0;
     BaseFloat cached_logdet = -1;
-    
-    for (;!feat_reader.Done(); feat_reader.Next()) {
-      std::string utt = feat_reader.Key();
-      const Matrix<BaseFloat> &feat(feat_reader.Value());
 
-      if (!use_global_transform && !transform_reader.HasKey(utt)) {
-        KALDI_WARN << "No fMLLR transform available for utterance "
-                   << utt << ", producing no output for this utterance";
-        num_error++;
-        continue;
-      }
+    // foreach utt
+    for (;!feat_reader.Done(); feat_reader.Next()) {
+      
+      std::string utt = feat_reader.Key();
+
+      // utt old-feats
+      const Matrix<BaseFloat> &feat(feat_reader.Value());
+      // utt lda-0.mat
       const Matrix<BaseFloat> &trans =
           (use_global_transform ? global_transform : transform_reader.Value(utt));
-      int32 transform_rows = trans.NumRows(),
+      
+      int32
+          // lda 0.mat M
+          transform_rows = trans.NumRows(),
+          // lda 0.mat N
           transform_cols = trans.NumCols(),
+          // old-feats dim-M
           feat_dim = feat.NumCols();
 
+      // old-feats -- [T, 0.mat-M]
+      // 0.mat        [N', M']
+      
+      // ==> 构造 lda-feats -- [T, 0.mat-N]
       Matrix<BaseFloat> feat_out(feat.NumRows(), transform_rows);
 
       if (transform_cols == feat_dim) {
@@ -178,67 +163,100 @@ int main(int argc, char *argv[]) {
         Vector<BaseFloat> offset(transform_rows);
         offset.CopyColFromMat(trans, feat_dim);
         feat_out.AddVecToRows(1.0, offset);
-      } else {
-        KALDI_WARN << "Transform matrix for utterance " << utt << " has bad dimension "
-                   << transform_rows << "x" << transform_cols << " versus feat dim "
-                   << feat_dim;
-        if (transform_cols == feat_dim+2)
-          KALDI_WARN << "[perhaps the transform was created by compose-transforms, "
-              "and you forgot the --b-is-affine option?]";
-        num_error++;
-        continue;
       }
+      
       num_done++;
 
       if (logdet_type == Unknown) {
+        // 这里没有发生降维, no
         if (transform_rows == feat_dim) logdet_type = Logdet;  // actual logdet.
-        else if (transform_rows < feat_dim) logdet_type = PseudoLogdet;  // see below
+        // 降维 yes logdet_type = PseudoLogdet
+        else if (transform_rows < feat_dim) logdet_type = PseudoLogdet;  // see below 伪logdet计算
         else logdet_type = DimIncrease;  // makes no sense to have any logdet.
+        
         // PseudoLogdet is if we have a dimension-reducing transform T, we compute
-        // 1/2 logdet(T T^T).  Why does this make sense?  Imagine we do MLLT after
-        // LDA and compose the transforms; the MLLT matrix is A and the LDA matrix is L,
+        // 1/2 logdet(T T^T).  Why does this make sense?
+
+        // Imagine we do MLLT after LDA and compose the transforms;
+        // the MLLT matrix is A and the LDA matrix is L,
         // so T = A L.  T T^T = A L L^T A, so 1/2 logdet(T T^T) = logdet(A) + 1/2 logdet(L L^T).
         // since L L^T is a constant, this is valid for comparing likelihoods if we're
         // just trying to see if the MLLT is converging.
       }
 
-      if (logdet_type != DimIncrease) { // Accumulate log-determinant stats.
+      // trans --  40x91, feat_dim - 91
+      if (logdet_type != DimIncrease) {
+        // Accumulate log-determinant stats. 统计log 统计量  N-out，            N-in
         SubMatrix<BaseFloat> linear_transform(trans, 0, trans.NumRows(), 0, feat_dim);
+        //                                     M      ro       r          co  c
+        // 进行了一遍拷贝 trans
+        // 1645   // point to the begining of window
+        // 1646   MatrixBase<Real>::num_rows_ = r;
+        // 1647   MatrixBase<Real>::num_cols_ = c;
+
+        // stride_ = M.stride_ >= cols--91
+        // 1648   MatrixBase<Real>::stride_ = M.Stride();  ???
+
+        // data_  = M.data_
+        // 1649   MatrixBase<Real>::data_ = M.Data_workaround() +
+        // 1650       static_cast<size_t>(co) +
+        // 1651       static_cast<size_t>(ro) * static_cast<size_t>(M.Stride());
+        // 1652 }
+        
         // "linear_transform" is just the linear part of any transform, ignoring
         // any affine (offset) component.
         SpMatrix<BaseFloat> TT(trans.NumRows());
         // TT = linear_transform * linear_transform^T
+        // 40x91 X 91x40 --> TT = 40X40
         TT.AddMat2(1.0, linear_transform, kNoTrans, 0.0);
         BaseFloat logdet;
-        if (use_global_transform) {
+        
+        if (use_global_transform) {  // true
           if (cached_logdet == -1)
             cached_logdet = 0.5 * TT.LogDet(NULL);
+          
+          // Real SpMatrix<Real>::LogDet(Real *det_sign) const {
+          //   Real log_det;
+          //   SpMatrix<Real> tmp(*this);
+          //   // false== output not needed (saves some computation).
+          //   求矩阵的逆
+          //   tmp.Invert(&log_det, det_sign, false);
+          //   return log_det;
+          // }          
           logdet = cached_logdet;
-        } else {
-          logdet = 0.5 * TT.LogDet(NULL);
         }
-        if (logdet != logdet || logdet-logdet != 0.0) // NaN or info.
-          KALDI_WARN << "Matrix has bad logdet " << logdet;
-        else {
+        
+        {
           tot_t += feat.NumRows();
           tot_logdet += feat.NumRows() * logdet;
         }
       }
+      
       feat_writer.Write(utt, feat_out);
     }
-    if (logdet_type != Unknown && logdet_type != DimIncrease)
-      KALDI_LOG << "Overall average " << (logdet_type == PseudoLogdet ? "[pseudo-]":"")
-                << "logdet is " << (tot_logdet/tot_t) << " over " << tot_t
-                << " frames.";
-    KALDI_LOG << "Applied transform to " << num_done << " utterances; " << num_error
-              << " had errors.";
-
-    return (num_done != 0 ? 0 : 1);
-  } catch(const std::exception &e) {
-    std::cerr << e.what();
-    return -1;
-  }
 }
+
+// feat_out 输出特征 保存的data [T, N]  == feat_in [T, 13*9] X [13*9, 40]
+//  trans 保存的是转置矩阵 -- [40, 13*9]
+void MatrixBase<Real>::AddMatMat(const Real alpha,
+                                  const MatrixBase<Real>& A,  // feature in
+                                  MatrixTransposeType transA,
+                                  const MatrixBase<Real>& B,
+                                  MatrixTransposeType transB,
+                                  const Real beta) {
+
+  ASSERT(transA == kNoTrans && transB == kTrans  // A 非转置   B 转置
+         && A.num_cols_ == B.num_cols_   // 13*9
+         && A.num_rows_ == num_rows_     //feat_in-T, feat_out-T
+         && B.num_rows_ == num_cols_);   //trans-N, feat_out-N
+  // C = alpha*A*B + beta*C
+  // 实际就是通过 feat-in X trans0.mat ---> feat_out.
+  // blas 库中的代码
+  cblas_Xgemm(alpha, transA, A.data_, A.num_rows_, A.num_cols_, A.stride_,
+              transB, B.data_, B.stride_, beta, data_, num_rows_, num_cols_, stride_);
+}
+
+
 
 
 
@@ -258,8 +276,8 @@ int main(int argc, char *argv[]) {
 
 
 // 1 ali-to-post
-//   in: 对齐结果 trans-id
-//   out: 输出给weight-slience-post
+//   in: 对齐结果 每帧用对应trans-id结果表示
+//   out: 修改为 每帧用 对应的 多个可能的vector<trans-id, probability> 来表示
 /** @brief Convert alignments to viterbi style posteriors. The aligned
     symbol gets a weight of 1.0 */
 int main(int argc, char *argv[]) {
@@ -283,12 +301,6 @@ int main(int argc, char *argv[]) {
 
     ParseOptions po(usage);
 
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 2) {
-      po.PrintUsage();
-      exit(1);
-    }
 
     std::string alignments_rspecifier = po.GetArg(1);
     std::string posteriors_wspecifier = po.GetArg(2);
@@ -310,6 +322,8 @@ int main(int argc, char *argv[]) {
     }
 }
 
+// 将一句utt 对齐信息
+// 从 trans-id 对齐方式  --->  vector<trains-id, probability>
 
 // Posterior is vector<vector<pair<int32, BaseFloat> > >
 // Posterior 保存的是每个utt的每个时间帧的vector多个可能pair<trans-id, probability>
@@ -351,29 +365,16 @@ int main(int argc, char *argv[]) {
 
     bool distribute = false;
 
-    po.Register("distribute", &distribute, "If true, rather than weighting the "
-                "individual posteriors, apply the weighting to the whole frame: "
-                "i.e. on time t, scale all posterior entries by "
-                "p(sil)*silence-weight + p(non-sil)*1.0");
-
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 5) {
-      po.PrintUsage();
-      exit(1);
-    }
-
-
     std::string
-        silence_weight_str = po.GetArg(1),
+        silence_weight_str = po.GetArg(1), //0.0
         silence_phones_str = po.GetArg(2),
         model_rxfilename = po.GetArg(3),
         posteriors_rspecifier = po.GetArg(4),
         posteriors_wspecifier = po.GetArg(5);
 
     BaseFloat silence_weight = 0.0;
-    // silence_weight_str = 1
-    // 所以 silence_weight   1.0
+    // silence_weight_str = 0.0
+    // 所以 silence_weight   0.0
     // silence_set  <1>
     if (!ConvertStringToReal(silence_weight_str, &silence_weight))
       KALDI_ERR << "Invalid silence-weight parameter: expected float, got \""
@@ -384,6 +385,7 @@ int main(int argc, char *argv[]) {
       KALDI_ERR << "Invalid silence-phones string " << silence_phones_str;
     if (silence_phones.empty())
       KALDI_WARN <<"No silence phones, this will have no effect";
+    // 使用set集合保存数组,能够去重 快速查找.
     ConstIntegerSet<int32> silence_set(silence_phones);  // faster lookup.
 
     TransitionModel trans_model;
@@ -396,9 +398,10 @@ int main(int argc, char *argv[]) {
     // 每utt
     for (; !posterior_reader.Done(); posterior_reader.Next()) {
       num_posteriors++;
-      
       // Posterior is vector<vector<pair<int32, BaseFloat> > >
       Posterior post = posterior_reader.Value();
+
+      // 对sil音素增加0.0的权重
       if (distribute)
         WeightSilencePostDistributed(trans_model, silence_set,
                                      silence_weight, &post);
@@ -415,10 +418,12 @@ void WeightSilencePost(const TransitionModel &trans_model,
                        const ConstIntegerSet<int32> &silence_set,
                        BaseFloat silence_scale,
                        Posterior *post) {
-  // frame
+  // foreach frame i
   for (size_t i = 0; i < post->size(); i++) {
+    // 所有可能的trans-id, probability
     std::vector<std::pair<int32, BaseFloat> > this_post;
     this_post.reserve((*post)[i].size());
+
     // 所有可能trans-id
     for (size_t j = 0; j < (*post)[i].size(); j++) {
       int32 tid = (*post)[i][j].first,
@@ -433,6 +438,7 @@ void WeightSilencePost(const TransitionModel &trans_model,
         this_post.push_back(std::make_pair(tid, weight));
       }
     }
+    
     (*post)[i].swap(this_post);
   }
 }
@@ -460,39 +466,23 @@ int main(int argc, char *argv[]) {
   using namespace kaldi;
   typedef kaldi::int32 int32;
   
-    const char *usage =
-        "Accumulate LDA statistics based on pdf-ids.\n"
-        "Usage:  acc-lda [options] <transition-gmm/model> <features-rspecifier> <posteriors-rspecifier> <lda-acc-out>\n"
-        "Typical usage:\n"
-        " ali-to-post ark:1.ali ark:- | lda-acc 1.mdl \"ark:splice-feats scp:train.scp|\"  ark:- ldaacc.1\n";
+  const char *usage =
+      "Accumulate LDA statistics based on pdf-ids.\n"
+      "Usage:  acc-lda [options] <transition-gmm/model> <features-rspecifier> <posteriors-rspecifier> <lda-acc-out>\n"
+      "Typical usage:\n"
+      " ali-to-post ark:1.ali ark:- | lda-acc 1.mdl \"ark:splice-feats scp:train.scp|\"  ark:- ldaacc.1\n";
 
     bool binary = true;
     BaseFloat rand_prune = 0.0;
     ParseOptions po(usage);
-    po.Register("binary", &binary, "Write accumulators in binary mode.");
-    po.Register("rand-prune", &rand_prune,
-                "Randomized pruning threshold for posteriors");
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 4) {
-      po.PrintUsage();
-      exit(1);
-    }
 
     std::string model_rxfilename = po.GetArg(1);
     std::string features_rspecifier = po.GetArg(2);
     std::string posteriors_rspecifier = po.GetArg(3);
+    
     std::string acc_wxfilename = po.GetArg(4);
 
     TransitionModel trans_model;
-    {
-      bool binary_read;
-      Input ki(model_rxfilename, &binary_read);
-      trans_model.Read(ki.Stream(), binary_read);
-      // discard rest of file.
-    }
-
-
     
     LdaEstimate lda;
     SequentialBaseFloatMatrixReader feature_reader(features_rspecifier);
@@ -511,17 +501,23 @@ int main(int argc, char *argv[]) {
       // 所有可能的pdf-id, 特征维度(9 * 13)???
       if (lda.Dim() == 0)
         lda.Init(trans_model.NumPdfs(), feats.NumCols());
+      
+      // void LdaEstimate::Init(int32 num_classes, int32 dimension) {
+      //   zero_acc_.Resize(num_classes); 每个pdf-id 统计量
+      //   first_acc_.Resize(num_classes, dimension); 每个pdf-id 每维度 统计量
+      //   total_second_acc_.Resize(dimension);  每维度统计量？？SpMatrix<double> SpMatrix 是个什么矩阵呢？
+      // }
 
       // pdf-post 将每帧 Vector<trans-id, probability> 转为每帧 Vector<pdf-id, probability>
       Posterior pdf_post;
       ConvertPosteriorToPdfs(trans_model, post, &pdf_post);
 
-      // foreach frame
+      // foreach frame i
       for (int32 i = 0; i < feats.NumRows(); i++) {
         // 保存 当前帧 feats
         SubVector<BaseFloat> feat(feats, i);
         // 当前帧 所有可能pdf-id, 进行剪枝, 加入lda.Accumulate 统计量.
-        // 统计量包括  feat, 对应可能的<pdf-id, weight> 
+        // 统计量包括  feat, 对应可能的<pdf-id, weight>
         for (size_t j = 0; j < pdf_post[i].size(); j++) {
           int32 pdf_id = pdf_post[i][j].first;          
           BaseFloat weight = RandPrune(pdf_post[i][j].second, rand_prune);
@@ -531,13 +527,44 @@ int main(int argc, char *argv[]) {
         }
       }
       num_done++;
-      
-      if (num_done % 100 == 0)
-        KALDI_LOG << "Done " << num_done << " utterances.";
     }
-     
+
+    //  save lda acc
     Output ko(acc_wxfilename, binary);
     lda.Write(ko.Stream(), binary);
+}
+
+// 将vector<tid, prob> --> vector<pdf-id, prob>
+void ConvertPosteriorToPdfs(const TransitionModel &tmodel,
+                            const Posterior &post_in,
+                            Posterior *post_out) {
+  post_out->clear();
+  post_out->resize(post_in.size());
+  // foreach frame i
+  for (size_t i = 0; i < post_out->size(); i++) {
+    
+    unordered_map<int32, BaseFloat> pdf_to_post;
+    // foreach prob tid
+    for (size_t j = 0; j < post_in[i].size(); j++) {
+      
+      int32 tid = post_in[i][j].first,
+          pdf_id = tmodel.TransitionIdToPdf(tid);
+      BaseFloat post = post_in[i][j].second;
+      if (pdf_to_post.count(pdf_id) == 0)
+        pdf_to_post[pdf_id] = post;
+      else
+        pdf_to_post[pdf_id] += post;
+    }
+    // 传递给调用
+    (*post_out)[i].reserve(pdf_to_post.size());
+    // 去掉 = 0.0
+    for (unordered_map<int32, BaseFloat>::const_iterator iter =
+             pdf_to_post.begin(); iter != pdf_to_post.end(); ++iter) {
+      if (iter->second != 0.0)
+        (*post_out)[i].push_back(
+            std::make_pair(iter->first, iter->second));
+    }
+  }
 }
 
 void LdaEstimate::Accumulate(const VectorBase<BaseFloat> &data,
@@ -545,11 +572,14 @@ void LdaEstimate::Accumulate(const VectorBase<BaseFloat> &data,
 
   Vector<double> data_d(data);
 
-  // zero_acc_ vector<pdf-id - weight> 保存pdf-id 的权重累和
+  // zero_acc_ vector<pdf-id weight> 保存pdf-id 的权重累和
   zero_acc_(class_id) += weight;
-  // first_acc_ pdf-id 的权重以及特征 Matrix<pdf-id < weight, feats>>
+  
+  // first_acc_ pdf-id 的权重以及特征 对每个pdf-id 的 对应特征 [features ] + [weight x data_d]
   first_acc_.Row(class_id).AddVec(weight, data_d);
-  // total_second_acc 二次统计量??? 特征×特征.
+  
+  // total_second_acc 所有pdf-id feature的二次统计量 value += weight x features x features‘ -- 1.0 x [1x3] [3x1]
+  // 保存的并不是个向量.???  SpMatrix
   total_second_acc_.AddVec2(weight, data_d);
 }
 
@@ -564,50 +594,17 @@ void LdaEstimate::Accumulate(const VectorBase<BaseFloat> &data,
 // }
 
           
-void ConvertPosteriorToPdfs(const TransitionModel &tmodel,
-                            const Posterior &post_in,
-                            Posterior *post_out) {
-  post_out->clear();
-  post_out->resize(post_in.size());
-
-  // foreach frame
-  for (size_t i = 0; i < post_out->size(); i++) {
-    
-    unordered_map<int32, BaseFloat> pdf_to_post;
-    // foreach frame's maybe <trans-id, probability>
-    for (size_t j = 0; j < post_in[i].size(); j++) {
-
-      int32 tid = post_in[i][j].first,
-          pdf_id = tmodel.TransitionIdToPdf(tid);
-      
-      BaseFloat post = post_in[i][j].second;
-
-      // 多个trans-id 会对应一个 pdf-id
-      if (pdf_to_post.count(pdf_id) == 0)
-        pdf_to_post[pdf_id] = post;
-      else
-        pdf_to_post[pdf_id] += post;
-    }
-    
-    (*post_out)[i].reserve(pdf_to_post.size());
-
-    // 使用 Posterior post_out 保存 每帧的可能<pdf-id, probability>
-    for (unordered_map<int32, BaseFloat>::const_iterator iter =
-             pdf_to_post.begin(); iter != pdf_to_post.end(); ++iter) {
-      
-      if (iter->second != 0.0)
-        (*post_out)[i].push_back(
-            std::make_pair(iter->first, iter->second));
-    }
-  }
-}
 
 
 
 
 
-// 4 est-lda
+// 4 est-lda 根据统计量 使用lda降维 输入特征得到 降维矩阵0.mat
 // est-lda --write-full-matrix=$dir/full.mat --dim=$dim $dir/0.mat $dir/lda.*.acc \
+//                      full-mat                          out-mat     lda-acc
+// in: lda.acc
+// out: 0.mat
+// full.mat???
 
 int main(int argc, char *argv[]) {  
   using namespace kaldi;
@@ -621,17 +618,8 @@ int main(int argc, char *argv[]) {
     
     LdaEstimateOptions opts;
     
-    ParseOptions po(usage);
-    po.Register("binary", &binary, "Write matrix in binary mode.");
     po.Register("write-full-matrix", &full_matrix_wxfilename,
                 "Write full LDA matrix to this location.");
-    opts.Register(&po);
-    po.Read(argc, argv);
-
-    if (po.NumArgs() < 2) {
-      po.PrintUsage();
-      exit(1);
-    }
 
     LdaEstimate lda;
     std::string lda_mat_wxfilename = po.GetArg(1);
@@ -649,8 +637,9 @@ int main(int argc, char *argv[]) {
     // 估计 lda_mat, full_lda_mat 参数.
     lda.Estimate(opts, &lda_mat, &full_lda_mat);
 
-    // 写入 lda_mat  full_lda_mat。
+    // 写入 lda_mat  
     WriteKaldiObject(lda_mat, lda_mat_wxfilename, binary);
+    // 写入 full_lda_mat（一般不写入）
     if (full_matrix_wxfilename != "") {
       Output ko(full_matrix_wxfilename, binary);
       full_lda_mat.Write(ko.Stream(), binary);
@@ -668,20 +657,33 @@ int main(int argc, char *argv[]) {
 
 
 // feats="$splicedfeats transform-feats $dir/0.mat ark:- ark:- |"
-//     此时 feats 是经过上面lda变换矩阵 变换后的特征, 已经实现了lda降维.  feats的特征此时为 dim = 40
+
+// splicedfeats --- 是 13x9 维度的特征
+// splicedfeats 通过ark:- 利用transform-feats 通过0.mat变换 得到lda变换后的特征 --> ark:-| ===> feats
+// feats 是经过上面lda变换矩阵 变换后的特征, 已经实现了lda降维.  feats的特征此时为 dim = 40
+//  具体 看 上面 transform-feats 的分析过程
 
 
 
+
+
+
+
+
+// ===================================
 // 按照新的 feats 重新构建决策树.
+// ===================================
 
-// 注意此时 feats特征已经 与 原本gmm参数的特征不同, 原本GMM适用的特征 已经经过升维后 lda进行降维, 需要重新估计GMM参数.
-// 统计量, 
-// if [ $stage -le -4 ] && $train_tree; then
-//     acc-tree-stats $context_opts \
-//     --ci-phones=$ciphonelist $alidir/final.mdl "$feats" \
-//     "ark:gunzip -c $alidir/ali.JOB.gz|" $dir/JOB.treeacc || exit 1;
 
-//     sum-tree-stats $dir/treeacc $dir/*.treeacc || exit 1;
+
+// 注意此时 feats特征已经 与 原本gmm参数的特征不同, 原本GMM适用的特征
+// 已经经过升维后 lda进行降维, 需要重新估计GMM参数.
+
+// 计算 状态-MFCC统计量  in final.mdl  MFCC   ali_gz  --->  状态-MFCC统计量
+// acc-tree-stats $context_opts --ci-phones=$ciphonelist $alidir/final.mdl "$feats" 
+//     "ark:gunzip -c $alidir/ali.JOB.gz|"  $dir/JOB.treeacc
+// 将*.treeacc 总和一下 --> treeacc
+// sum-tree-stats $dir/treeacc $dir/*.treeacc || exit 1;
 
 //   rm $dir/*.treeacc
 // fi
@@ -690,14 +692,16 @@ int main(int argc, char *argv[]) {
 // 重新应用一遍决策树构建过程.
 // if [ $stage -le -3 ] && $train_tree; then
 //   echo "$0: Getting questions for tree clustering."
-//   # preparing questions, roots file...
+
+//   # preparing questions, roots file... 聚类音素, 获得音素簇集合 -- 问题
 //   cluster-phones $context_opts $dir/treeacc $lang/phones/sets.int \
 //     $dir/questions.int 2> $dir/log/questions.log || exit 1;
 //   cat $lang/phones/extra_questions.int >> $dir/questions.int
+//   # 将问题 转化为 qst形式..... 没啥用.
 //   compile-questions $context_opts $lang/topo $dir/questions.int \
 //     $dir/questions.qst 2>$dir/log/compile_questions.log || exit 1;
 
-//   echo "$0: Building the tree"
+//   echo "$0: Building the tree"  构建决策树
 //   $cmd $dir/log/build_tree.log \
 //     build-tree $context_opts --verbose=1 --max-leaves=$numleaves \
 //     --cluster-thresh=$cluster_thresh $dir/treeacc $lang/phones/roots.int \
@@ -707,20 +711,14 @@ int main(int argc, char *argv[]) {
 
 
 
-// $dir/tree 是 决策树状态绑定之后的决策树, 在gmm-init-model中是用来做topo的, 但是、
-// 此时的topo与初始化的topo完全不同, 包含了很重要的状态pdf-id绑定信息.
 
-// if [ $stage -le -2 ]; then
-//   echo "$0: Initializing the model"
-//   if $train_tree; then
-//     gmm-init-model  --write-occs=$dir/1.occs  \
-//       $dir/tree $dir/treeacc $lang/topo $dir/1.mdl 2> $dir/log/init_model.log || exit 1;
-//     grep 'no stats' $dir/log/init_model.log && echo "This is a bad warning.";
-//     rm $dir/treeacc
-// fi
 
-// gmm-init-model  --write-occs=$dir/1.occs                              \
-//     $dir/tree $dir/treeacc $lang/topo $dir/1.mdl 2> $dir/log/init_model.log || exit 1;
+
+
+
+// $dir/tree 是 决策树状态绑定之后的决策树
+//                                           状态绑定决策树  统计量  topo      ---> model
+// gmm-init-model  --write-occs=$dir/1.occs  $dir/tree $dir/treeacc $lang/topo $dir/1.mdl 
 
 
 //转换原对齐 trans-id --> pdf-id
@@ -867,23 +865,8 @@ int main(int argc, char *argv[]) {
             tot_weight += weight;
           }
         }
-        KALDI_LOG << "Average like for this file is "
-                  << (tot_like_this_file/tot_weight) << " over "
-                  << tot_weight << " frames.";
-        tot_like += tot_like_this_file;
-        tot_t += tot_weight;
-        if (num_done % 10 == 0)
-          KALDI_LOG << "Avg like per frame so far is "
-                    << (tot_like/tot_t);
-      }
     }
 
-    KALDI_LOG << "Done " << num_done << " files, " << num_no_posterior
-              << " with no posteriors, " << num_other_error
-              << " with other errors.";
-
-    KALDI_LOG << "Overall avg like per frame (Gaussian only) = "
-              << (tot_like/tot_t) << " over " << tot_t << " frames.";
 
     WriteKaldiObject(mllt_accs, accs_wxfilename, binary);
 }
