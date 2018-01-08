@@ -262,7 +262,7 @@ void MatrixBase<Real>::AddMatMat(const Real alpha,
 
 
 
-// ali-to-post "ark:gunzip -c $alidir/ali.JOB.gz|" ark:- \|                \
+// ali-to-post "ark:gunzip -c $alidir/ali.JOB.gz|" ark:- \|\
 //   weight-silence-post 0.0 $silphonelist $alidir/final.mdl ark:- ark:- \|  \
 //   acc-lda --rand-prune=$randprune $alidir/final.mdl "$splicedfeats" ark,s,cs:- \
 //   $dir/lda.JOB.acc || exit 1;
@@ -1113,50 +1113,56 @@ static inline void ConvertAlignmentForPhone(
 
 
 
-while [ $x -lt $num_iters ]; do
-  echo Training pass $x
-      // in:
-      // 转移模型
-      // utt的fst图
-      // feats特征
-      // out:
-      // 对齐的trans-id 序列
-  gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
-    "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" \
-    "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
+// while [ $x -lt $num_iters ]; do
+//   echo Training pass $x
+//       // in:
+//       // 转移模型
+//       // utt的fst图
+//       // feats特征
+//       // out:
+//       // 对齐的trans-id 序列
+//   gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
+//     "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" \
+//     "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
 
-  // 2 根据trans-id对齐信息, 转化为 pdf-id对齐信息， 然后增加silence权重.
-   echo "$0: Estimating MLLT"
+//   // 2 根据trans-id对齐信息, 转化为probable<pdf-id, prob>对齐信息， 然后增加silence权重.
+//    echo "$0: Estimating MLLT"
    
-   ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:- \| \
-   weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \| \
-   gmm-acc-mllt --rand-prune=$randprune  $dir/$x.mdl "$feats" ark:- $dir/$x.JOB.macc || exit 1;
+//    ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:- \| \
+//    weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \| \
+//    gmm-acc-mllt --rand-prune=$randprune  $dir/$x.mdl "$feats" ark:- $dir/$x.JOB.macc || exit 1;
 
-   est-mllt $dir/$x.mat.new $dir/$x.*.macc 2> $dir/log/mupdate.$x.log || exit 1;
+//    est-mllt $dir/$x.mat.new $dir/$x.*.macc 2> $dir/log/mupdate.$x.log || exit 1;
 
-   gmm-transform-means  $dir/$x.mat.new $dir/$x.mdl $dir/$x.mdl 
 
-   compose-transforms --print-args=false $dir/$x.mat.new $dir/$cur_lda_iter.mat $dir/$x.mat || exit 1;
+//    计算新的DiagGmm 的所有均值 以及 Gconst
+//    gmm-transform-means  $dir/$x.mat.new $dir/$x.mdl $dir/$x.mdl
 
-      // 多次迭代的 mllt mat矩阵 $x.mat.
-    feats="$splicedfeats transform-feats $dir/$x.mat ark:- ark:- |"
-    cur_lda_iter=$x
+//    组合LDA($cur_lda_iter.mat) 和 MLLT($x.mat.new)矩阵 得到 $x.mat
+//    compose-transforms --print-args=false $dir/$x.mat.new $dir/$cur_lda_iter.mat $dir/$x.mat
 
-    gmm-acc-stats-ali  $dir/$x.mdl "$feats" \
-      "ark,s,cs:gunzip -c $dir/ali.JOB.gz|" $dir/$x.JOB.acc || exit 1;
+//    多次迭代的 mllt mat矩阵 $x.mat. 每次计算了mllt矩阵之后 都将MFCC重新变换, 每次都是在新的MFCC上进行的MLLT, 这样每次
+//    的MLLT估计都只需要通过初始化一个unitMat 进行更新一个MLLT矩阵,然后 compose以前的matrix即可.
+//    feats="$splicedfeats transform-feats $dir/$x.mat ark:- ark:- |"
+//    cur_lda_iter=$x
 
-    gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss --power=$power \
-      $dir/$x.mdl "gmm-sum-accs - $dir/$x.*.acc |" $dir/$[$x+1].mdl || exit 1;
+
+//     // 重估 gmm 参数.
+//     gmm-acc-stats-ali  $dir/$x.mdl "$feats" \
+//       "ark,s,cs:gunzip -c $dir/ali.JOB.gz|" $dir/$x.JOB.acc || exit 1;
+
+//     gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss --power=$power \
+//       $dir/$x.mdl "gmm-sum-accs - $dir/$x.*.acc |" $dir/$[$x+1].mdl || exit 1;
   
-  [ $x -le $max_iter_inc ] && numgauss=$[$numgauss+$incgauss];
-  x=$[$x+1];
-done
+//   [ $x -le $max_iter_inc ] && numgauss=$[$numgauss+$incgauss];
+//   x=$[$x+1];
+// done
 
 
 
-// 将对齐trans-id 转化为 多个可能的<trans-id, prob>
+// 将对齐trans-id 转化为 多个可能的<trans-id, prob> 这里实际上只有一个可能 <trans-id, prob=1.0> .
 // ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:- \| \
-// weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \|        \
+// weight-silence-post 0.0 $silphonelist $dir/$x.mdl ark:- ark:- \|        \ 
 // gmm-acc-mllt --rand-prune=$randprune  $dir/$x.mdl "$feats" ark:- $dir/$x.JOB.macc || exit 1;
 
 int gmm_acc_mllt(int argc, char *argv[]) {
@@ -1175,12 +1181,9 @@ int gmm_acc_mllt(int argc, char *argv[]) {
               "accumulation (larger -> more pruning.  May exceed one).");
   po.Read(argc, argv);
 
-  if (po.NumArgs() != 4) {
-    po.PrintUsage();
-    exit(1);
-  }
 
-  std::string model_filename = po.GetArg(1),
+  std::string
+      model_filename = po.GetArg(1),
       feature_rspecifier = po.GetArg(2),
       posteriors_rspecifier = po.GetArg(3),
       accs_wxfilename = po.GetArg(4);
@@ -1197,6 +1200,8 @@ int gmm_acc_mllt(int argc, char *argv[]) {
     am_gmm.Read(ki.Stream(), binary);
   }
 
+  // 内部通过Vecotr<SpMatrix> 保存多个对称矩阵, 保存的是协方差么？
+  // amm_gmm.Dim() 保存的是 内部的DiaGmm 的Dim() 就是特征维度.
   MlltAccs mllt_accs(am_gmm.Dim(), rand_prune);
 
   double tot_like = 0.0;
@@ -1206,6 +1211,7 @@ int gmm_acc_mllt(int argc, char *argv[]) {
   RandomAccessPosteriorReader posteriors_reader(posteriors_rspecifier);
 
   int32 num_done = 0, num_no_posterior = 0, num_other_error = 0;
+  // foreach utt
   for (; !feature_reader.Done(); feature_reader.Next()) {
     std::string key = feature_reader.Key();
     if (!posteriors_reader.HasKey(key)) {
@@ -1214,18 +1220,15 @@ int gmm_acc_mllt(int argc, char *argv[]) {
       const Matrix<BaseFloat> &mat = feature_reader.Value();
       const Posterior &posterior = posteriors_reader.Value(key);
 
-      if (static_cast<int32>(posterior.size()) != mat.NumRows()) {
-        KALDI_WARN << "Posterior vector has wrong size "<< (posterior.size()) << " vs. "<< (mat.NumRows());
-        num_other_error++;
-        continue;
-      }
-
       num_done++;
       BaseFloat tot_like_this_file = 0.0, tot_weight = 0.0;
 
       Posterior pdf_posterior;
       ConvertPosteriorToPdfs(trans_model, posterior, &pdf_posterior);
+
+      // foreach frame i 
       for (size_t i = 0; i < posterior.size(); i++) {
+        // foreach probable pdf-id--- DiaGmm. 训练时应该都是只对应一个DiaGmm因为有标注
         for (size_t j = 0; j < pdf_posterior[i].size(); j++) {
           int32 pdf_id = pdf_posterior[i][j].first;
           BaseFloat weight = pdf_posterior[i][j].second;
@@ -1239,21 +1242,513 @@ int gmm_acc_mllt(int argc, char *argv[]) {
     }
 
   }
+  // 保存所有统计量
   WriteKaldiObject(mllt_accs, accs_wxfilename, binary);
+}
+
+
+// 根据transmodel , 将可能的tid, prob 转化为 可能的 pdf-id, prob.
+void ConvertPosteriorToPdfs(const TransitionModel &tmodel,
+                            const Posterior &post_in,
+                            Posterior *post_out) {
+  post_out->clear();
+  post_out->resize(post_in.size());
+
+  // foreach frame
+  for (size_t i = 0; i < post_out->size(); i++) {
+    unordered_map<int32, BaseFloat> pdf_to_post;
+    // foreach probable t-id
+    for (size_t j = 0; j < post_in[i].size(); j++) {
+      
+      int32 tid = post_in[i][j].first,
+          pdf_id = tmodel.TransitionIdToPdf(tid);
+      BaseFloat post = post_in[i][j].second;
+      if (pdf_to_post.count(pdf_id) == 0)
+        pdf_to_post[pdf_id] = post;
+      else
+        pdf_to_post[pdf_id] += post;
+    }
+    // 将当前frame i的所有可能pdf-id保存到 post_out[i].
+    (*post_out)[i].reserve(pdf_to_post.size());  // 修改某个vector大小
+    for (unordered_map<int32, BaseFloat>::const_iterator iter =
+             pdf_to_post.begin(); iter != pdf_to_post.end(); ++iter) {
+      if (iter->second != 0.0)
+        (*post_out)[i].push_back(
+            std::make_pair(iter->first, iter->second));
+    }
+  }
+}
+
+
+
+// 计算了什么东西反正是 类似 更新参数用的 统计量.  与 各个GMM参数有关、与MFCC有关,
+// 计算MLLT转换矩阵 用的统计量.
+void MlltAccs::AccumulateFromPosteriors(const DiagGmm &gmm,
+                                        const VectorBase<BaseFloat> &data,
+                                        const VectorBase<BaseFloat> &posteriors) {
+  // 确保 数据维度与高斯参数维度相同、后验概率维度 与 gmm高斯分量数目相同
+  KALDI_ASSERT(data.Dim() == gmm.Dim());
+  KALDI_ASSERT(data.Dim() == Dim());
+  KALDI_ASSERT(posteriors.Dim() == gmm.NumGauss());
+
+  // Matrix<>   --- row-高斯分量数   col MFCC维度 参数
+  const Matrix<BaseFloat> &means_invvars = gmm.means_invvars();
+  const Matrix<BaseFloat> &inv_vars = gmm.inv_vars();
+  
+  Vector<BaseFloat> mean(data.Dim());
+  SpMatrix<double> tmp(data.Dim());  // 对称矩阵， 虽然是矩阵样子 内部保存的数据实际上是一个数组.
+  Vector<double> offset_dbl(data.Dim());
+  
+  double this_beta_ = 0.0;
+
+  // foreach mixcomp..
+  for (int32 i = 0; i < posteriors.Dim(); i++) {  
+
+    BaseFloat posterior = RandPrune(posteriors(i), rand_prune_);
+    if (posterior == 0.0) continue;
+    
+    SubVector<BaseFloat> mean_invvar(means_invvars, i);
+    SubVector<BaseFloat> inv_var(inv_vars, i);
+    
+    mean.AddVecDivVec(1.0, mean_invvar, inv_var, 0.0);  // get mean.
+
+    mean.AddVec(-1.0, data);  // get offset
+    
+    offset_dbl.CopyFromVec(mean);  // make it double.
+    
+    tmp.SetZero();
+    tmp.AddVec2(1.0, offset_dbl);
+    for (int32 j = 0; j < data.Dim(); j++)
+      G_[j].AddSp(inv_var(j)*posterior, tmp);
+    this_beta_ += posterior;
+  }
+  beta_ += this_beta_;
+  Vector<double> data_dbl(data);
+}
+
+BaseFloat MlltAccs::AccumulateFromGmm(const DiagGmm &gmm,  // frame probable pdf-id gmm 参数
+                                      const VectorBase<BaseFloat> &data,  // frame mfcc
+                                      BaseFloat weight) {  // e.g. weight = 1.0  pdf-id, prob
+  // 多个高斯分量
+  Vector<BaseFloat> posteriors(gmm.NumGauss());
+  BaseFloat ans = gmm.ComponentPosteriors(data, &posteriors);
+  posteriors.Scale(weight);
+  AccumulateFromPosteriors(gmm, data, posteriors);
+  return ans;
+}
+
+// Gets likelihood of data given this. Also provides per-Gaussian posteriors.
+// 获得每个高斯分量的 后验概率？？
+BaseFloat DiagGmm::ComponentPosteriors(const VectorBase<BaseFloat> &data,
+                                       Vector<BaseFloat> *posterior) const {
+
+  Vector<BaseFloat> loglikes;
+  LogLikelihoods(data, &loglikes);
+  BaseFloat log_sum = loglikes.ApplySoftMax();
+  posterior->CopyFromVec(loglikes);
+  return log_sum;
+}
+
+// 计算 某个MFCC属于 DiagGmm中某个高斯分量的概率？
+// 应该是的, 这里means_invvars_都是多个高斯分量的 vector
+void DiagGmm::LogLikelihoods(const VectorBase<BaseFloat> &data,
+                             Vector<BaseFloat> *loglikes) const {
+  // gconst_  是一个计算用的部件
+  loglikes->Resize(gconsts_.Dim(), kUndefined);
+  loglikes->CopyFromVec(gconsts_);
+
+  // x^2
+  Vector<BaseFloat> data_sq(data);
+  data_sq.ApplyPow(2.0);
+
+  // loglikes +=  means * inv(vars) * data.
+  loglikes->AddMatVec(1.0, means_invvars_, kNoTrans, data, 1.0);
+  // loglikes += -0.5 * inv(vars) * data_sq.
+  loglikes->AddMatVec(-0.5, inv_vars_, kNoTrans, data_sq, 1.0);
+}
+
+
+
+// est-mllt $dir/$x.mat.new $dir/$x.*.macc
+// in:
+// $x.*.macc 刚刚 gmm-acc-mllt 统计得到的统计量
+// out:
+// $x.mat.new 计算得到的MFCC转移矩阵, 通过在特征域进行mat.new变换，实现MLLT将Diag参数 扩展一下. 提高表达能力.
+void est_mllt(){
+  // 获得update mllt统计量
+  // 根据统计量的维度 初始化一个 matrix
+  Matrix<BaseFloat> mat(mllt_accs.Dim(), mllt_accs.Dim());
+  mat.SetUnit();
+    
+  BaseFloat objf_impr, count;
+  // 根据统计量计算mllt 转换矩阵, 病
+  mllt_accs.Update(&mat, &objf_impr, &count);
+
+  // 写入到 $x.mat.new.
+  writeToFile();
+}
+
+// static version of the Update function.
+// 更新算法的计算过程.
+void MlltAccs::Update(double beta,
+                      const std::vector<SpMatrix<double> > &G,
+                      MatrixBase<BaseFloat> *M_ptr,
+                      BaseFloat *objf_impr_out,
+                      BaseFloat *count_out) {
+  int32 dim = G.size();
+  KALDI_ASSERT(dim != 0 && M_ptr != NULL
+               && M_ptr->NumRows() == dim
+               && M_ptr->NumCols() == dim);
+  if (beta < 10*dim) {  // not really enough data to estimate.
+    // don't bother with min-count parameter etc., as MLLT is typically
+    // global.
+    if (beta > 2*dim)
+      KALDI_WARN << "Mllt:Update, very small count " << beta;
+    else
+      KALDI_WARN << "Mllt:Update, insufficient count " << beta;
+  }
+  int32 num_iters = 200;  // may later make this an option.
+  Matrix<double> M(dim, dim), Minv(dim, dim);
+  M.CopyFromMat(*M_ptr);
+  std::vector<SpMatrix<double> > Ginv(dim);
+  for (int32 i = 0; i < dim;  i++) {
+    Ginv[i].Resize(dim);
+    Ginv[i].CopyFromSp(G[i]);
+    Ginv[i].Invert();
+  }
+
+  double tot_objf_impr = 0.0;
+  for (int32 p = 0; p < num_iters; p++) {
+    for (int32 i = 0; i < dim; i++) {  // for each row
+      SubVector<double> row(M, i);
+      // work out cofactor (actually cofactor times a constant which
+      // doesn't affect anything):
+      Minv.CopyFromMat(M);
+      Minv.Invert();
+      Minv.Transpose();
+      SubVector<double> cofactor(Minv, i);
+      // Objf is: beta log(|row . cofactor|) -0.5 row^T G[i] row
+      // optimized by (c.f. Mark Gales's techreport "semitied covariance matrices
+      // for hidden markov models, eq.  (22)),
+      // row = G_i^{-1} cofactor sqrt(beta / cofactor^T G_i^{-1} cofactor). (1)
+      // here, "row" and "cofactor" are considered as column vectors.
+      double objf_before = beta * Log(std::abs(VecVec(row, cofactor)))
+          -0.5 * VecSpVec(row, G[i], row);
+      // do eq. (1) above:
+      row.AddSpVec(std::sqrt(beta / VecSpVec(cofactor, Ginv[i], cofactor)),
+                   Ginv[i], cofactor, 0.0);
+      double objf_after = beta * Log(std::abs(VecVec(row, cofactor)))
+          -0.5 * VecSpVec(row, G[i], row);
+      if (objf_after < objf_before - fabs(objf_before)*0.00001)
+        KALDI_ERR << "Objective decrease in MLLT update.";
+      tot_objf_impr += objf_after - objf_before;
+    }
+    if (p < 10 || p % 10 == 0)
+      KALDI_LOG << "MLLT objective improvement per frame by " << p
+                << "'th iteration is " << (tot_objf_impr/beta) << " per frame "
+                << "over " << beta << " frames.";
+  }
+  if (objf_impr_out)
+    *objf_impr_out = tot_objf_impr;
+  if (count_out)
+    *count_out = beta;
+  M_ptr->CopyFromMat(M);
 }
 
 
 
 
+// gmm-transform-mean
+// in:
+// 转换矩阵
+// old mdl  -- trans-model + GMM参数
+// out
+// new mdl  -- trans-model + 修改均值以及Gconst 的GMM参数
+int gmm_transform_means(int argc, char *argv[]) {
+
+    const char *usage =
+        "Transform GMM means with linear or affine transform\n"
+        "Usage:  gmm-transform-means <transform-matrix> <model-in> <model-out>\n"
+        "e.g.: gmm-transform-means 2.mat 2.mdl 3.mdl\n";
 
 
+    std::string
+        mat_rxfilename = po.GetArg(1),
+        model_in_rxfilename = po.GetArg(2),
+        model_out_wxfilename = po.GetArg(3);
+
+    Matrix<BaseFloat> mat;
+    ReadKaldiObject(mat_rxfilename, &mat);
+
+    AmDiagGmm am_gmm;
+    TransitionModel trans_model;
+    {
+      bool binary_read;
+      Input ki(model_in_rxfilename, &binary_read);
+      trans_model.Read(ki.Stream(), binary_read);
+      am_gmm.Read(ki.Stream(), binary_read);
+    }
+    
+    // 实际上是MFCC 维度
+    int32 dim = am_gmm.Dim();
+
+    // foreach DiagGmm
+    for (int32 i = 0; i < am_gmm.NumPdfs(); i++) {
+      DiagGmm &gmm = am_gmm.GetPdf(i);
+
+      // 多个分量的 means
+      Matrix<BaseFloat> means;
+      gmm.GetMeans(&means);
+      Matrix<BaseFloat> new_means(means.NumRows(), means.NumCols());
+
+      if (mat.NumCols() == dim) {  // linear case
+        // Right-multiply means by mat^T (equivalent to left-multiplying each
+        // row by mat).
+        new_means.AddMatMat(1.0, means, kNoTrans, mat, kTrans, 0.0);
+      } else { // affine case
+        Matrix<BaseFloat> means_ext(means.NumRows(), means.NumCols()+1);
+        means_ext.Set(1.0);  // set all elems to 1.0
+        SubMatrix<BaseFloat> means_part(means_ext, 0, means.NumRows(),
+                                        0, means.NumCols());
+        means_part.CopyFromMat(means);  // copy old part...
+        new_means.AddMatMat(1.0, means_ext, kNoTrans, mat, kTrans, 0.0);
+      }
+
+      // 使用新的均值
+      gmm.SetMeans(new_means);
+      // 计算Gconst
+      gmm.ComputeGconsts();
+    }
+
+    // 写入文件
+    {
+      Output ko(model_out_wxfilename, binary);
+      trans_model.Write(ko.Stream(), binary);
+      am_gmm.Write(ko.Stream(), binary);
+    }
+}
+
+
+// compose-transforms --print-args=false $dir/$x.mat.new $dir/$cur_lda_iter.mat $dir/$x.mat
+// 合并 上轮变换矩阵 和 本次更新的变换矩阵.
+int compose_transforms(int argc, char *argv[]) {
+
+  const char *usage =
+      "Compose (affine or linear) feature transforms\n"
+      "Usage: compose-transforms [options] (<transform-A-rspecifier>|<transform-A-rxfilename>) "
+      "(<transform-B-rspecifier>|<transform-B-rxfilename>) (<transform-out-wspecifier>|<transform-out-wxfilename>)\n"
+      " Note: it does matrix multiplication (A B) so B is the transform that gets applied\n"
+      "  to the features first.  If b-is-affine = true, then assume last column of b corresponds to offset\n"
+      " e.g.: compose-transforms 1.mat 2.mat 3.mat\n"
+      "   compose-transforms 1.mat ark:2.trans ark:3.trans\n"
+      "   compose-transforms ark:1.trans ark:2.trans ark:3.trans\n"
+      " See also: transform-feats, transform-vec, extend-transform-dim, est-lda, est-pca\n";
+
+  bool b_is_affine = false;
+  bool binary = true;
+  std::string utt2spk_rspecifier;
+  ParseOptions po(usage);
+
+
+  // new mllt mat
+  std::string transform_a_fn = po.GetArg(1);
+  // old lda+mllt mat
+  std::string transform_b_fn = po.GetArg(2);
+  // ----> out new lda+mllt mat
+  std::string transform_c_fn = po.GetArg(3);
+
+  // all these "fn"'s are either rspecifiers or filenames.
+
+  bool a_is_rspecifier =
+      (ClassifyRspecifier(transform_a_fn, NULL, NULL)
+       != kNoRspecifier),
+      b_is_rspecifier =
+      (ClassifyRspecifier(transform_b_fn, NULL, NULL)
+       != kNoRspecifier),
+      c_is_wspecifier =
+      (ClassifyWspecifier(transform_c_fn, NULL, NULL, NULL)
+       != kNoWspecifier);
+
+
+   
+  if (a_is_rspecifier || b_is_rspecifier) {
+    BaseFloatMatrixWriter c_writer(transform_c_fn);
+    if (a_is_rspecifier) {
+      SequentialBaseFloatMatrixReader a_reader(transform_a_fn);
+      if (b_is_rspecifier) {  // both are rspecifiers.
+        RandomAccessBaseFloatMatrixReader b_reader(transform_b_fn);
+        
+        for (;!a_reader.Done(); a_reader.Next()) {
+          if (utt2spk_rspecifier != "") {  // assume a is per-utt, b is per-spk.
+
+          } else {  // Normal case: either both per-utterance or both per-speaker.
+            if (!b_reader.HasKey(a_reader.Key())) {
+              KALDI_WARN << "Second table does not have key " << a_reader.Key();
+            } else {
+              Matrix<BaseFloat> c;
+              if (!ComposeTransforms(a_reader.Value(), b_reader.Value(a_reader.Key()),
+                                     b_is_affine, &c))
+                continue;  // warning will have been printed already.
+              c_writer.Write(a_reader.Key(), c);
+            }
+          }
+        }
+      } else {  // a is rspecifier,  b is rxfilename
+        Matrix<BaseFloat> b;
+        ReadKaldiObject(transform_b_fn, &b);
+        for (;!a_reader.Done(); a_reader.Next()) {
+          Matrix<BaseFloat> c;
+          if (!ComposeTransforms(a_reader.Value(), b,
+                                 b_is_affine, &c))
+            continue;  // warning will have been printed already.
+          c_writer.Write(a_reader.Key(), c);
+        }
+      }
+    } else {
+      Matrix<BaseFloat> a;
+      ReadKaldiObject(transform_a_fn, &a);
+      SequentialBaseFloatMatrixReader b_reader(transform_b_fn);
+      for (; !b_reader.Done(); b_reader.Next()) {
+        Matrix<BaseFloat> c;
+        if (!ComposeTransforms(a, b_reader.Value(),
+                               b_is_affine, &c))
+          continue;  // warning will have been printed already.
+        c_writer.Write(b_reader.Key(), c);
+      }
+    }
+  } else {  // all are just {rx, wx}filenames.
+    Matrix<BaseFloat> a;
+    ReadKaldiObject(transform_a_fn, &a);
+    Matrix<BaseFloat> b;
+    ReadKaldiObject(transform_b_fn, &b);
+    Matrix<BaseFloat> c;
+    
+    if (!ComposeTransforms(a, b, b_is_affine, &c)) exit (1);
+
+    WriteKaldiObject(c, transform_c_fn, binary);
+  }
+  return 0;
+}
+
+
+// 组合矩阵, 内部实际上就是 矩阵点乘。
+bool ComposeTransforms(const Matrix<BaseFloat> &a, const Matrix<BaseFloat> &b,
+                       bool b_is_affine,
+                       Matrix<BaseFloat> *c) {
+
+  // 实际上就是 矩阵点乘.
+  if (a.NumCols() == b.NumRows()) {
+    c->Resize(a.NumRows(), b.NumCols());
+    c->AddMatMat(1.0, a, kNoTrans, b, kNoTrans, 0.0);  // c = a * b.
+    return true;
+  }
+  
+}
 
 
 
 
 void question(){
   // 1 pdf-id  and trans-id ??? 区别
+  // pdf-id 是绑定了的 trans-state（phone, HMM-state, pdf-id）, 而 trans-id， 是所有trans-state的所有可能输出转移的id
+  // trans-id 才是对齐、识别过程中使用的基本单位. 因为trans-id 包含的信息量够多.
+  
+  // 2 DiagGmm 保存的是多个高斯分量 的模型
+  // LogLikelihoods() 函数 计算的是 高斯分量后验概率, 是在EM算法中用来更新参数的统计量.
 
 
   
 }
+
+
+
+
+
+
+// ///////////////////////////////////////////////////////////////////////////
+// 执行了 train_lda_mllt.sh之后会进行 align_si.sh 
+// #lda_mllt_ali
+// steps/align_si.sh  --nj $n --cmd "$train_cmd" --use-graphs true data/mfcc/train data/lang exp/tri2b exp/tri2b_ali || exit 1;
+
+
+# Begin configuration section.
+
+nj=4
+cmd=run.pl
+use_graphs=false
+# Begin configuration.
+scale_opts="--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1"
+beam=10
+retry_beam=40
+careful=false
+
+boost_silence=1.0 # Factor by which to boost silence during alignment.
+
+# End configuration options.
+
+echo "$0 $@"  # Print the command line for logging
+
+
+if [ $# != 4 ]; then
+   echo "usage: steps/align_si.sh <data-dir> <lang-dir> <src-dir> <align-dir>"
+   echo "e.g.:  steps/align_si.sh data/train data/lang exp/tri1 exp/tri1_ali"
+   echo "main options (for others, see top of script file)"
+   echo "  --config <config-file>                           # config containing options"
+   echo "  --nj <nj>                                        # number of parallel jobs"
+   echo "  --use-graphs true                                # use graphs in src-dir"
+   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
+   exit 1;
+fi
+
+
+data=$1  // data/mfcc/train/
+lang=$2  // data/lang
+srcdir=$3  // exp/tri2b
+dir=$4     // exp/tri2_ali
+
+
+for f in $data/text $lang/oov.int $srcdir/tree $srcdir/final.mdl; do
+  [ ! -f $f ] && echo "$0: expected file $f to exist" && exit 1;
+done
+
+
+cp $lang/phones.txt $dir || exit 1;
+cp $srcdir/{tree,final.mdl} $dir || exit 1;
+cp $srcdir/final.occs $dir;
+
+
+
+if [ -f $srcdir/final.mat ]; then feat_type=lda; else feat_type=delta; fi
+echo "$0: feature type is $feat_type"
+
+// use lda
+case $feat_type in
+  delta) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- |";;
+
+  lda) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $srcdir/final.mat ark:- ark:- |"
+                                          
+    cp $srcdir/final.mat $srcdir/full.mat $dir
+   ;;
+  *) echo "$0: invalid feature type $feat_type" && exit 1;
+esac
+
+
+
+
+echo "$0: aligning data in $data using model from $srcdir, putting alignments in $dir"
+
+mdl="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/optional_silence.csl` $dir/final.mdl - |"
+
+if $use_graphs; then
+  [ $nj != "`cat $srcdir/num_jobs`" ] && echo "$0: mismatch in num-jobs" && exit 1;
+  [ ! -f $srcdir/fsts.1.gz ] && echo "$0: no such file $srcdir/fsts.1.gz" && exit 1;
+
+  $cmd JOB=1:$nj $dir/log/align.JOB.log \
+    gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
+      "ark:gunzip -c $srcdir/fsts.JOB.gz|" "$feats" "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
+
+fi
+
+steps/diagnostic/analyze_alignments.sh --cmd "$cmd" $lang $dir
+
+echo "$0: done aligning data."
