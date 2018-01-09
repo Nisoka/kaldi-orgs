@@ -168,6 +168,10 @@ data/dev
        steps/make_mfcc.sh --nj $n --cmd "$train_cmd" data/mfcc/$x exp/make_mfcc/$x mfcc/$x || exit 1;   
                                                      data         logdir           mfccdir
 
+
+
+
+
        data/mfcc/train、test、dev
            feats.scp      每段utt语音对应在ark 文件中的字节位置.
            cmvn.scp       每个人的到普均值什么的
@@ -177,12 +181,11 @@ data/dev
            计算mfcc时的log信息
 
        mfcc/$x 
-           raw_mfcc_$x.n.ark  将train数据的mfcc特征整合到了raw_mfcc_$x.n.ark 文件中了
-           raw_mfcc_$x.n.scp  每段utt语音对应在ark 文件中的字节位置.
-           cmvn_$x.ark        统计均值 方差什么的
+           raw_mfcc_$x.n.ark  将train数据的mfcc特征整合到raw_mfcc_$x.n.ark  archives文件中
+           raw_mfcc_$x.n.scp  每段utt语音对应在ark 文件中的字节位置 script 文件 用于结合archives文件获取实际数据
+           cmvn_$x.ark        表示倒谱均值和方差归一化
            cmvn_$x.scp
-
-      
+     
        
             
      
@@ -294,6 +297,15 @@ result:
 
 *** monophone
     
+    单音素训练
+    #monophone
+    steps/train_mono.sh --boost-silence 1.25 --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/mono || exit 1;
+    #test monophone model
+    local/thchs-30_decode.sh --mono true --nj $n "steps/decode.sh" exp/mono data/mfcc &
+    
+    #monophone_ali
+    steps/align_si.sh --boost-silence 1.25 --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/mono exp/mono_ali || exit 1;
+    
 **** steps/train_mono.sh
 
      整体框架以及框架描述
@@ -367,7 +379,7 @@ result:
           $dir/0.mdl $dir/tree || exit 1;
 
       输入:
-      $lang/topo(data/lang/topo) 中定义了每个音素（phone）所对应的 HMM 模型状态数 以及 初始时的转移概率
+      $lang/topo(data/lang/topo) 中定义了每个音素（phone）所对应的 HMM 模型状态数以及初始时的转移概率
       --shared-phones=$lang/phones/sets.int 选项指向的文件，即$lang/phones/sets.int
           (该文件生成roots.txt中开头为share split的部分，表示同一行元素共享pdf，允许进行决策树分裂),
           文件中同一行的音素（phone）共享 GMM 概率分布。tree文件由sets.int产生。
