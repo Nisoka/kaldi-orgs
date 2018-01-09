@@ -277,7 +277,7 @@ int compile_train_graphs(int argc, char *argv[]) {
         KALDI_ERR << "fstcomposecontext: Could not read disambiguation symbols from "
                   << disambig_rxfilename;
 
-    // 训练图编译器
+    // 训练用FST图(每个utt一个简单图) 编译器
     // 保存了 trans-model, tree, lex-fst, disambig_symbals 
     TrainingGraphCompiler gc(trans_model, ctx_dep, lex_fst, disambig_syms, gopts);
 
@@ -338,7 +338,7 @@ int compile_train_graphs(int argc, char *argv[]) {
 
 // use：
 // 批量生成标注的 线性fst图(路径只有一条的一条直线)
-
+// fst  是 从trans-id  --> word 的简图.
 bool TrainingGraphCompiler::CompileGraphsFromText(
     const std::vector<std::vector<int32> > &transcripts,
     std::vector<fst::VectorFst<fst::StdArc>*> *out_fsts) {
@@ -389,7 +389,6 @@ void MakeLinearAcceptor(const vector<I> &labels, MutableFst<Arc> *ofst) {
 // word_fst 以word为基本单元的基本简图
 // out:
 // out_fsts 生成对应的 以trans-id为基本的线性图.
-
 bool TrainingGraphCompiler::CompileGraphs(
     const std::vector<const fst::VectorFst<fst::StdArc>* > &word_fsts,
     std::vector<fst::VectorFst<fst::StdArc>* > *out_fsts) {
@@ -407,7 +406,7 @@ bool TrainingGraphCompiler::CompileGraphs(
       subseq_symbol = 1 + disambig_syms_.back();
 
     // 上下文相关的音素图, 目的是为了和 phone2word图组合 构建三音素上下文相关图.
-    
+    // important but not read!!!!!!!!!!!!!!!!!!!!111
     cfst = new ContextFst<StdArc>(subseq_symbol,               // 音素总数
                                   phone_syms,                  // 所有实际因素
                                   disambig_syms_,              // 销岐符号
@@ -441,6 +440,7 @@ bool TrainingGraphCompiler::CompileGraphs(
   h_cfg.transition_scale = opts_.transition_scale;
 
   std::vector<int32> disambig_syms_h;
+  // ?????????????????????????????????????????????????
   VectorFst<StdArc> *H = GetHTransducer(cfst->ILabelInfo(),
                                         ctx_dep_,
                                         trans_model_,
@@ -481,62 +481,6 @@ bool TrainingGraphCompiler::CompileGraphs(
 }
 
 
-
-// The H transducer has a separate outgoing arc for each of the symbols in ilabel_info.
-fst::VectorFst<fst::StdArc> *GetHTransducer (const std::vector<std::vector<int32> > &ilabel_info,
-                                             const ContextDependencyInterface &ctx_dep,
-                                             const TransitionModel &trans_model,
-                                             const HTransducerConfig &config,
-                                             std::vector<int32> *disambig_syms_left)
-{
-  
-  HmmCacheType cache;
-
-  std::vector<const ExpandedFst<Arc>* > fsts(ilabel_info.size(), NULL);
-  std::vector<int32> phones = trans_model.GetPhones();
-
-  disambig_syms_left->clear();
-
-  int32 first_disambig_sym = trans_model.NumTransitionIds() + 1;  // First disambig symbol we can have on the input side.
-  int32 next_disambig_sym = first_disambig_sym;
-
-  if (ilabel_info.size() > 0)
-    KALDI_ASSERT(ilabel_info[0].size() == 0);  // make sure epsilon is epsilon...
-
-  for (int32 j = 1; j < static_cast<int32>(ilabel_info.size()); j++) {  // zero is eps.
-    KALDI_ASSERT(!ilabel_info[j].empty());
-    if (ilabel_info[j].size() == 1 &&
-       ilabel_info[j][0] <= 0) {  // disambig symbol
-
-      // disambiguation symbol.
-      int32 disambig_sym_left = next_disambig_sym++;
-      disambig_syms_left->push_back(disambig_sym_left);
-      // get acceptor with one path with "disambig_sym" on it.
-      VectorFst<Arc> *fst = new VectorFst<Arc>;
-      fst->AddState();
-      fst->AddState();
-      fst->SetStart(0);
-      fst->SetFinal(1, Weight::One());
-      fst->AddArc(0, Arc(disambig_sym_left, disambig_sym_left, Weight::One(), 1));
-      fsts[j] = fst;
-    } else {  // Real phone-in-context.
-      std::vector<int32> phone_window = ilabel_info[j];
-
-      VectorFst<Arc> *fst = GetHmmAsFst(phone_window,
-                                        ctx_dep,
-                                        trans_model,
-                                        config,
-                                        &cache);
-      fsts[j] = fst;
-    }
-  }
-
-  VectorFst<Arc> *ans = MakeLoopFst(fsts);
-  SortAndUniq(&fsts); // remove duplicate pointers, which we will have
-  // in general, since we used the cache.
-  DeletePointers(&fsts);
-  return ans;
-}
 
 
 
@@ -591,6 +535,7 @@ int align_equal_compiled(int argc, char *argv[]) {
 
         VectorFst<StdArc> path;
         int32 rand_seed = StringHasher()(key); // StringHasher() produces new anonymous
+
         // object of type StringHasher; we then call operator () on it, with "key".
         // 执行 简单平均对齐 将特征数平均分配给每个word，然后平均分配给每个phone的state
         if (EqualAlign(decode_fst, features.NumRows(), rand_seed, &path) ) {
@@ -825,8 +770,101 @@ bool GetLinearSymbolSequence(const Fst<Arc> &fst,
 
 
 
-# In the following steps, the --min-gaussian-occupancy=3 option is important, otherwise
-# we fail to est "rare" phones and later on, they never align properly.
+
+
+
+
+
+
+
+int gmm_acc_stats_ali(int argc, char *argv[]) {
+  using namespace kaldi;
+  typedef kaldi::int32 int32;
+    const char *usage =
+        "Accumulate stats for GMM training.\n"
+        "Usage:  gmm-acc-stats-ali [options] <model-in> <feature-rspecifier> "
+        "<alignments-rspecifier> <stats-out>\n"
+        "e.g.:\n gmm-acc-stats-ali 1.mdl scp:train.scp ark:1.ali 1.acc\n";
+
+    ParseOptions po(usage);
+    bool binary = true;
+
+    std::string
+        model_filename = po.GetArg(1),
+        feature_rspecifier = po.GetArg(2),
+        alignments_rspecifier = po.GetArg(3),
+        accs_wxfilename = po.GetArg(4);
+
+    AmDiagGmm am_gmm;
+    TransitionModel trans_model;
+    {
+      bool binary;
+      Input ki(model_filename, &binary);
+      trans_model.Read(ki.Stream(), binary);
+      am_gmm.Read(ki.Stream(), binary);
+    }
+
+    Vector<double> transition_accs;
+    trans_model.InitStats(&transition_accs);
+    AccumAmDiagGmm gmm_accs;
+    gmm_accs.Init(am_gmm, kGmmAll);
+
+    double tot_like = 0.0;
+    kaldi::int64 tot_t = 0;
+
+    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    RandomAccessInt32VectorReader alignments_reader(alignments_rspecifier);
+
+    int32 num_done = 0, num_err = 0;
+    for (; !feature_reader.Done(); feature_reader.Next()) {
+      std::string key = feature_reader.Key();
+      if (!alignments_reader.HasKey(key)) {
+        KALDI_WARN << "No alignment for utterance " << key;
+        num_err++;
+      } else {
+        const Matrix<BaseFloat> &mat = feature_reader.Value();
+        const std::vector<int32> &alignment = alignments_reader.Value(key);
+
+        if (alignment.size() != mat.NumRows()) {
+          KALDI_WARN << "Alignments has wrong size " << (alignment.size())
+                     << " vs. " << (mat.NumRows());
+          num_err++;
+          continue;
+        }
+
+        num_done++;
+        BaseFloat tot_like_this_file = 0.0;
+
+        
+        for (size_t i = 0; i < alignment.size(); i++) {
+          int32 tid = alignment[i],  // transition identifier.
+              pdf_id = trans_model.TransitionIdToPdf(tid);
+          
+          trans_model.Accumulate(1.0, tid, &transition_accs);
+          tot_like_this_file += gmm_accs.AccumulateForGmm(am_gmm, mat.Row(i),
+                                                          pdf_id, 1.0);
+        }
+        tot_like += tot_like_this_file;
+        tot_t += alignment.size();
+        if (num_done % 50 == 0) {
+          KALDI_LOG << "Processed " << num_done << " utterances; for utterance "
+                    << key << " avg. like is "
+                    << (tot_like_this_file/alignment.size())
+                    << " over " << alignment.size() <<" frames.";
+        }
+      }
+    }
+    {
+      Output ko(accs_wxfilename, binary);
+      transition_accs.Write(ko.Stream(), binary);
+      gmm_accs.Write(ko.Stream(), binary);
+    }
+}
+
+
+
+// # In the following steps, the --min-gaussian-occupancy=3 option is important, otherwise
+// # we fail to est "rare" phones and later on, they never align properly.
 
 if [ $stage -le 0 ]; then
   gmm-est --min-gaussian-occupancy=3  --mix-up=$numgauss --power=$power \
@@ -834,6 +872,120 @@ if [ $stage -le 0 ]; then
   rm $dir/0.*.acc
 fi
 
+
+  int gmm_est(int argc, char *argv[]) {
+    using namespace kaldi;
+    typedef kaldi::int32 int32;
+
+    const char *usage =
+        "Do Maximum Likelihood re-estimation of GMM-based acoustic model\n"
+        "Usage:  gmm-est [options] <model-in> <stats-in> <model-out>\n"
+        "e.g.: gmm-est 1.mdl 1.acc 2.mdl\n";
+
+    bool binary_write = true;
+    MleTransitionUpdateConfig tcfg;
+    MleDiagGmmOptions gmm_opts;
+    int32 mixup = 0;
+    int32 mixdown = 0;
+    BaseFloat perturb_factor = 0.01;
+    BaseFloat power = 0.2;
+    BaseFloat min_count = 20.0;
+    std::string update_flags_str = "mvwt";
+    std::string occs_out_filename;
+
+    ParseOptions po(usage);
+    po.Register("mix-up", &mixup, "Increase number of mixture components to "
+                "this overall target.");
+    po.Register("min-count", &min_count,
+                "Minimum per-Gaussian count enforced while mixing up and down.");
+    po.Register("power", &power, "If mixing up, power to allocate Gaussians to"
+                " states.");
+
+    tcfg.Register(&po);
+    gmm_opts.Register(&po);
+
+    po.Read(argc, argv);
+
+    if (po.NumArgs() != 3) {
+      po.PrintUsage();
+      exit(1);
+    }
+
+    kaldi::GmmFlagsType update_flags =
+        StringToGmmFlags(update_flags_str);
+
+    std::string model_in_filename = po.GetArg(1),
+        stats_filename = po.GetArg(2),
+        model_out_filename = po.GetArg(3);
+
+    AmDiagGmm am_gmm;
+    TransitionModel trans_model;
+    {
+      bool binary_read;
+      Input ki(model_in_filename, &binary_read);
+      trans_model.Read(ki.Stream(), binary_read);
+      am_gmm.Read(ki.Stream(), binary_read);
+    }
+
+    Vector<double> transition_accs;
+    AccumAmDiagGmm gmm_accs;
+    {
+      bool binary;
+      Input ki(stats_filename, &binary);
+      transition_accs.Read(ki.Stream(), binary);
+      gmm_accs.Read(ki.Stream(), binary, true);  // true == add; doesn't matter here.
+    }
+
+
+    {  // Update GMMs.
+      BaseFloat objf_impr, count;
+      BaseFloat tot_like = gmm_accs.TotLogLike(),
+          tot_t = gmm_accs.TotCount();
+      
+      MleAmDiagGmmUpdate(gmm_opts, gmm_accs, update_flags, &am_gmm,
+                         &objf_impr, &count);
+      
+    }
+
+    if (mixup != 0 || mixdown != 0 || !occs_out_filename.empty()) {
+      // get pdf occupation counts
+      Vector<BaseFloat> pdf_occs;
+      pdf_occs.Resize(gmm_accs.NumAccs());
+      
+      for (int i = 0; i < gmm_accs.NumAccs(); i++)
+        pdf_occs(i) = gmm_accs.GetAcc(i).occupancy().Sum();
+
+      if (mixdown != 0)
+        am_gmm.MergeByCount(pdf_occs, mixdown, power, min_count);
+
+      if (mixup != 0)
+        am_gmm.SplitByCount(pdf_occs, mixup, perturb_factor,
+                            power, min_count);
+
+      if (!occs_out_filename.empty()) {
+        bool binary = false;
+        WriteKaldiObject(pdf_occs, occs_out_filename, binary);
+      }
+    }
+
+    {
+      Output ko(model_out_filename, binary_write);
+      trans_model.Write(ko.Stream(), binary_write);
+      am_gmm.Write(ko.Stream(), binary_write);
+    }
+
+    KALDI_LOG << "Written model to " << model_out_filename;
+    return 0;
+  } catch(const std::exception &e) {
+    std::cerr << e.what() << '\n';
+    return -1;
+  }
+}
+
+
+
+
+  
 
 beam=6 # will change to 10 below after 1st pass
 # note: using slightly wider beams for WSJ vs. RM.
