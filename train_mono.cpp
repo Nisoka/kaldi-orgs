@@ -10,9 +10,9 @@
 // 就可以描述一个图. 因此就是用这种数据结构表示 图FST。
 
 
-# To be run from ..
-# Flat start and monophone training, with delta-delta features.
-# This script applies cepstral mean normalization (per speaker).
+// # To be run from ..
+// # Flat start and monophone training, with delta-delta features.
+// # This script applies cepstral mean normalization (per speaker).
 
 void configuration(){
   // # Begin configuration section.
@@ -61,7 +61,7 @@ void configuration(){
 // echo "$0: Initializing monophone system."
 
 // 共享因素列表. data/lang/phones/sets.int
-shared_phones_opt="--shared-phones=$lang/phones/sets.int"
+// shared_phones_opt="--shared-phones=$lang/phones/sets.int"
 
 // 获得特征的维度
 // # Note: JOB=1 just uses the 1st part of the features-- we only need a subset anyway.
@@ -218,18 +218,25 @@ int gmm_init_mono(int argc, char *argv[]) {
 
 
 
-
 // compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $dir/tree $dir/0.mdl  $lang/L.fst \
 //     "ark:sym2int.pl --map-oov $oov_sym -f 2- $lang/words.txt < $sdata/JOB/text|" \
 //     "ark:|gzip -c >$dir/fsts.JOB.gz" || exit 1;
+
+// disambig.int (219 - 275)
+// tree (easy way)
+// L.fst Lexicon.fst
+// word id(0 -- nnnn)  +  sdata/JOB/text (data/mfcc/train/split/n/text) 是每句的word标记
+// ---> fst.n.gz
+
+
 // in:
 // tree
 // model
-// L.fst
+// L.fst  这里是不带销岐音素的???
 // 每utt标注信息
 // out:
-// 输出图 graphs-wspecifier
-  
+// 输出图 graphs-wspecifier  每个utt对应的线性HCLG.FST
+ 
 int compile_train_graphs(int argc, char *argv[]) {
 
     const char *usage =
@@ -271,7 +278,8 @@ int compile_train_graphs(int argc, char *argv[]) {
     // need VectorFst because we will change it by adding subseq symbol.
     VectorFst<StdArc> *lex_fst = fst::ReadFstKaldi(lex_rxfilename);
 
-    std::vector<int32> disambig_syms;
+    // read all the disambig symbals
+    std::vector<int32> disambig_syms;  
     if (disambig_rxfilename != "")
       if (!ReadIntegerVectorSimple(disambig_rxfilename, &disambig_syms))
         KALDI_ERR << "fstcomposecontext: Could not read disambiguation symbols from "
@@ -283,6 +291,7 @@ int compile_train_graphs(int argc, char *argv[]) {
 
     lex_fst = NULL;  // we gave ownership to gc.
 
+    // word 标注信息 是int形式的 word序列.
     SequentialInt32VectorReader transcript_reader(transcript_rspecifier);
 
     // 保存Table形式的数据 内部保存的是VectorFst.
@@ -300,6 +309,7 @@ int compile_train_graphs(int argc, char *argv[]) {
       while (!transcript_reader.Done()) {
         keys.clear();
         transcripts.clear();
+        
         // foreach utt word 标注 in a batch
         for (; !transcript_reader.Done() &&
                 static_cast<int32>(transcripts.size()) < batch_size;
@@ -310,11 +320,16 @@ int compile_train_graphs(int argc, char *argv[]) {
         }
 
         // 将当前batch的transcripts编译生成batch fst图 （对每个utt 编译生成一个fst）
+        // 这样得到了 trans-id --- wordID的 HCLG图 每个utt都对应一个线性的HCLG图
+        // 在后面进行对齐时, 只需要判断 一个frame 属于那个trans-id， 就实现了对齐
+        // <tid1, tid1, tid2,tid2,tid2,tid2, tid3,tid3,tid3>
         std::vector<fst::VectorFst<fst::StdArc>* > fsts;
         if (!gc.CompileGraphsFromText(transcripts, &fsts)) {
           KALDI_ERR << "Not expecting CompileGraphs to fail.";
         }
-        
+
+
+        // 保存编译结果图.
         KALDI_ASSERT(fsts.size() == keys.size());
         // foreach the fst in the batch
         for (size_t i = 0; i < fsts.size(); i++) {
@@ -331,6 +346,109 @@ int compile_train_graphs(int argc, char *argv[]) {
     return (num_succeed != 0 ? 0 : 1);
 }
 
+
+// 训练用 图编译器
+// in:
+// trans_model
+// ctx_dep  tree
+// lex_fst
+// disambig_syms   销岐符号(也是音素符号，但是非正常音素) 构建图时需要所有音素符号.
+// opts 编译选项
+// out:
+// 得到一个编译器,
+// 简单处理了一下L.fst 为了能够和C的右上下文相关性进行组合？？
+TrainingGraphCompiler::TrainingGraphCompiler(const TransitionModel &trans_model,
+                                             const ContextDependency &ctx_dep,  // Does not maintain reference to this.
+                                             fst::VectorFst<fst::StdArc> *lex_fst,
+                                             const std::vector<int32> &disambig_syms,
+                                             const TrainingGraphCompilerOptions &opts):
+    trans_model_(trans_model), ctx_dep_(ctx_dep), lex_fst_(lex_fst),
+    disambig_syms_(disambig_syms), opts_(opts) {
+  
+  using namespace fst;
+  // 所有正常音素
+  const std::vector<int32> &phone_syms = trans_model_.GetPhones();  // needed to create context fst.
+  // 排序销岐音素
+  SortAndUniq(&disambig_syms_);
+  // check 销岐音素是否是个正常音素.
+  for (int32 i = 0; i < disambig_syms_.size(); i++)
+    if (std::binary_search(phone_syms.begin(), phone_syms.end(),
+                           disambig_syms_[i]))
+      KALDI_ERR << "Disambiguation symbol " << disambig_syms_[i]
+                << " is also a phone.";
+
+  // subseq_symbol 是所有音素(正常音素+销岐音素)总数
+  int32 subseq_symbol = 1 + phone_syms.back();
+  if (!disambig_syms_.empty() && subseq_symbol <= disambig_syms_.back())
+    subseq_symbol = 1 + disambig_syms_.back();
+
+  {
+    int32 N = ctx_dep.ContextWidth(),
+        P = ctx_dep.CentralPosition();
+    
+    // This is needed for systems with right-context or we will not successfully compose with C.
+    // 这是右上文需要的，否则不能和C进行组合.
+    if (P != N-1)
+      AddSubsequentialLoop(subseq_symbol, lex_fst_);
+
+  }
+
+  // 将lex_fst_按照 输出标签排序,因为fst 实际上是一个Arc的组合, 所以能够实现排序.
+  {
+    // make sure lexicon is olabel sorted.
+    fst::OLabelCompare<fst::StdArc> olabel_comp;
+    fst::ArcSort(lex_fst_, olabel_comp);
+  }
+}
+
+// in:
+// 所有音素（正常音素 + 销岐音素）
+// fst --- lexicconfst
+// out:
+// 向fst中增加 超级终止状态. 并且保持原本终止状态的终止权重， 不知道具体作用
+// 说是为了保证 右上下文需要能够得到满足.
+template<class Arc>
+void AddSubsequentialLoop(typename Arc::Label subseq_symbol,
+                          MutableFst<Arc> *fst) {
+
+  typedef typename Arc::StateId StateId;
+  typedef typename Arc::Weight Weight;
+
+  vector<StateId> final_states;
+  // 状态迭代器 遍历Lexicon FST的所有状态?
+  // 保存所有终止状态
+  for (StateIterator<MutableFst<Arc> > siter(*fst); !siter.Done(); siter.Next()) {
+    StateId s = siter.Value();
+    if (fst->Final(s) != Weight::Zero())  final_states.push_back(s);
+  }
+
+  // 但是这个超级终止状态是从哪里过去的？？？
+  // 哦 下面写了 所有的终止状态都增加一个到达超级终止状态的Arc
+  
+  // 增加超级终止状态
+  StateId superfinal = fst->AddState();
+  // Arc(ilabel, olabel, weight, state)
+  Arc arc(subseq_symbol, 0, Weight::One(), superfinal);
+  // loop at superfinal.
+  fst->AddArc(superfinal, arc);  
+  fst->SetFinal(superfinal, Weight::One());
+
+  // foreach final state.
+  for (size_t i = 0; i < final_states.size(); i++) {
+    StateId s = final_states[i];
+    fst->AddArc(s, Arc(subseq_symbol, 0, fst->Final(s), superfinal));
+    // 不要移除原本终止状态的 终止权重, 这样能够增加并发循环... 不知道啥意思.
+    // No, don't remove the final-weights of the original states..
+    // this is so we can add the subsequential loop in cases where
+    // there is no context, and it won't hurt.
+    // fst->SetFinal(s, Weight::Zero());
+    arc.nextstate = final_states[i];
+  }
+}
+
+
+
+
 // in:
 // transcripts -- batchsize 个 utt 标注word
 // out:
@@ -344,33 +462,44 @@ bool TrainingGraphCompiler::CompileGraphsFromText(
     std::vector<fst::VectorFst<fst::StdArc>*> *out_fsts) {
   
   using namespace fst;
-  // 根据标注, 构建batchsize 个fst, 每个状态是word.
+  // 根据标注, 构建batchsize 个fst,  输出结果是word
   std::vector<const VectorFst<StdArc>* > word_fsts(transcripts.size());
 
-  // foreach utt
+  // 对每utt 构建线性 FST标记图 ilabel olabel 都是wordID.
+  // foreach utt word FST.
   for (size_t i = 0; i < transcripts.size(); i++) {
     VectorFst<StdArc> *word_fst = new VectorFst<StdArc>();
     MakeLinearAcceptor(transcripts[i], word_fst);
     word_fsts[i] = word_fst;
-  }    
+  }
+
+  // 构建一个完整图  HCLG.Fst
   bool ans = CompileGraphs(word_fsts, out_fsts);
   for (size_t i = 0; i < transcripts.size(); i++)
     delete word_fsts[i];
   return ans;
 }
 
+// in:
+// labels utt标注信息
+// out:
+// ofst 生成的fst
 
-// 根据word utt标注 生成一个fst图
+// 根据wordID utt标注 生成一个fst图
 // 因为utt的标注存在 是确定的一条路径 , 因此使用生成线性简图 fst
 template<class Arc, class I>
 void MakeLinearAcceptor(const vector<I> &labels, MutableFst<Arc> *ofst) {
+
   typedef typename Arc::StateId StateId;
   typedef typename Arc::Weight Weight;
 
   ofst->DeleteStates();
+  // 构建初始状态
   StateId cur_state = ofst->AddState();
   ofst->SetStart(cur_state);
-  // foreach utt中的每个word label
+
+  // 根据label循环构建一个线性 FST图。
+  // foreach label
   for (size_t i = 0; i < labels.size(); i++) {
     StateId next_state = ofst->AddState();
     // 以word标注为 inlabel, outlabel 权重=1 目标状态，构建转移弧
@@ -386,9 +515,9 @@ void MakeLinearAcceptor(const vector<I> &labels, MutableFst<Arc> *ofst) {
 
 
 // in:
-// word_fst 以word为基本单元的基本简图
+// word_fst 所有utt的线性简图, 以wordID为基本label单元的基本线性简图
 // out:
-// out_fsts 生成对应的 以trans-id为基本的线性图.
+// out_fsts 生成对应的 以trans-id为基本label的线性图.
 bool TrainingGraphCompiler::CompileGraphs(
     const std::vector<const fst::VectorFst<fst::StdArc>* > &word_fsts,
     std::vector<fst::VectorFst<fst::StdArc>* > *out_fsts) {
@@ -397,15 +526,17 @@ bool TrainingGraphCompiler::CompileGraphs(
   
   ContextFst<StdArc> *cfst = NULL;
 
-  {  // make cfst [ it's expanded on the fly ]
+  {
+    // make cfst [ it's expanded on the fly ]
     // all phones
     const std::vector<int32> &phone_syms = trans_model_.GetPhones();  // needed to create context fst.
-    // phone_cnt + 销岐音素 得到总音素总数
+    // phone_cnt 得到正常音素总数
     int32 subseq_symbol = phone_syms.back() + 1;
+    // 获得所有音素总数
     if (!disambig_syms_.empty() && subseq_symbol <= disambig_syms_.back())
       subseq_symbol = 1 + disambig_syms_.back();
 
-    // 上下文相关的音素图, 目的是为了和 phone2word图组合 构建三音素上下文相关图.
+    // 上下文相关的音素图, 构建三音素上下文相关图.
     // important but not read!!!!!!!!!!!!!!!!!!!!111
     cfst = new ContextFst<StdArc>(subseq_symbol,               // 音素总数
                                   phone_syms,                  // 所有实际因素
@@ -414,46 +545,55 @@ bool TrainingGraphCompiler::CompileGraphs(
                                   ctx_dep_.CentralPosition());  // 音素窗中位置
   }
 
-  // 根据lex FST  以及每句的word FST 构建 phone2word FST
-  // 根据上下文相关的cFst + phone2word Fst 构建一个 Context_phone2word.Fst
+  // 根据每句的wordID FST + LEX.FST 构建 phone2word FST(LG.FST)
+  // 根据上下文相关的cFst + phone2word Fst 构建一个 Context_phone2word.Fst(CLG.FST)
   // foreach utt word sequeitial
   for (size_t i = 0; i < word_fsts.size(); i++) {
     VectorFst<StdArc> phone2word_fst;
     
     // TableCompose more efficient than compose.
-    // lex_fst 和 word_fst, 得到 phone2word_fst的一个图.
+    // lex_fst 和 word_fst, 得到phone2word_fst的一个图. --  LG.fst(不过G比较简单是个线性图)
     TableCompose(*lex_fst_, *(word_fsts[i]), &phone2word_fst, &lex_cache_);
 
-   
+    // 通过讲Cfst + LG.FST 构建三音素相关的 CLG.FST， 以三音素id为基本单元.
     VectorFst<StdArc> ctx2word_fst;
     ComposeContextFst(*cfst, phone2word_fst, &ctx2word_fst);
     // ComposeContextFst is like Compose but faster for this particular Fst type.
     // [and doesn't expand too many arcs in the ContextFst.]
 
-    // 结果得到一个 上下文相关的 phone2word的fst图.
+    // 结果得到一个 上下文相关的 ctx2word的fst图.
     (*out_fsts)[i] = ctx2word_fst.Copy();
     // For now this contains the FST with symbols
     // representing phones-in-context.
   }
 
+  
   HTransducerConfig h_cfg;
   h_cfg.transition_scale = opts_.transition_scale;
 
   std::vector<int32> disambig_syms_h;
-  // ?????????????????????????????????????????????????
+  //  !!! 得到三音素声学模型  H.FST
   VectorFst<StdArc> *H = GetHTransducer(cfst->ILabelInfo(),
                                         ctx_dep_,
                                         trans_model_,
                                         h_cfg,
                                         &disambig_syms_h);
+  
 
+  // foreach utt的 ctx2wordID FST
   for (size_t i = 0; i < out_fsts->size(); i++) {
+    
     VectorFst<StdArc> &ctx2word_fst = *((*out_fsts)[i]);
     VectorFst<StdArc> trans2word_fst;
+    // 组合 H.FST + ctx2word_fst ---> HCLG.FST
     TableCompose(*H, ctx2word_fst, &trans2word_fst);
 
+
+
+    // 确定化
     DeterminizeStarInLog(&trans2word_fst);
 
+    // 去掉销岐音素, 具体怎么实现的呢？
     if (!disambig_syms_h.empty()) {
       RemoveSomeInputSymbols(disambig_syms_h, &trans2word_fst);
       if (opts_.rm_eps)
@@ -470,8 +610,7 @@ bool TrainingGraphCompiler::CompileGraphs(
                  opts_.reorder,
                  &trans2word_fst);
 
-    KALDI_ASSERT(trans2word_fst.Start() != kNoStateId);
-
+    // out_fst 就是 -- 优化后的HCLG.fst
     *((*out_fsts)[i]) = trans2word_fst;
   }
 
@@ -480,7 +619,320 @@ bool TrainingGraphCompiler::CompileGraphs(
   return true;
 }
 
+// 主要就是声学模型相关的.
 
+// in:
+// ilabel_info  C.FST 中构建的 所有三音素 triphoneID 对应的 {L, central, R} 的ilabel_info_entry
+// ctx_dep      当前决策树
+// tran-model   转移模型
+// config       配置, 主要是声学拉伸
+// out: 
+// disambig_syms_left  剩余的销岐音素
+
+// 最终的到 所有三音素的fst结构 汇总到一起的 H.FST
+
+fst::VectorFst<fst::StdArc> *GetHTransducer (const std::vector<std::vector<int32> > &ilabel_info,
+                                             const ContextDependencyInterface &ctx_dep,
+                                             const TransitionModel &trans_model,
+                                             const HTransducerConfig &config,
+                                             std::vector<int32> *disambig_syms_left) {
+
+  HmmCacheType cache;
+  // "cache" is an optimization that prevents GetHmmAsFst repeating work
+  // unnecessarily.
+
+  // 对所有三音素结构都构建一个fst???
+  std::vector<const ExpandedFst<Arc>* > fsts(ilabel_info.size(), NULL);
+  // 所有正常音素
+  std::vector<int32> phones = trans_model.GetPhones();
+
+  disambig_syms_left->clear();
+
+  int32 first_disambig_sym = trans_model.NumTransitionIds() + 1;  // First disambig symbol we can have on the input side.
+  int32 next_disambig_sym = first_disambig_sym;
+
+  // make sure epsilon is epsilon...
+  // 因为epsilon 在ilabel_info[0] 并且epsilon要求是{} 内为空 没有三音素.
+  if (ilabel_info.size() > 0)
+    KALDI_ASSERT(ilabel_info[0].size() == 0);  
+
+  // foreach triphone， 为每个音素都构建一个 fst
+  for (int32 j = 1; j < static_cast<int32>(ilabel_info.size()); j++) {  // zero is eps.
+    KALDI_ASSERT(!ilabel_info[j].empty());
+
+    // 判断是销岐音素
+    if (ilabel_info[j].size() == 1 &&
+       ilabel_info[j][0] <= 0) {  // disambig symbol
+
+      // disambiguation symbol.
+      int32 disambig_sym_left = next_disambig_sym++;
+      disambig_syms_left->push_back(disambig_sym_left);
+      // get acceptor with one path with "disambig_sym" on it.
+      VectorFst<Arc> *fst = new VectorFst<Arc>;
+      fst->AddState();
+      fst->AddState();
+      fst->SetStart(0);
+      fst->SetFinal(1, Weight::One());
+      fst->AddArc(0, Arc(disambig_sym_left, disambig_sym_left, Weight::One(), 1));
+      fsts[j] = fst;
+    } else {  // Real phone-in-context.
+      std::vector<int32> phone_window = ilabel_info[j];
+
+      // 对每一个三音素窗 构建一个 三音素的FST图 
+      vectorfst<Arc> *fst = GetHmmAsFst(phone_window,
+                                        ctx_dep,
+                                        trans_model,
+                                        config,
+                                        &cache);
+      fsts[j] = fst;
+    }
+  }
+
+  // 将所有三音素的fst 汇总到一个 H.FST中.
+  VectorFst<Arc> *ans = MakeLoopFst(fsts);
+  // remove duplicate pointers, which we will have in general, since we used the cache.
+  SortAndUniq(&fsts);
+  DeletePointers(&fsts);
+  return ans;
+}
+
+
+// in:
+// phone_window   输入三音素
+// ctx_dep       
+// trans_model
+// config
+// cache???
+
+// out:
+// fst            输出一个上下文三音素的fst图
+// 是从 trans-id 为ilabel,olabel, 的Fst.
+// 当多个三音素FST组合一起时,就形成了接收器acceptor, 当trans-id都满足就能够输出某个三音素.
+
+fst::VectorFst<fst::StdArc> *GetHmmAsFst(
+    std::vector<int32> phone_window,
+    const ContextDependencyInterface &ctx_dep,
+    const TransitionModel &trans_model,
+    const HTransducerConfig &config,
+    HmmCacheType *cache) {
+
+  // 获得该音素
+  int P = ctx_dep.CentralPosition();
+  int32 phone = phone_window[P];
+  if (phone == 0)
+    KALDI_ERR << "phone == 0.  Some mismatch happened, or there is "
+          "a code error.";
+
+  // 获得该音素的 hmmstate结构
+  const HmmTopology &topo = trans_model.GetTopo();
+  const HmmTopology::TopologyEntry &entry  = topo.TopologyForPhone(phone);
+
+  // vector of the pdfs, indexed by pdf-class (pdf-classes must start from zero
+  // and be contiguous).
+  std::vector<int32> pdfs(topo.NumPdfClasses(phone));
+  // foreach 所有pdf-class 对应的pdf-id?
+  for (int32 pdf_class = 0;
+       pdf_class < static_cast<int32>(pdfs.size());
+       pdf_class++) {
+    // 获得pdf-class的pdf-id
+    if (! ctx_dep.Compute(phone_window, pdf_class, &(pdfs[pdf_class])) ) {
+      std::ostringstream ctx_ss;
+      for (size_t i = 0; i < phone_window.size(); i++)
+        ctx_ss << phone_window[i] << ' ';
+      KALDI_ERR << "GetHmmAsFst: context-dependency object could not produce "
+                << "an answer: pdf-class = " << pdf_class << " ctx-window = "
+                << ctx_ss.str() << ".  This probably points "
+          "to either a coding error in some graph-building process, "
+          "a mismatch of topology with context-dependency object, the "
+          "wrong FST being passed on a command-line, or something of "
+          " that general nature.";
+    }
+  }
+  
+  std::pair<int32, std::vector<int32> > cache_index(phone, pdfs);
+  if (cache != NULL) {
+    HmmCacheType::iterator iter = cache->find(cache_index);
+    if (iter != cache->end())
+      return iter->second;
+  }
+
+  // 目标fst
+  VectorFst<StdArc> *ans = new VectorFst<StdArc>;
+
+  // state_ids 索引该因素的状态结构内状态
+  // 将所有状态state 加入到state_ids中
+  std::vector<StateId> state_ids;
+  for (size_t i = 0; i < entry.size(); i++)
+    state_ids.push_back(ans->AddState());
+
+  // ans 以第一个状态为初始状态， 最后状态为终止状态（topo结构就是这么定义的）
+  ans->SetStart(state_ids[0]);
+  StateId final = state_ids.back();
+  ans->SetFinal(final, Weight::One());
+
+  // foreach hmm_state
+  for (int32 hmm_state = 0;
+       hmm_state < static_cast<int32>(entry.size());
+       hmm_state++) {
+    // 获得每个hmm_state的对应的 pdf-class 然后获得 每个hmm-state的pdf-id
+    int32 forward_pdf_class = entry[hmm_state].forward_pdf_class, forward_pdf;
+    int32 self_loop_pdf_class = entry[hmm_state].self_loop_pdf_class, self_loop_pdf;
+    if (forward_pdf_class == kNoPdf) {  // nonemitting state.
+      forward_pdf = kNoPdf;
+      self_loop_pdf = kNoPdf;
+    } else {
+      KALDI_ASSERT(forward_pdf_class < static_cast<int32>(pdfs.size()));
+      KALDI_ASSERT(self_loop_pdf_class < static_cast<int32>(pdfs.size()));
+      forward_pdf = pdfs[forward_pdf_class];
+      self_loop_pdf = pdfs[self_loop_pdf_class];
+    }
+    
+    int32 trans_idx;
+    // foreach trans-id from a hmm-state
+    for (trans_idx = 0;
+        trans_idx < static_cast<int32>(entry[hmm_state].transitions.size());
+        trans_idx++) {
+      BaseFloat log_prob;
+      Label label;
+      int32 dest_state = entry[hmm_state].transitions[trans_idx].first;
+      bool is_self_loop = (dest_state == hmm_state);
+      
+      if (is_self_loop)
+        continue; // We will add self-loops in at a later stage of processing,
+      // not in this function.
+      if (forward_pdf_class == kNoPdf) {
+        // no pdf, hence non-estimated probability.
+        // [would not happen with normal topology] .  There is no transition-state
+        // involved in this case.
+        log_prob = Log(entry[hmm_state].transitions[trans_idx].second);
+        label = 0;
+      } else {  // normal probability.
+        // 对HMM-STATE的每个trans-id构建一个转移弧, 这样就构成成了每个状态的出发弧,
+        // 通过构建 三音素中的所有状态 的 所有出发弧, 就构建了一个三音素的 FST
+        int32 trans_state =
+            trans_model.TupleToTransitionState(phone, hmm_state, forward_pdf, self_loop_pdf);
+        int32 trans_id =
+            trans_model.PairToTransitionId(trans_state, trans_idx);
+        log_prob = trans_model.GetTransitionLogProbIgnoringSelfLoops(trans_id);
+        // log_prob is a negative number (or zero)...
+        label = trans_id;
+      }
+      // Will add probability-scale later (we may want to push first).
+      // 向三音素fst中增加转移弧.
+      ans->AddArc(state_ids[hmm_state],
+                  Arc(label, label, Weight(-log_prob), state_ids[dest_state]));
+    }
+  }
+
+  fst::RemoveEpsLocal(ans);  // this is safe and will not blow up.
+
+  // 应用概率拉伸
+  // Now apply probability scale. 
+  // We waited till after the possible weight-pushing steps,
+  // because weight-pushing needs "real" weights in order to work.
+  ApplyProbabilityScale(config.transition_scale, ans);
+  if (cache != NULL)
+    (*cache)[cache_index] = ans;
+  return ans;
+}
+
+
+// 目的应该是将所有的FST构建成一个完整的 自环FST --- 因为实际上 H就应该是这样的
+// 对于一个发音序列输入 可以循环的输出 对应的音素.
+template<class Arc>
+VectorFst<Arc>* MakeLoopFst(const vector<const ExpandedFst<Arc> *> &fsts) {
+
+  // 一个自环的fst？？
+  VectorFst<Arc> *ans = new VectorFst<Arc>;
+  StateId loop_state = ans->AddState();  // = 0.
+  ans->SetStart(loop_state);
+  ans->SetFinal(loop_state, Weight::One());
+
+  // "cache" is used as an optimization when some of the pointers in "fsts"
+  // may have the same value.
+  unordered_map<const ExpandedFst<Arc> *, Arc> cache;
+
+  // foreach triphone fst
+  for (Label i = 0; i < static_cast<Label>(fsts.size()); i++) {
+    const ExpandedFst<Arc> *fst = fsts[i];
+    
+
+    // 通过cache 进行triphone转移结构一样的优化实现过程，
+    // 只是增加一个转移弧,在原本的fst上增加一个新的转移弧,输出标签代表当前triphone
+    // 加快了实现过程.
+    { // optimization with cache: helpful if some members of "fsts" may
+      // contain the same pointer value (e.g. in GetHTransducer).
+      typename unordered_map<const ExpandedFst<Arc> *, Arc>::iterator
+          iter = cache.find(fst);
+      if (iter != cache.end()) {
+        Arc arc = iter->second;
+        arc.olabel = i;
+        ans->AddArc(0, arc);
+        continue;
+      }
+    }
+
+    // 判断要求是一个 Acceptor
+    KALDI_ASSERT(fst->Properties(kAcceptor, true) == kAcceptor);  // expect acceptor.
+
+    StateId fst_num_states = fst->NumStates();
+    StateId fst_start_state = fst->Start();
+
+    if (fst_start_state == kNoStateId)
+      continue;  // empty fst.
+
+    // 如果FST 是一个kInitialAcyclic类型的FST？？
+    // 并且从初始状态出发的弧只有一条
+    // 并且初始状态不是终止状态
+    bool share_start_state =
+        fst->Properties(kInitialAcyclic, true) == kInitialAcyclic
+        && fst->NumArcs(fst_start_state) == 1
+        && fst->Final(fst_start_state) == Weight::Zero();
+
+    // fst的所有状态,添加到完整FST ans 中.
+    vector<StateId> state_map(fst_num_states);  // fst state -> ans state
+    for (StateId s = 0; s < fst_num_states; s++) {
+      if (s == fst_start_state && share_start_state)
+        state_map[s] = loop_state;
+      // 对于fst中的所有状态, 在ans中创建一个对应状态.
+      else
+        state_map[s] = ans->AddState();
+    }
+
+    // 如果不是 share_start_state
+    // 创建一个弧 ilabel 0, olabel i, weight=1, state--- 对应fst中初始状态的在ans中的状态
+    // 该弧的源状态为0, 目标状态为 对应fst的起始状态
+    if (!share_start_state) {
+      Arc arc(0, i, Weight::One(), state_map[fst_start_state]);
+      cache[fst] = arc;
+      ans->AddArc(0, arc);
+    }
+    // foreach fst的所有状态 s
+    for (StateId s = 0; s < fst_num_states; s++) {
+      // Add arcs out of state s.
+      // fst中s出发的所有arc
+      for (ArcIterator<ExpandedFst<Arc> > aiter(*fst, s); !aiter.Done(); aiter.Next()) {
+        const Arc &arc = aiter.Value();
+        Label olabel = (s == fst_start_state && share_start_state ? i : 0);
+        // 实现将 输入进行匹配trans-id 时， 直接就能够输出triphone.
+        // 生成对应fst中弧的弧,
+        // 输入标签 -----  原本的弧输入标签 --- trans-id.
+        // 输出标签 -----  如果是初始状态， 则将triphonefst ID作为输出标签.
+        Arc newarc(arc.ilabel, olabel, arc.weight, state_map[arc.nextstate]);
+        ans->AddArc(state_map[s], newarc);
+        
+        if (s == fst_start_state && share_start_state)
+          cache[fst] = newarc;
+      }
+      
+      if (fst->Final(s) != Weight::Zero()) {
+        KALDI_ASSERT(!(s == fst_start_state && share_start_state));
+        ans->AddArc(state_map[s], Arc(0, 0, fst->Final(s), loop_state));
+      }
+    }
+  }
+  return ans;
+}
 
 
 
@@ -866,169 +1318,294 @@ int gmm_acc_stats_ali(int argc, char *argv[]) {
 // # In the following steps, the --min-gaussian-occupancy=3 option is important, otherwise
 // # we fail to est "rare" phones and later on, they never align properly.
 
-if [ $stage -le 0 ]; then
-  gmm-est --min-gaussian-occupancy=3  --mix-up=$numgauss --power=$power \
-    $dir/0.mdl "gmm-sum-accs - $dir/0.*.acc|" $dir/1.mdl 2> $dir/log/update.0.log || exit 1;
-  rm $dir/0.*.acc
-fi
+// if [ $stage -le 0 ]; then
+//   gmm-est --min-gaussian-occupancy=3  --mix-up=$numgauss --power=$power \
+//     $dir/0.mdl "gmm-sum-accs - $dir/0.*.acc|" $dir/1.mdl
+// fi
 
 
-  int gmm_est(int argc, char *argv[]) {
-    using namespace kaldi;
-    typedef kaldi::int32 int32;
+int gmm_est(int argc, char *argv[]) {
+  using namespace kaldi;
+  typedef kaldi::int32 int32;
 
-    const char *usage =
-        "Do Maximum Likelihood re-estimation of GMM-based acoustic model\n"
-        "Usage:  gmm-est [options] <model-in> <stats-in> <model-out>\n"
-        "e.g.: gmm-est 1.mdl 1.acc 2.mdl\n";
+  const char *usage =
+      "Do Maximum Likelihood re-estimation of GMM-based acoustic model\n"
+      "Usage:  gmm-est [options] <model-in> <stats-in> <model-out>\n"
+      "e.g.: gmm-est 1.mdl 1.acc 2.mdl\n";
 
-    bool binary_write = true;
-    MleTransitionUpdateConfig tcfg;
-    MleDiagGmmOptions gmm_opts;
-    int32 mixup = 0;
-    int32 mixdown = 0;
-    BaseFloat perturb_factor = 0.01;
-    BaseFloat power = 0.2;
-    BaseFloat min_count = 20.0;
-    std::string update_flags_str = "mvwt";
-    std::string occs_out_filename;
+  bool binary_write = true;
+  MleTransitionUpdateConfig tcfg;
+  MleDiagGmmOptions gmm_opts;
+  int32 mixup = 0;
+  int32 mixdown = 0;
+  BaseFloat perturb_factor = 0.01;
+  BaseFloat power = 0.2;
+  BaseFloat min_count = 20.0;
+  std::string update_flags_str = "mvwt";
+  std::string occs_out_filename;
 
-    ParseOptions po(usage);
-    po.Register("mix-up", &mixup, "Increase number of mixture components to "
-                "this overall target.");
-    po.Register("min-count", &min_count,
-                "Minimum per-Gaussian count enforced while mixing up and down.");
-    po.Register("power", &power, "If mixing up, power to allocate Gaussians to"
-                " states.");
-
-    tcfg.Register(&po);
-    gmm_opts.Register(&po);
-
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 3) {
-      po.PrintUsage();
-      exit(1);
-    }
-
-    kaldi::GmmFlagsType update_flags =
-        StringToGmmFlags(update_flags_str);
-
-    std::string model_in_filename = po.GetArg(1),
-        stats_filename = po.GetArg(2),
-        model_out_filename = po.GetArg(3);
-
-    AmDiagGmm am_gmm;
-    TransitionModel trans_model;
-    {
-      bool binary_read;
-      Input ki(model_in_filename, &binary_read);
-      trans_model.Read(ki.Stream(), binary_read);
-      am_gmm.Read(ki.Stream(), binary_read);
-    }
-
-    Vector<double> transition_accs;
-    AccumAmDiagGmm gmm_accs;
-    {
-      bool binary;
-      Input ki(stats_filename, &binary);
-      transition_accs.Read(ki.Stream(), binary);
-      gmm_accs.Read(ki.Stream(), binary, true);  // true == add; doesn't matter here.
-    }
+  ParseOptions po(usage);
+  po.Register("mix-up", &mixup, "Increase number of mixture components to "
+              "this overall target.");
+  po.Register("min-count", &min_count,
+              "Minimum per-Gaussian count enforced while mixing up and down.");
+  po.Register("power", &power, "If mixing up, power to allocate Gaussians to"
+              " states.");
 
 
-    {  // Update GMMs.
-      BaseFloat objf_impr, count;
-      BaseFloat tot_like = gmm_accs.TotLogLike(),
-          tot_t = gmm_accs.TotCount();
-      
-      MleAmDiagGmmUpdate(gmm_opts, gmm_accs, update_flags, &am_gmm,
-                         &objf_impr, &count);
-      
-    }
+  kaldi::GmmFlagsType update_flags =
+      StringToGmmFlags(update_flags_str);
 
-    if (mixup != 0 || mixdown != 0 || !occs_out_filename.empty()) {
-      // get pdf occupation counts
-      Vector<BaseFloat> pdf_occs;
-      pdf_occs.Resize(gmm_accs.NumAccs());
-      
-      for (int i = 0; i < gmm_accs.NumAccs(); i++)
-        pdf_occs(i) = gmm_accs.GetAcc(i).occupancy().Sum();
+  std::string model_in_filename = po.GetArg(1),
+      stats_filename = po.GetArg(2),
+      model_out_filename = po.GetArg(3);
 
-      if (mixdown != 0)
-        am_gmm.MergeByCount(pdf_occs, mixdown, power, min_count);
-
-      if (mixup != 0)
-        am_gmm.SplitByCount(pdf_occs, mixup, perturb_factor,
-                            power, min_count);
-
-      if (!occs_out_filename.empty()) {
-        bool binary = false;
-        WriteKaldiObject(pdf_occs, occs_out_filename, binary);
-      }
-    }
-
-    {
-      Output ko(model_out_filename, binary_write);
-      trans_model.Write(ko.Stream(), binary_write);
-      am_gmm.Write(ko.Stream(), binary_write);
-    }
-
-    KALDI_LOG << "Written model to " << model_out_filename;
-    return 0;
-  } catch(const std::exception &e) {
-    std::cerr << e.what() << '\n';
-    return -1;
+  AmDiagGmm am_gmm;
+  TransitionModel trans_model;
+  {
+    bool binary_read;
+    Input ki(model_in_filename, &binary_read);
+    trans_model.Read(ki.Stream(), binary_read);
+    am_gmm.Read(ki.Stream(), binary_read);
   }
+
+  Vector<double> transition_accs;
+  AccumAmDiagGmm gmm_accs;
+  {
+    bool binary;
+    Input ki(stats_filename, &binary);
+    transition_accs.Read(ki.Stream(), binary);
+    gmm_accs.Read(ki.Stream(), binary, true);  // true == add; doesn't matter here.
+  }
+
+
+  {  // Update GMMs.
+    BaseFloat objf_impr, count;
+    BaseFloat tot_like = gmm_accs.TotLogLike(),
+        tot_t = gmm_accs.TotCount();
+      
+    MleAmDiagGmmUpdate(gmm_opts, gmm_accs, update_flags, &am_gmm,
+                       &objf_impr, &count);
+      
+  }
+
+  if (mixup != 0 || mixdown != 0 || !occs_out_filename.empty()) {
+    // get pdf occupation counts
+    Vector<BaseFloat> pdf_occs;
+    pdf_occs.Resize(gmm_accs.NumAccs());
+      
+    for (int i = 0; i < gmm_accs.NumAccs(); i++)
+      pdf_occs(i) = gmm_accs.GetAcc(i).occupancy().Sum();
+
+    if (mixdown != 0)
+      am_gmm.MergeByCount(pdf_occs, mixdown, power, min_count);
+
+    // 提升高斯总数
+    if (mixup != 0)
+      am_gmm.SplitByCount(pdf_occs, mixup, perturb_factor,
+                          power, min_count);
+
+    // 将pdf-occs pdf-id统计数写入文件中. 一般不写入.
+    if (!occs_out_filename.empty()) {
+      bool binary = false;
+      WriteKaldiObject(pdf_occs, occs_out_filename, binary);
+    }
+  }
+
+  {
+    Output ko(model_out_filename, binary_write);
+    trans_model.Write(ko.Stream(), binary_write);
+    am_gmm.Write(ko.Stream(), binary_write);
+  }
+
+  KALDI_LOG << "Written model to " << model_out_filename;
+  return 0;
 }
 
 
 
 
+
+// am_gmm.SplitByCount(pdf_occs, mixup, perturb_factor, power, min_count);
+void AmDiagGmm::SplitByCount(const Vector<BaseFloat> &state_occs,
+                             int32 target_components,
+                             float perturb_factor, BaseFloat power,
+                             BaseFloat min_count) {
+
+  int32 gauss_at_start = NumGauss();
+  std::vector<int32> targets;
+  // 将所有pdf-id 按照目标的高斯总数 进行平均拆分， 拆分结果 -> targets<pdf-id <num_gauss>>
+  GetSplitTargets(state_occs, target_components, power,
+                  min_count, &targets);
+
+  // mix-up 实际将DiagGmm进行划分 DiagGmm->Split(targetCnt)
+  for (int32 i = 0; i < NumPdfs(); i++) {
+    if (densities_[i]->NumGauss() < targets[i])
+      densities_[i]->Split(targets[i], perturb_factor);
+  }
+}
+
+
+
+// in:
+// state_occs  所有DiagGMM(pdf-id)出现次数
+// target_components 目标高斯总数
+// power 计算用.
+// min_count 20
+// out:
+// targets <pdf-id<guass-cnt>>
+
+
+void GetSplitTargets(const Vector<BaseFloat> &state_occs,
+                     int32 target_components,
+                     BaseFloat power,
+                     BaseFloat min_count,
+                     std::vector<int32> *targets) {
+  // 使用优先队列方式进行.
+  std::priority_queue<CountStats> split_queue;
+  // pdf-id 总数
+  int32 num_pdfs = state_occs.Dim();
+
+  // 为(pdf-index, 1, occ) 构建一个结构体, 初始化每个pdf-id都只有一个高斯分量.
+  for (int32 pdf_index = 0; pdf_index < num_pdfs; pdf_index++) {
+    BaseFloat occ = pow(state_occs(pdf_index), power);
+    // initialize with one Gaussian per PDF, to put a floor
+    // of 1 on the #Gauss
+    split_queue.push(CountStats(pdf_index, 1, occ));
+  }
+
+  // 当前高斯分量总数 -- 增长 直到 到达目标高斯分量总数
+  for (int32 num_gauss = num_pdfs; num_gauss < target_components;) {
+    CountStats state_to_split = split_queue.top();
+    split_queue.pop();
+
+    // 当前pdf-id 的统计总数
+    BaseFloat orig_occ = state_occs(state_to_split.pdf_index);
+    
+    if ((state_to_split.num_components+1) * min_count >= orig_occ) {
+      state_to_split.occupancy = 0; // min-count active -> disallow splitting
+      // this state any more by setting occupancy = 0.
+    } else {
+      // 将当前pdf-id的高斯组成+1
+      state_to_split.num_components++;
+      num_gauss++;
+    }
+    // 在放入到优先队列 等待继续划分.
+    split_queue.push(state_to_split);
+  }
+  
+  targets->resize(num_pdfs);  
+  while (!split_queue.empty()) {
+    int32 pdf_index = split_queue.top().pdf_index;
+    int32 pdf_tgt_comp = split_queue.top().num_components;
+    // 将每个pdf-id 的高斯数 放入到target中。
+    (*targets)[pdf_index] = pdf_tgt_comp;
+    split_queue.pop();
+  }
+}
+
+
+void DiagGmm::Split(int32 target_components, float perturb_factor,
+                    std::vector<int32> *history) {
+
+
+  int32 current_components = NumGauss(), dim = Dim();
+  DiagGmm *tmp = new DiagGmm;
+  tmp->CopyFromDiagGmm(*this);  // so we have copies of matrices
+  // First do the resize:
+  weights_.Resize(target_components);
+  weights_.Range(0, current_components).CopyFromVec(tmp->weights_);
+  means_invvars_.Resize(target_components, dim);
+  means_invvars_.Range(0, current_components, 0, dim).CopyFromMat(
+      tmp->means_invvars_);
+  inv_vars_.Resize(target_components, dim);
+  inv_vars_.Range(0, current_components, 0, dim).CopyFromMat(tmp->inv_vars_);
+  gconsts_.Resize(target_components);
+
+  delete tmp;
+
+  // future work(arnab): Use a priority queue instead?
+  while (current_components < target_components) {
+    BaseFloat max_weight = weights_(0);
+    int32 max_idx = 0;
+    for (int32 i = 1; i < current_components; i++) {
+      if (weights_(i) > max_weight) {
+        max_weight = weights_(i);
+        max_idx = i;
+      }
+    }
+
+    // remember what component was split
+    if (history != NULL)
+      history->push_back(max_idx);
+
+    weights_(max_idx) /= 2;
+    weights_(current_components) = weights_(max_idx);
+    Vector<BaseFloat> rand_vec(dim);
+    for (int32 i = 0; i < dim; i++) {
+      rand_vec(i) = RandGauss() * std::sqrt(inv_vars_(max_idx, i));
+      // note, this looks wrong but is really right because it's the
+      // means_invvars we're multiplying and they have the dimension
+      // of an inverse standard variance. [dan]
+    }
+    inv_vars_.Row(current_components).CopyFromVec(inv_vars_.Row(max_idx));
+    means_invvars_.Row(current_components).CopyFromVec(means_invvars_.Row(
+        max_idx));
+    means_invvars_.Row(current_components).AddVec(perturb_factor, rand_vec);
+    means_invvars_.Row(max_idx).AddVec(-perturb_factor, rand_vec);
+    current_components++;
+  }
+  
+  ComputeGconsts();
+}
+
+
   
 
-beam=6 # will change to 10 below after 1st pass
-# note: using slightly wider beams for WSJ vs. RM.
-x=1
-while [ $x -lt $num_iters ]; do
-  echo "$0: Pass $x"
-  if [ $stage -le $x ]; then
-    if echo $realign_iters | grep -w $x >/dev/null; then
-      echo "$0: Aligning data"
-      mdl="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/optional_silence.csl` $dir/$x.mdl - |"
-      $cmd JOB=1:$nj $dir/log/align.$x.JOB.log \
-        gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$[$beam*4] --careful=$careful "$mdl" \
-        "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" "ark,t:|gzip -c >$dir/ali.JOB.gz" \
-        || exit 1;
-    fi
-    $cmd JOB=1:$nj $dir/log/acc.$x.JOB.log \
-      gmm-acc-stats-ali  $dir/$x.mdl "$feats" "ark:gunzip -c $dir/ali.JOB.gz|" \
-      $dir/$x.JOB.acc || exit 1;
+// x=1
+// while [ $x -lt $num_iters ]; do
+//   echo "$0: Pass $x"
+//   if [ $stage -le $x ]; then
+//     if echo $realign_iters | grep -w $x >/dev/null; then
+//       echo "$0: Aligning data"
+// ============= 执行对齐 utt -- <tid1, tid2, tid2, tid3>
+//       mdl="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/optional_silence.csl` $dir/$x.mdl - |"
+//       $cmd JOB=1:$nj $dir/log/align.$x.JOB.log \
+//         gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$[$beam*4] --careful=$careful "$mdl" \
+//         "ark:gunzip -c $dir/fsts.JOB.gz|" "$feats" "ark,t:|gzip -c >$dir/ali.JOB.gz" \
+//         || exit 1;
+//     fi
+// ============= 统计pdf-id 出现次数 MFCC统计量等
+//     $cmd JOB=1:$nj $dir/log/acc.$x.JOB.log \
+//       gmm-acc-stats-ali  $dir/$x.mdl "$feats" "ark:gunzip -c $dir/ali.JOB.gz|" \
+//       $dir/$x.JOB.acc || exit 1;
+// ============ 估计gmm 参数
+//     $cmd $dir/log/update.$x.log \
+//       gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss --power=$power $dir/$x.mdl \
+//       "gmm-sum-accs - $dir/$x.*.acc|" $dir/$[$x+1].mdl || exit 1;
+//     rm $dir/$x.mdl $dir/$x.*.acc $dir/$x.occs 2>/dev/null
+//   fi
+//   if [ $x -le $max_iter_inc ]; then
+//      numgauss=$[$numgauss+$incgauss];
+//   fi
+//   beam=10
+//   x=$[$x+1]
+// done
 
-    $cmd $dir/log/update.$x.log \
-      gmm-est --write-occs=$dir/$[$x+1].occs --mix-up=$numgauss --power=$power $dir/$x.mdl \
-      "gmm-sum-accs - $dir/$x.*.acc|" $dir/$[$x+1].mdl || exit 1;
-    rm $dir/$x.mdl $dir/$x.*.acc $dir/$x.occs 2>/dev/null
-  fi
-  if [ $x -le $max_iter_inc ]; then
-     numgauss=$[$numgauss+$incgauss];
-  fi
-  beam=10
-  x=$[$x+1]
-done
-
-( cd $dir; rm final.{mdl,occs} 2>/dev/null; ln -s $x.mdl final.mdl; ln -s $x.occs final.occs )
+// 生成final.mdl
+// ( cd $dir; rm final.{mdl,occs} 2>/dev/null; ln -s $x.mdl final.mdl; ln -s $x.occs final.occs )
 
 
-steps/diagnostic/analyze_alignments.sh --cmd "$cmd" $lang $dir
-utils/summarize_warnings.pl $dir/log
 
-steps/info/gmm_dir_info.pl $dir
+// steps/diagnostic/analyze_alignments.sh --cmd "$cmd" $lang $dir
+// utils/summarize_warnings.pl $dir/log
 
-echo "$0: Done training monophone system in $dir"
+// steps/info/gmm_dir_info.pl $dir
 
-exit 0
+// echo "$0: Done training monophone system in $dir"
 
-# example of showing the alignments:
-# show-alignments data/lang/phones.txt $dir/30.mdl "ark:gunzip -c $dir/ali.0.gz|" | head -4
+// exit 0
+
+// # example of showing the alignments:
+// # show-alignments data/lang/phones.txt $dir/30.mdl "ark:gunzip -c $dir/ali.0.gz|" | head -4
 
