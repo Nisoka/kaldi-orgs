@@ -1,9 +1,9 @@
 
-#sat
-steps/train_sat.sh --cmd "$train_cmd" 2500 15000 data/mfcc/train data/lang exp/tri2b_ali exp/tri3b || exit 1;
+// #sat
+// steps/train_sat.sh --cmd "$train_cmd" 2500 15000 data/mfcc/train data/lang exp/tri2b_ali exp/tri3b || exit 1;
 
-#sat_ali
-steps/align_fmllr.sh --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/tri3b exp/tri3b_ali
+// #sat_ali
+// steps/align_fmllr.sh --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/tri3b exp/tri3b_ali
 
 
 
@@ -391,6 +391,7 @@ void FmllrDiagGmmAccs:: AccumulateFromPosteriors(
 //   # computed with the speaker-independent features, but matches Gaussian-for-Gaussian
 //   # with the final speaker-adapted model.
 
+
 //   从新对齐结果 两种特征 计算重新估计gmm 和 trans的转移概率 的统计量 
 //     ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:-  \| \
 //     gmm-acc-stats-twofeats $dir/$x.mdl "$feats" "$sifeats" ark,s,cs:- $dir/$x.JOB.acc 
@@ -582,7 +583,7 @@ void AccumDiagGmm::AccumulateFromPosteriors(
 //   最后根据 两种特征 得到的统计量 进行GMM参数估计, 得到  final.alimdl
 //   # Update model.
 //     gmm-est --power=$power --remove-low-count-gaussians=false $dir/$x.mdl \
-//     "gmm-sum-accs - $dir/$x.*.acc|" $dir/$x.alimdl  || exit 1;
+//     "gmm-sum-accs - $dir/$x.*.acc|"   $dir/$x.alimdl  || exit 1;
 //   rm $dir/$x.*.acc
 // fi
 

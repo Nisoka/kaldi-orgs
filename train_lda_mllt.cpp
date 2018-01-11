@@ -1,3 +1,15 @@
+// steps/train_lda_mllt.sh --cmd "$train_cmd" --splice-opts "--left-context=3 --right-context=3"
+//        2500 15000 data/mfcc/train data/lang exp/tri1_ali exp/tri2b 
+
+// numleaves=$1  目标叶子节点数
+// totgauss=$2   高斯总数
+// data=$3       训练用特征
+// lang=$4       语言模型的fst
+// alidir=$5     上步对齐结果
+// dir=$6        输出路径.
+
+
+
 // this is a org
 // 原始MFCC、语言模型、对齐数据。
 void shellParamters(){
@@ -721,7 +733,6 @@ int est_lda(int argc, char *argv[]) {
 //     输入对齐pdf-id
 // out:
 //     输出对齐 pdf-id
-
 
 int convert_ali(int argc, char *argv[]) {
   using namespace kaldi;
@@ -1671,84 +1682,84 @@ void question(){
 // steps/align_si.sh  --nj $n --cmd "$train_cmd" --use-graphs true data/mfcc/train data/lang exp/tri2b exp/tri2b_ali || exit 1;
 
 
-# Begin configuration section.
+// # Begin configuration section.
 
-nj=4
-cmd=run.pl
-use_graphs=false
-# Begin configuration.
-scale_opts="--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1"
-beam=10
-retry_beam=40
-careful=false
+// nj=4
+// cmd=run.pl
+// use_graphs=false
+// # Begin configuration.
+// scale_opts="--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1"
+// beam=10
+// retry_beam=40
+// careful=false
 
-boost_silence=1.0 # Factor by which to boost silence during alignment.
+// boost_silence=1.0 # Factor by which to boost silence during alignment.
 
-# End configuration options.
+// # End configuration options.
 
-echo "$0 $@"  # Print the command line for logging
-
-
-if [ $# != 4 ]; then
-   echo "usage: steps/align_si.sh <data-dir> <lang-dir> <src-dir> <align-dir>"
-   echo "e.g.:  steps/align_si.sh data/train data/lang exp/tri1 exp/tri1_ali"
-   echo "main options (for others, see top of script file)"
-   echo "  --config <config-file>                           # config containing options"
-   echo "  --nj <nj>                                        # number of parallel jobs"
-   echo "  --use-graphs true                                # use graphs in src-dir"
-   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
-   exit 1;
-fi
+// echo "$0 $@"  # Print the command line for logging
 
 
-data=$1  // data/mfcc/train/
-lang=$2  // data/lang
-srcdir=$3  // exp/tri2b
-dir=$4     // exp/tri2_ali
+// if [ $# != 4 ]; then
+//    echo "usage: steps/align_si.sh <data-dir> <lang-dir> <src-dir> <align-dir>"
+//    echo "e.g.:  steps/align_si.sh data/train data/lang exp/tri1 exp/tri1_ali"
+//    echo "main options (for others, see top of script file)"
+//    echo "  --config <config-file>                           # config containing options"
+//    echo "  --nj <nj>                                        # number of parallel jobs"
+//    echo "  --use-graphs true                                # use graphs in src-dir"
+//    echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
+//    exit 1;
+// fi
 
 
-for f in $data/text $lang/oov.int $srcdir/tree $srcdir/final.mdl; do
-  [ ! -f $f ] && echo "$0: expected file $f to exist" && exit 1;
-done
+// data=$1  // data/mfcc/train/
+// lang=$2  // data/lang
+// srcdir=$3  // exp/tri2b
+// dir=$4     // exp/tri2_ali
 
 
-cp $lang/phones.txt $dir || exit 1;
-cp $srcdir/{tree,final.mdl} $dir || exit 1;
-cp $srcdir/final.occs $dir;
+// for f in $data/text $lang/oov.int $srcdir/tree $srcdir/final.mdl; do
+//   [ ! -f $f ] && echo "$0: expected file $f to exist" && exit 1;
+// done
+
+
+// cp $lang/phones.txt $dir || exit 1;
+// cp $srcdir/{tree,final.mdl} $dir || exit 1;
+// cp $srcdir/final.occs $dir;
 
 
 
-if [ -f $srcdir/final.mat ]; then feat_type=lda; else feat_type=delta; fi
-echo "$0: feature type is $feat_type"
+// if [ -f $srcdir/final.mat ]; then feat_type=lda; else feat_type=delta; fi
+// echo "$0: feature type is $feat_type"
 
-// use lda
-case $feat_type in
-  delta) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- |";;
+// // use lda
+// case $feat_type in
+//   delta) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- |";;
 
-  lda) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $srcdir/final.mat ark:- ark:- |"
+//   lda) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $srcdir/final.mat ark:- ark:- |"
                                           
-    cp $srcdir/final.mat $srcdir/full.mat $dir
-   ;;
-  *) echo "$0: invalid feature type $feat_type" && exit 1;
-esac
+//     cp $srcdir/final.mat $srcdir/full.mat $dir
+//    ;;
+//   *) echo "$0: invalid feature type $feat_type" && exit 1;
+// esac
 
 
 
 
-echo "$0: aligning data in $data using model from $srcdir, putting alignments in $dir"
+// echo "$0: aligning data in $data using model from $srcdir, putting alignments in $dir"
 
-mdl="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/optional_silence.csl` $dir/final.mdl - |"
+// mdl="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/optional_silence.csl` $dir/final.mdl - |"
 
-if $use_graphs; then
-  [ $nj != "`cat $srcdir/num_jobs`" ] && echo "$0: mismatch in num-jobs" && exit 1;
-  [ ! -f $srcdir/fsts.1.gz ] && echo "$0: no such file $srcdir/fsts.1.gz" && exit 1;
+// if $use_graphs; then
+//   [ $nj != "`cat $srcdir/num_jobs`" ] && echo "$0: mismatch in num-jobs" && exit 1;
+//   [ ! -f $srcdir/fsts.1.gz ] && echo "$0: no such file $srcdir/fsts.1.gz" && exit 1;
 
-  $cmd JOB=1:$nj $dir/log/align.JOB.log \
-    gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
-      "ark:gunzip -c $srcdir/fsts.JOB.gz|" "$feats" "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
+//   $cmd JOB=1:$nj $dir/log/align.JOB.log \
+//     gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
+//       "ark:gunzip -c $srcdir/fsts.JOB.gz|" "$feats" "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
 
-fi
+// fi
 
-steps/diagnostic/analyze_alignments.sh --cmd "$cmd" $lang $dir
+// steps/diagnostic/analyze_alignments.sh --cmd "$cmd" $lang $dir
 
-echo "$0: done aligning data."
+// echo "$0: done aligning data."

@@ -1,5 +1,8 @@
-// gmm-init-model  --write-occs=$dir/1.occs  $dir/tree $dir/treeacc $lang/topo $dir/1.mdl
+// gmm-init-model  --write-occs=$dir/1.occs  $dir/tree      $dir/treeacc  $lang/topo      $dir/1.mdl
+//                    w pdf-id占存率         ctx_dep决策树  pdf-id统计量  基本topo结构    w 目标转移模型
 
+//1  根据ctx_dep决策树(pdf-id) topo结构(phone,Hmm-State,pdf-class) 构建初始化的转移模型-trans-model（没有需要统计量?）
+//2  根据统计量初始化AmDiagGmm (通过统计量 对每个pdf-id构建一个DiagGmm，然后综合得到 AmDiagGmm)
 void gmm_init_model(){
   using namespace kaldi;
   using namespace kaldi;
@@ -17,9 +20,8 @@ void gmm_init_model(){
   double var_floor = 0.01;
   std::string occs_out_filename;
 
-
   ParseOptions po(usage);
-  // 占用率, 计算 GMM的 ai ui var 需要的.
+  // 占用率, 后面需要.
   po.Register("write-occs", &occs_out_filename, "File to write state occupancies to.");
     
   std::string
@@ -60,6 +62,7 @@ void gmm_init_model(){
 
   if (!occs_out_filename.empty()) {  // write state occs
     Vector<BaseFloat> occs;
+    // 将统计量 按照 ctx_dep的叶子节点进行再统计, 得到每个pdf-id的占存率。
     GetOccs(stats, to_pdf, &occs);
     Output ko(occs_out_filename, binary);
     occs.Write(ko.Stream(), binary);
@@ -377,7 +380,10 @@ void TransitionModel::Check() const {
 
 
 
-/// InitAmGmm initializes the GMM with one Gaussian per state.
+// InitAmGmm initializes the GMM with one Gaussian per state.
+// 1 将统计量stats 按照ctx_dep tree的pdf叶子节点
+// 2 为每个Pdf叶子节点 构建一个DiagGmm(*c, var_floor)
+// 3 将所有DiagGmm加入到AmDiagGmm中.
 void InitAmGmm(const BuildTreeStatsType &stats,
                const EventMap &to_pdf_map,
                AmDiagGmm *am_gmm,
@@ -420,7 +426,9 @@ void InitAmGmm(const BuildTreeStatsType &stats,
     // 累加起所有统计量
   Clusterable *avg_stats = SumClusterable(summed_stats);
   KALDI_ASSERT(avg_stats != NULL && "No stats available in gmm-init-model.");
-    // foreach pdf-id stats
+
+  // =======================
+  // foreach pdf-id stats
   for (size_t i = 0; i < summed_stats.size(); i++) {
     GaussClusterable *c =
         static_cast<GaussClusterable*>(summed_stats[i] != NULL ? summed_stats[i] : avg_stats);
@@ -440,8 +448,11 @@ void InitAmGmm(const BuildTreeStatsType &stats,
                  << count << "; corresponding phone list: " << ss.str();
     }
   }
+
+  
   DeletePointers(&summed_stats);
   delete avg_stats;
+}
 
 DiagGmm::DiagGmm(const GaussClusterable &gc,
                  BaseFloat var_floor): valid_gconsts_(false) {
@@ -467,14 +478,18 @@ DiagGmm::DiagGmm(const GaussClusterable &gc,
   this->SetWeights(weights);
   this->ComputeGconsts();
 }
-}
+
+
+
+
+
 
 /// Get state occupation counts. 占存率
 void GetOccs(const BuildTreeStatsType &stats,
              const EventMap &to_pdf_map,
              Vector<BaseFloat> *occs) {
 
-    // Get stats split by tree-leaf ( == pdf):
+  // Get stats split by tree-leaf ( == pdf-id):
   std::vector<BuildTreeStatsType> split_stats;
   SplitStatsByMap(stats, to_pdf_map, &split_stats);
   
@@ -503,3 +518,616 @@ BaseFloat SumNormalizer(const BuildTreeStatsType &stats_in) {
 
 virtual BaseFloat Normalizer() const { return count_; }
 
+
+
+
+
+
+
+
+
+
+
+
+
+// gmm-mixup --mix-up=$numgauss $dir/1.mdl $dir/1.occs    $dir/1.mdl 
+//            目标高斯总数      转移模型   pdf-id占存率   新转移模型
+// 从每个初始化的DiagGmm(pdf-id)的原本只有一个高斯分量，进行高斯分量扩充, pdf-id总数不变，但是为pdf-id增加高斯分量
+// 实现增加高斯数 提高拟合能力.
+int gmm_mixup(int argc, char *argv[]) {
+
+    const char *usage =
+        "Does GMM mixing up (and Gaussian merging)\n"
+        "Usage:  gmm-mixup [options] <model-in> <state-occs-in> <model-out>\n"
+        "e.g. of mixing up:\n"
+        " gmm-mixup --mix-up=4000 1.mdl 1.occs 2.mdl\n"
+        "e.g. of merging:\n"
+        " gmm-mixup --merge=2000 1.mdl 1.occs 2.mdl\n";
+        
+    bool binary_write = true;
+    int32 mixup = 0;
+    int32 mixdown = 0;
+    BaseFloat perturb_factor = 0.01;
+    BaseFloat power = 0.2;
+    BaseFloat min_count = 20.0;
+    
+    ParseOptions po(usage);
+    po.Register("mix-up", &mixup, "Increase number of mixture components to "
+                "this overall target.");
+
+    std::string
+        model_in_filename = po.GetArg(1),
+        occs_in_filename = po.GetArg(2),
+        model_out_filename = po.GetArg(3);
+
+    AmDiagGmm am_gmm;
+    TransitionModel trans_model;
+    {
+      bool binary_read;
+      Input ki(model_in_filename, &binary_read);
+      trans_model.Read(ki.Stream(), binary_read);
+      am_gmm.Read(ki.Stream(), binary_read);
+    }
+
+    if (mixup != 0 || mixdown != 0) {
+
+      Vector<BaseFloat> occs;
+      ReadKaldiObject(occs_in_filename, &occs);
+      if (occs.Dim() != am_gmm.NumPdfs())
+        KALDI_ERR << "Dimension of state occupancies " << occs.Dim()
+                   << " does not match num-pdfs " << am_gmm.NumPdfs();
+
+      if (mixdown != 0)
+        am_gmm.MergeByCount(occs, mixdown, power, min_count);
+
+      // 进行高斯数目扩充 见train_mono.cpp
+      if (mixup != 0)
+        am_gmm.SplitByCount(occs, mixup, perturb_factor, power, min_count);
+    }
+
+    {
+      Output ko(model_out_filename, binary_write);
+      trans_model.Write(ko.Stream(), binary_write);
+      am_gmm.Write(ko.Stream(), binary_write);
+    }
+}
+
+
+
+
+
+//   将对齐信息从 原本trans-id的对齐结果 转化为 tree绑定后的 trans-id。
+//   echo "$0: converting alignments from $alidir to use current tree"
+//   convert-ali $alidir/final.mdl $dir/1.mdl $dir/tree   \
+//      "ark:gunzip -c $alidir/ali.JOB.gz|" "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
+
+
+
+
+
+// gmm-align-compiled $scale_opts --beam=$beam --retry-beam=$retry_beam --careful=$careful "$mdl" \
+//                               beam                                                       转移模型
+//                       "ark:gunzip -c $dir/fsts.JOB.gz|"    "$feats"        \
+//                           输入 utt-fst线性图                 MFCC feature特征
+//                       "ark:|gzip -c >$dir/ali.JOB.gz"
+//                           输出 utt-trans-id 对齐信息
+
+// gmm-align-compiled 按照编译图 进行对齐
+int gmm_align_compiled(int argc, char *argv[]) {
+    const char *usage =
+        "Align features given [GMM-based] models.\n"
+        "Usage:   gmm-align-compiled [options] <model-in> <graphs-rspecifier> "
+        "<feature-rspecifier> <alignments-wspecifier> [scores-wspecifier]\n"
+        "e.g.: \n"
+        " gmm-align-compiled 1.mdl ark:graphs.fsts scp:train.scp ark:1.ali\n"
+        "or:\n"
+        " compile-train-graphs tree 1.mdl lex.fst 'ark:sym2int.pl -f 2- words.txt text|' \\\n"
+        "   ark:- | gmm-align-compiled 1.mdl ark:- scp:train.scp t, ark:1.ali\n";
+
+    ParseOptions po(usage);
+    AlignConfig align_config;
+    BaseFloat acoustic_scale = 1.0;
+    BaseFloat transition_scale = 1.0;
+    BaseFloat self_loop_scale = 1.0;
+    std::string per_frame_acwt_wspecifier;
+
+    std::string
+        model_in_filename = po.GetArg(1),
+        fst_rspecifier = po.GetArg(2),
+        feature_rspecifier = po.GetArg(3),
+        alignment_wspecifier = po.GetArg(4),
+        scores_wspecifier = po.GetOptArg(5);
+
+    TransitionModel trans_model;
+    AmDiagGmm am_gmm;
+    {
+      bool binary;
+      Input ki(model_in_filename, &binary);
+      trans_model.Read(ki.Stream(), binary);
+      am_gmm.Read(ki.Stream(), binary);
+    }
+
+    SequentialTableReader<fst::VectorFstHolder> fst_reader(fst_rspecifier);
+    RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    Int32VectorWriter alignment_writer(alignment_wspecifier);
+    BaseFloatWriter scores_writer(scores_wspecifier);
+    BaseFloatVectorWriter per_frame_acwt_writer(per_frame_acwt_wspecifier);
+
+    int num_done = 0, num_err = 0, num_retry = 0;
+    double tot_like = 0.0;
+    kaldi::int64 frame_count = 0;
+
+    // foreach utt 
+    for (; !fst_reader.Done(); fst_reader.Next()) {
+      
+      std::string utt = fst_reader.Key();
+      if (!feature_reader.HasKey(utt)) {
+        num_err++;
+        KALDI_WARN << "No features for utterance " << utt;
+      } else {
+        // utt-MFCC & utt-fst
+        const Matrix<BaseFloat> &features = feature_reader.Value(utt);
+        VectorFst<StdArc> decode_fst(fst_reader.Value());
+        fst_reader.FreeCurrent();  // this stops copy-on-write of the fst
+        // by deleting the fst inside the reader, since we're about to mutate
+        // the fst by adding transition probs.
+
+
+        // Add transition-probs to the FST.
+        // 在FST上增加转移概率
+        {  
+          std::vector<int32> disambig_syms;  // empty.
+          AddTransitionProbs(trans_model, disambig_syms,
+                             transition_scale, self_loop_scale,
+                             &decode_fst);
+        }
+
+        // 解码用 统计量: amm_gmm, trans_model, MFCC-features, 声学拉伸.
+        DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features,
+                                               acoustic_scale);
+
+        AlignUtteranceWrapper(align_config, utt,
+                              acoustic_scale, &decode_fst, &gmm_decodable,
+                              &alignment_writer, &scores_writer,
+                              &num_done, &num_err, &num_retry,
+                              &tot_like, &frame_count, &per_frame_acwt_writer);
+      }
+    }
+}
+
+
+
+
+
+// 对齐utt的包装 --   utt --- trans-id
+void AlignUtteranceWrapper(
+    const AlignConfig &config,
+    const std::string &utt,
+    BaseFloat acoustic_scale,  // affects scores written to scores_writer, if
+                               // present
+    fst::VectorFst<fst::StdArc> *fst,  // non-const in case config.careful ==
+                                       // true.
+    DecodableInterface *decodable,  // not const but is really an input.
+    Int32VectorWriter *alignment_writer,
+    BaseFloatWriter *scores_writer,
+    int32 *num_done,
+    int32 *num_error,
+    int32 *num_retried,
+    double *tot_like,
+    int64 *frame_count,
+    BaseFloatVectorWriter *per_frame_acwt_writer) {
+
+
+  fst::StdArc::Label special_symbol = 0;
+  if (config.careful)
+    ModifyGraphForCarefulAlignment(fst);
+
+  FasterDecoderOptions decode_opts;
+  decode_opts.beam = config.beam;
+
+  //1 根据图fst，构建解码器decoder
+  //2 利用decoder 对解码统计量(utt的特征等信息) 进行解码
+  FasterDecoder decoder(*fst, decode_opts);
+  decoder.Decode(decodable);
+
+  // 获得解码是否正常达到终止状态.
+  bool ans = decoder.ReachedFinal();  // consider only final states.
+
+  // 如果没有正常到达终止状态, 重新解码
+  if (!ans && config.retry_beam != 0.0) {
+    if (num_retried != NULL) (*num_retried)++;
+    KALDI_WARN << "Retrying utterance " << utt << " with beam "
+               << config.retry_beam;
+    decode_opts.beam = config.retry_beam;
+    decoder.SetOptions(decode_opts);
+    // 重新解码
+    decoder.Decode(decodable);
+    ans = decoder.ReachedFinal();
+  }
+
+
+  // 获得最佳路径, 没有什么lattice.
+  fst::VectorFst<LatticeArc> decoded;  // linear FST.
+  decoder.GetBestPath(&decoded);
+  
+  if (decoded.NumStates() == 0) {
+    KALDI_WARN << "Error getting best path from decoder (likely a bug)";
+    if (num_error != NULL) (*num_error)++;
+    return;
+  }
+
+  // alignment -- trans-id, 是 一个FST的 ilabel
+  // words                       是解码的 olabel -- 解码结果
+  std::vector<int32> alignment;
+  std::vector<int32> words;
+  LatticeWeight weight;
+  // 获得解码结果
+  GetLinearSymbolSequence(decoded, &alignment, &words, &weight);
+  BaseFloat like = -(weight.Value1()+weight.Value2()) / acoustic_scale;
+
+  if (num_done != NULL) (*num_done)++;
+  if (tot_like != NULL) (*tot_like) += like;
+  if (frame_count != NULL) (*frame_count) += decodable->NumFramesReady();
+
+  if (alignment_writer != NULL && alignment_writer->IsOpen())
+    alignment_writer->Write(utt, alignment);
+
+  if (scores_writer != NULL && scores_writer->IsOpen())
+    scores_writer->Write(utt, -(weight.Value1()+weight.Value2()));
+
+  Vector<BaseFloat> per_frame_loglikes;
+  if (per_frame_acwt_writer != NULL && per_frame_acwt_writer->IsOpen()) {
+    GetPerFrameAcousticCosts(decoded, &per_frame_loglikes);
+    per_frame_loglikes.Scale(-1 / acoustic_scale);
+    per_frame_acwt_writer->Write(utt, per_frame_loglikes);
+  }
+}
+
+// 解码过程！
+void FasterDecoder::Decode(DecodableInterface *decodable) {
+  InitDecoding();
+  // 遍历解码统计量直到最后一帧
+  while (!decodable->IsLastFrame(num_frames_decoded_ - 1)) {
+    // 按帧进行解码, 解码当前帧可能的 ilabel!=0 的转移弧
+    double weight_cutoff = ProcessEmitting(decodable);
+    // 解码ilabel==0 的转移弧.
+    ProcessNonemitting(weight_cutoff);
+  }
+}
+
+void FasterDecoder::InitDecoding() {
+  // clean up from last time:
+  // 清除上次解码结果
+  ClearToks(toks_.Clear());
+  
+  StateId start_state = fst_.Start();
+  // 构建一个目标状体为fst_其实状态节点的 转移弧
+  Arc dummy_arc(0, 0, Weight::One(), start_state);
+  // 从起始节点开始进行 扩展式解码 -- token解码， 解码起点 就是 fst_图的起始状态节点
+  // (FasterDecoder 是用于训练用的, 而训练时的解码fst图 是线性图.)
+  toks_.Insert(start_state, new Token(dummy_arc, NULL));
+  // 处理无激发状态 ilabel==0 需要看构图部分 ilabel 是 trans-id
+  ProcessNonemitting(std::numeric_limits<float>::max());
+  num_frames_decoded_ = 0;
+}
+
+// HashList<StateId, Token*> toks_;  toks_ 是一个hash列表 <stateid, token>
+//          key      Token
+// 每次 toks_.Inser<new_stateID, Token> key 都是 Token内的目标状态.
+// ProcessNonemitting 是处理的 arc.ialbel==0 的转移, 是chapter04最后描述的算法, epsilon 认为是子词word的边界。
+// 但是 ProcessNonemitting ProcessEmitting 都会向toks_中增加token 是怎么个意思?
+
+// TODO: first time we go through this, could avoid using the queue.
+void FasterDecoder::ProcessNonemitting(double cutoff) {
+  // Processes nonemitting arcs for one frame. 
+  KALDI_ASSERT(queue_.empty());
+  // 从toks_ 解码扩展 中取出当前需要进行扩展解码的节点Elem 加入queue 进行扩展解码.
+  for (const Elem *e = toks_.GetList(); e != NULL;  e = e->tail)
+    queue_.push_back(e->key);
+  
+  while (!queue_.empty()) {
+    StateId state = queue_.back();
+    queue_.pop_back();
+    Token *tok = toks_.Find(state)->val;  // would segfault if state not
+    // in toks_ but this can't happen.
+    if (tok->cost_ > cutoff) { // Don't bother processing successors.
+      continue;
+    }
+   
+    // fst中从状态节点state出发的所有弧
+    for (fst::ArcIterator<fst::Fst<Arc> > aiter(fst_, state);
+         !aiter.Done();
+         aiter.Next()) {
+      const Arc &arc = aiter.Value();
+
+      //  ===============================================
+      // 传播 无激发 -- ilabel 是trans-id.
+      // 那么什么时候trans-id==0？这都是经过了fst的各种优化操作之后进行的,
+      // 所以当一个arc.ilabel == 0时, 代表的是word边界, 所以arc.ilabel=0 ,就是解码一个word.
+      // 而对于一个epsilon转移, 可直接发生转移, 而不用考虑生成概率！！！。
+      // propagate nonemitting only...
+      if (arc.ilabel == 0) {  
+        // 根据可能的 弧，源token节点
+        // 构建新token节点, 以源token节点中fst状态ID为源状态 并arc弧的目标状态作为新token节点的状态.
+        Token *new_tok = new Token(arc, tok);
+
+        // 剪枝 prune, 根据前面计算的激发状态扩展解码得到的一个 剪枝权重.
+        if (new_tok->cost_ > cutoff) {  // prune
+          Token::TokenDelete(new_tok);
+          
+        } else {
+          // 在toks 中查找是否存在了新建token的终止状态
+          Elem *e_found = toks_.Find(arc.nextstate);
+          // 不存在就插入新的token。 并认为可以继续进行扩展解码.
+          if (e_found == NULL) {
+            toks_.Insert(arc.nextstate, new_tok);
+            queue_.push_back(arc.nextstate);
+          } else {
+            // 操作符重载
+            // inline bool operator < (const Token &other) {
+            //   return cost_ > other.cost_;
+            //    cost_ 保存的是路径下的前向累计权重, 权重越大说明解码正确性越大.
+            // }
+            if ( *(e_found->val) < *new_tok ) {
+              Token::TokenDelete(e_found->val);
+              e_found->val = new_tok;
+              queue_.push_back(arc.nextstate);
+            } else {
+              Token::TokenDelete(new_tok);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// ProcessEmitting returns the likelihood cutoff used.
+double FasterDecoder::ProcessEmitting(DecodableInterface *decodable) {
+  int32 frame = num_frames_decoded_;
+  // HashList, 只不过内部的HashList转出给last_toks. HashList内部进行一下清理, 因为可能需要修改Hash大小.
+  Elem *last_toks = toks_.Clear();
+  size_t tok_cnt;
+  BaseFloat adaptive_beam;
+  Elem *best_elem = NULL;
+
+  
+  double weight_cutoff = GetCutoff(last_toks, &tok_cnt,
+                                   &adaptive_beam, &best_elem);
+  KALDI_VLOG(3) << tok_cnt << " tokens active.";
+  PossiblyResizeHash(tok_cnt);  // This makes sure the hash is always big enough.
+    
+  // This is the cutoff we use after adding in the log-likes (i.e.
+  // for the next frame).  This is a bound on the cutoff we will use
+  // on the next frame.
+  double next_weight_cutoff = std::numeric_limits<double>::infinity();
+  
+  // First process the best token to get a hopefully
+  // reasonably tight bound on the next cutoff.
+  if (best_elem) {
+    StateId state = best_elem->key;
+    Token *tok = best_elem->val;
+    for (fst::ArcIterator<fst::Fst<Arc> > aiter(fst_, state);
+         !aiter.Done();
+         aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      if (arc.ilabel != 0) {  // we'd propagate..
+        BaseFloat ac_cost = - decodable->LogLikelihood(frame, arc.ilabel);
+        double new_weight = arc.weight.Value() + tok->cost_ + ac_cost;
+        if (new_weight + adaptive_beam < next_weight_cutoff)
+          next_weight_cutoff = new_weight + adaptive_beam;
+      }
+    }
+  }
+
+  // int32 n = 0, np = 0;
+
+  
+  // 遍历toks_ 保存的上一时间保存的状态节点, 在本时间帧对 特征进行解码, 判断最佳可能转移.
+  // 上一时间保存的状态节点有多个,每个都是上一个时间的可能状态, 此时要对每一个状态点 再进行扩展解码
+  // 生成更多可能，然后将上一个时间的点(本转移的源状态)从toks_中去掉. 一个token 实际上是一个转移, 所有有了
+  // 最后最优的一个token 就能够通过每次保存的Prevtoken 找到最佳路径.
+  for (Elem *e = last_toks, *e_tail; e != NULL; e = e_tail) { 
+    StateId state = e->key;
+    Token *tok = e->val;
+   if (tok->cost_ < weight_cutoff) {
+      
+      // foreach fst中以state 为源状态的 arc
+      for (fst::ArcIterator<fst::Fst<Arc> > aiter(fst_, state);
+           !aiter.Done();
+           aiter.Next()) {
+        Arc arc = aiter.Value();
+        // 进行扩展解码 说明不是epsilon??? 是个词内转移?
+        // 具体需要看chapter04 的具体描述, 实际上应该是 WFST状态内的HMM-state转移, 经过优化
+        // WFST状态内部, 没有了epsilon（arc.ilabel != 0），因此可以通过arc.ilabel 是否为0，
+        // 决定是否是一个HMM-state转移.  只有正常的HMM-state转移才会需要计算转移概率, 而对于WFST状态转移, 则只需要保存token
+        if (arc.ilabel != 0) {  
+          // 计算当前帧 是 该转移弧输入标签(HMM-state?)的概率 -- ac_cost().
+          BaseFloat ac_cost =  - decodable->LogLikelihood(frame, arc.ilabel);
+          // 当前Viterbi权重
+          double new_weight = arc.weight.Value() + tok->cost_ + ac_cost;
+
+          // 依旧不发生剪枝
+          if (new_weight < next_weight_cutoff) {  // not pruned..
+            // 从当前token 构建转移弧, 并保存 该路径权重.
+            Token *new_tok = new Token(arc, ac_cost, tok);
+            Elem *e_found = toks_.Find(arc.nextstate);
+            // 重新计算剪枝权重线
+            if (new_weight + adaptive_beam < next_weight_cutoff)
+              next_weight_cutoff = new_weight + adaptive_beam;
+            
+            if (e_found == NULL) {
+              toks_.Insert(arc.nextstate, new_tok);
+            } else {
+              // 判断两条路径的权重, 留下更好的.
+              if ( *(e_found->val) < *new_tok ) {
+                Token::TokenDelete(e_found->val);
+                e_found->val = new_tok;
+              } else {
+                Token::TokenDelete(new_tok);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    
+   // 遍历下一个上时间状态节点, 并将已经扩展传播了的上时间节点 从toks_中删除.
+   // 因为已经扩展传播了, toks_中保存的是当前时间需要进行扩展传播的节点.
+   e_tail = e->tail;
+   Token::TokenDelete(e->val);
+   toks_.Delete(e);
+  }
+  
+  num_frames_decoded_++;
+  return next_weight_cutoff;
+}
+
+
+// 根据FST图 扩展解码 构建下一个token
+// in:
+// FST arc
+// 上一个token节点, 对应是在FST图 arc弧的源状态
+inline Token(const Arc &arc, Token *prev):
+    arc_(arc), prev_(prev), ref_count_(1) {
+  if (prev) {
+    prev->ref_count_++;
+    weight_ = Times(prev->weight_, arc.weight);
+  } else {
+    weight_ = arc.weight;
+  }
+}
+
+
+// 解码器判断是否解码正常.
+// 存在一条解码路径达到终止状态
+bool FasterDecoder::ReachedFinal() {
+  // toks_保存的是 上时间 解码路径的结果状态节点, 可以进行继续传播扩展解码, 或者直接获得当前最佳路径.
+  // 遍历所有当前解码结果.
+  for (const Elem *e = toks_.GetList(); e != NULL; e = e->tail) {
+    // cost_ 代价正常 并且 是个FST终止状态.
+    if (e->val->cost_ != std::numeric_limits<double>::infinity() &&
+        fst_.Final(e->key) != Weight::Zero())
+      return true;
+  }
+  return false;
+}
+
+
+
+bool FasterDecoder::GetBestPath(fst::MutableFst<LatticeArc> *fst_out,
+                                bool use_final_probs) {
+  // GetBestPath gets the decoding output.  If "use_final_probs" is true
+  // AND we reached a final state, it limits itself to final states;
+  // otherwise it gets the most likely token not taking into
+  // account final-probs.  fst_out will be empty (Start() == kNoStateId) if
+  // nothing was available.  It returns true if it got output (thus, fst_out
+  // will be nonempty).
+  
+  fst_out->DeleteStates();
+  Token *best_tok = NULL;
+  bool is_final = ReachedFinal();
+  if (!is_final) {
+    for (const Elem *e = toks_.GetList(); e != NULL; e = e->tail)
+      if (best_tok == NULL || *best_tok < *(e->val) )
+        best_tok = e->val;
+  } else {
+    double infinity =  std::numeric_limits<double>::infinity(),
+        best_cost = infinity;
+    
+    for (const Elem *e = toks_.GetList(); e != NULL; e = e->tail) {
+      double this_cost = e->val->cost_ + fst_.Final(e->key).Value();
+      // 找到最佳的 cost_
+      if (this_cost < best_cost && this_cost != infinity) {
+        best_cost = this_cost;
+        best_tok = e->val;
+      }
+    }
+  }
+  
+  if (best_tok == NULL) return false;  // No output.
+
+  std::vector<LatticeArc> arcs_reverse;  // arcs in reverse order.
+
+  // 回溯 最优的Token， 找到最优路径的reverse（翻转）
+  for (Token *tok = best_tok; tok != NULL; tok = tok->prev_) {
+    BaseFloat
+        tot_cost = tok->cost_ -  (tok->prev_ ? tok->prev_->cost_ : 0.0),
+        graph_cost = tok->arc_.weight.Value(),
+        ac_cost = tot_cost - graph_cost;
+    
+    LatticeArc l_arc(tok->arc_.ilabel,
+                     tok->arc_.olabel,
+                     LatticeWeight(graph_cost, ac_cost),
+                     tok->arc_.nextstate);
+    arcs_reverse.push_back(l_arc);
+  }
+  
+  KALDI_ASSERT(arcs_reverse.back().nextstate == fst_.Start());
+  arcs_reverse.pop_back();  // that was a "fake" token... gives no info.
+
+  StateId cur_state = fst_out->AddState();
+  fst_out->SetStart(cur_state);
+  
+  for (ssize_t i = static_cast<ssize_t>(arcs_reverse.size())-1; i >= 0; i--) {
+    LatticeArc arc = arcs_reverse[i];
+    arc.nextstate = fst_out->AddState();
+    fst_out->AddArc(cur_state, arc);
+    cur_state = arc.nextstate;
+  }
+  
+  if (is_final && use_final_probs) {
+    Weight final_weight = fst_.Final(best_tok->arc_.nextstate);
+    fst_out->SetFinal(cur_state, LatticeWeight(final_weight.Value(), 0.0));
+  } else {
+    fst_out->SetFinal(cur_state, LatticeWeight::One());
+  }
+  RemoveEpsLocal(fst_out);
+  return true;
+}
+
+
+
+
+template<class Arc, class I>
+bool GetLinearSymbolSequence(const Fst<Arc> &fst,
+                             vector<I> *isymbols_out,
+                             vector<I> *osymbols_out,
+                             typename Arc::Weight *tot_weight_out) {
+  
+  typedef typename Arc::StateId StateId;
+  typedef typename Arc::Weight Weight;
+
+  Weight tot_weight = Weight::One();
+  vector<I> ilabel_seq;
+  vector<I> olabel_seq;
+
+  StateId cur_state = fst.Start();
+  if (cur_state == kNoStateId) {  // empty sequence.
+    if (isymbols_out != NULL) isymbols_out->clear();
+    if (osymbols_out != NULL) osymbols_out->clear();
+    if (tot_weight_out != NULL) *tot_weight_out = Weight::Zero();
+    return true;
+  }
+  while (1) {
+    Weight w = fst.Final(cur_state);
+    if (w != Weight::Zero()) {  // is final..
+      tot_weight = Times(w, tot_weight);
+      if (fst.NumArcs(cur_state) != 0) return false;
+      if (isymbols_out != NULL) *isymbols_out = ilabel_seq;
+      if (osymbols_out != NULL) *osymbols_out = olabel_seq;
+      if (tot_weight_out != NULL) *tot_weight_out = tot_weight;
+      return true;
+    } else {
+      if (fst.NumArcs(cur_state) != 1) return false;
+
+      ArcIterator<Fst<Arc> > iter(fst, cur_state);  // get the only arc.
+      const Arc &arc = iter.Value();
+      tot_weight = Times(arc.weight, tot_weight);
+      if (arc.ilabel != 0) ilabel_seq.push_back(arc.ilabel);
+      if (arc.olabel != 0) olabel_seq.push_back(arc.olabel);
+      cur_state = arc.nextstate;
+    }
+  }
+}

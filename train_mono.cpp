@@ -401,12 +401,15 @@ TrainingGraphCompiler::TrainingGraphCompiler(const TransitionModel &trans_model,
   }
 }
 
+
+// 向Lexicon.fst中增加 超级终止状态. 并且保持原本终止状态的终止权重， 不知道具体作用
+// 说是为了保证 右上下文需要能够得到满足.
+
 // in:
 // 所有音素（正常音素 + 销岐音素）
-// fst --- lexicconfst
+// Lexicon FST
 // out:
-// 向fst中增加 超级终止状态. 并且保持原本终止状态的终止权重， 不知道具体作用
-// 说是为了保证 右上下文需要能够得到满足.
+
 template<class Arc>
 void AddSubsequentialLoop(typename Arc::Label subseq_symbol,
                           MutableFst<Arc> *fst) {
@@ -429,8 +432,9 @@ void AddSubsequentialLoop(typename Arc::Label subseq_symbol,
   StateId superfinal = fst->AddState();
   // Arc(ilabel, olabel, weight, state)
   Arc arc(subseq_symbol, 0, Weight::One(), superfinal);
-  // loop at superfinal.
-  fst->AddArc(superfinal, arc);  
+  // self-loop at superfinal.
+  fst->AddArc(superfinal, arc);
+  // 设置超级终止状态为终止状态
   fst->SetFinal(superfinal, Weight::One());
 
   // foreach final state.
@@ -777,6 +781,7 @@ fst::VectorFst<fst::StdArc> *GetHmmAsFst(
     // 获得每个hmm_state的对应的 pdf-class 然后获得 每个hmm-state的pdf-id
     int32 forward_pdf_class = entry[hmm_state].forward_pdf_class, forward_pdf;
     int32 self_loop_pdf_class = entry[hmm_state].self_loop_pdf_class, self_loop_pdf;
+    
     if (forward_pdf_class == kNoPdf) {  // nonemitting state.
       forward_pdf = kNoPdf;
       self_loop_pdf = kNoPdf;
@@ -798,8 +803,10 @@ fst::VectorFst<fst::StdArc> *GetHmmAsFst(
       bool is_self_loop = (dest_state == hmm_state);
       
       if (is_self_loop)
-        continue; // We will add self-loops in at a later stage of processing,
-      // not in this function.
+        continue; // We will add self-loops in at a later stage of processing, not in this function.
+      // forward_pdf_class == kNoPdf 说明当前是一个nonemitting state， 是topo entry结构中一个三音素中的终止状态.
+      // 正常状态是 0, 1, 2, 一般认为就三个状态,并且2 就是终止状态，但是实际上3才是实际用来描述的终止状态
+      // 是为了实现音素间转移用的，在解码中会用得到.
       if (forward_pdf_class == kNoPdf) {
         // no pdf, hence non-estimated probability.
         // [would not happen with normal topology] .  There is no transition-state
@@ -933,6 +940,15 @@ VectorFst<Arc>* MakeLoopFst(const vector<const ExpandedFst<Arc> *> &fsts) {
   }
   return ans;
 }
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1454,8 +1470,6 @@ void AmDiagGmm::SplitByCount(const Vector<BaseFloat> &state_occs,
 // min_count 20
 // out:
 // targets <pdf-id<guass-cnt>>
-
-
 void GetSplitTargets(const Vector<BaseFloat> &state_occs,
                      int32 target_components,
                      BaseFloat power,
