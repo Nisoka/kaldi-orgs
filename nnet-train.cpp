@@ -386,6 +386,9 @@ void PREPARE_FEATURES(){
 
 
 // ###### PREPARE FEATURE PIPELINE ######
+// 构建两个基本nnet 并且逐个组合起来
+// 1 nnet proto原型  <Splice> 升维
+// 2 nnet cmvn归一化 <Shift><Scale> 归一化变换
 void PREPARE_FEATURES(){
   
 
@@ -408,7 +411,7 @@ void PREPARE_FEATURES(){
 
 
 
-  //   =======================  特征转换 -- 实际上就是 简单nnet原型 后面构建nnet的过程就是在其基础上增加component======
+  //   =======================  特征转换 -- 实际上就是 一个nnet  后面构建nnet的过程就是在其基础上增加component======
   //   现在开始构建特征转换, 之后会进行神经网络训练, 然后会使用GPU进行计算. 在frame帧进行shuffling之前.
   //   GPU 既进行特征转换 还会用来进行NN训练 所以必须使用单线程.这也会减少CPU-GPU 上下行时间.
 
@@ -419,15 +422,16 @@ void PREPARE_FEATURES(){
   //     特征转换原型
   //     feature_transform_proto=$dir/splice${splice}.proto
 
-  //     向 特征转换原型中 echo  各种信息标签. 主要就是 输入特征dim -> 输出特征dim 信息. BuildVector信息.
+  //     生成一个简单基本的特征转换模型是个基础原型proto -- 只执行了 Splice转换 只有一个Splice Component
   //     echo "<Splice> <InputDim> $feat_dim <OutputDim> $(((2*splice+1)*feat_dim)) <BuildVector> -$splice:$splice </BuildVector>"
   //           > $feature_transform_proto
 
 
-
-  //   nnet-initialize 利用特征转换模型proto, 生成基本的nnet网络 XXXXXXXXXXXXXXXXXXXXXX
+  //   nnet-initialize 利用特征转换模型proto, 生成基本的nnet网络
+  
+  //   feature_transform是构建目标 只具有最简单的Splice Component.(shell中很多都是先设定目标去实现或者使用,所以有时比较变扭)
   //   feature_transform=$dir/tr_$(basename $feature_transform_proto .proto).nnet     (目标文件名字)
-  //   nnet利用 特征转换原型进行初始化 得到正常 特征转换模型
+  //   利用 特征转换原型进行初始化 得到一个正常基础的nnet
   //   nnet-initialize --binary=false $feature_transform_proto $feature_transform
 
   // 根据nnet原型 初始化nnet网络参数.
@@ -485,12 +489,146 @@ void PREPARE_FEATURES(){
     Check();
   }
 
+  // <Splice> <InputDim> $feat_dim <OutputDim> $(((2*splice+1)*feat_dim)) <BuildVector> -$splice:$splice </BuildVector>
+  // 每个component 必须包含的几个Token -- <InputDim> <OutputDim>
+  Component* Component::Init(const std::string &conf_line) {
+
+    std::istringstream is(conf_line);
+    std::string component_type_string;
+    int32 input_dim, output_dim;
+
+    // initialize component w/o internal data
+    ReadToken(is, false, &component_type_string);
+    // 将<Splice> 映射为一个componentType
+    ComponentType component_type = MarkerToType(component_type_string);
+    // 读取基本Token
+    ExpectToken(is, false, "<InputDim>");
+    ReadBasicType(is, false, &input_dim);
+    ExpectToken(is, false, "<OutputDim>");
+    ReadBasicType(is, false, &output_dim);
+    // 根据基本Token构建component
+    Component *ans = NewComponentOfType(component_type, input_dim, output_dim);
+
+    // initialize internal data with the remaining part of config line
+    // 用剩余 特殊Token初始化Component.
+    ans->InitData(is);
+
+    return ans;
+  }
+
+  // 所有可能的 nnet 的每一层.
+  Component* Component::NewComponentOfType(ComponentType comp_type,
+                                           int32 input_dim, int32 output_dim) {
+    Component *ans = NULL;
+    switch (comp_type) {
+      case Component::kAffineTransform :
+        ans = new AffineTransform(input_dim, output_dim);
+        break;
+      case Component::kLinearTransform :
+        ans = new LinearTransform(input_dim, output_dim);
+        break;
+      case Component::kConvolutionalComponent :
+        ans = new ConvolutionalComponent(input_dim, output_dim);
+        break;
+      case Component::kConvolutional2DComponent :
+        ans = new Convolutional2DComponent(input_dim, output_dim);
+        break;
+      case Component::kLstmProjected :
+        ans = new LstmProjected(input_dim, output_dim);
+        break;
+      case Component::kBlstmProjected :
+        ans = new BlstmProjected(input_dim, output_dim);
+        break;
+      case Component::kRecurrentComponent :
+        ans = new RecurrentComponent(input_dim, output_dim);
+        break;
+      case Component::kSoftmax :
+        ans = new Softmax(input_dim, output_dim);
+        break;
+      case Component::kHiddenSoftmax :
+        ans = new HiddenSoftmax(input_dim, output_dim);
+        break;
+      case Component::kBlockSoftmax :
+        ans = new BlockSoftmax(input_dim, output_dim);
+        break;
+      case Component::kSigmoid :
+        ans = new Sigmoid(input_dim, output_dim);
+        break;
+      case Component::kTanh :
+        ans = new Tanh(input_dim, output_dim);
+        break;
+      case Component::kParametricRelu :
+        ans = new ParametricRelu(input_dim, output_dim);
+        break;
+      case Component::kDropout :
+        ans = new Dropout(input_dim, output_dim);
+        break;
+      case Component::kLengthNormComponent :
+        ans = new LengthNormComponent(input_dim, output_dim);
+        break;
+      case Component::kRbm :
+        ans = new Rbm(input_dim, output_dim);
+        break;
+      case Component::kSplice :
+        ans = new Splice(input_dim, output_dim);
+        break;
+      case Component::kCopy :
+        ans = new CopyComponent(input_dim, output_dim);
+        break;
+      case Component::kAddShift :
+        ans = new AddShift(input_dim, output_dim);
+        break;
+      case Component::kRescale :
+        ans = new Rescale(input_dim, output_dim);
+        break;
+      case Component::kKlHmm :
+        ans = new KlHmm(input_dim, output_dim);
+        break;
+      case Component::kSentenceAveragingComponent :
+        ans = new SentenceAveragingComponent(input_dim, output_dim);
+        break;
+      case Component::kSimpleSentenceAveragingComponent :
+        ans = new SimpleSentenceAveragingComponent(input_dim, output_dim);
+        break;
+      case Component::kAveragePoolingComponent :
+        ans = new AveragePoolingComponent(input_dim, output_dim);
+        break;
+      case Component::kAveragePooling2DComponent :
+        ans = new AveragePooling2DComponent(input_dim, output_dim);
+        break;
+      case Component::kMaxPoolingComponent :
+        ans = new MaxPoolingComponent(input_dim, output_dim);
+        break;
+      case Component::kMaxPooling2DComponent :
+        ans = new MaxPooling2DComponent(input_dim, output_dim);
+        break;
+      case Component::kFramePoolingComponent :
+        ans = new FramePoolingComponent(input_dim, output_dim);
+        break;
+      case Component::kParallelComponent :
+        ans = new ParallelComponent(input_dim, output_dim);
+        break;
+      case Component::kMultiBasisComponent :
+        ans = new MultiBasisComponent(input_dim, output_dim);
+        break;
+      case Component::kUnknown :
+      default :
+        KALDI_ERR << "Missing type: " << TypeToMarker(comp_type);
+    }
+    return ans;
+  }
+
+
 
 
   //  ========================  为nnet 增加一个归一化层 ==============
   //   # Renormalize the MLP input to zero mean and unit variance,
   //   重新归一化 多层神经网络输入为 zero均值 单位协方差矩阵.
 
+  //   此时:
+  //   feature_transform_old 是当前的nnet模型 通过基本proto原型得到的nnet基础模型--Splice-Component.
+  //   feature_transform为目标nnet模型(应用特征spker到普均值归一化)
+  
   //   feature_transform_old=$feature_transform
   //   feature_transform=${feature_transform%.nnet}_cmvn-g.nnet
 
@@ -501,14 +639,309 @@ void PREPARE_FEATURES(){
   //   echo "# compute normalization stats from 10k sentences"
   //   对10k数据子集的数据 进行 统计归一化
 
+  //   nnet-forward 跑一边nnet，可以带一些参数 实现不同的nnet执行流程
+  //   compute-cmvn-stats 统计cmvn 所需统计量
   //   nnet-forward --print-args=true --use-gpu=yes $feature_transform_old "$feats_tr_10k" ark:- | \
   //     compute-cmvn-stats ark:- $dir/cmvn-g.stats
 
   //   echo "# + normalization of NN-input at '$feature_transform'"
-  //   在 刚刚的nnet网络 上增加输入层的归一化操作.
+  //   在 刚刚的nnet网络 上增加一个nnet结构     倒普均值归一化 转换操作-nnet.
   //   nnet-concat --binary=false $feature_transform_old \
   //     "cmvn-to-nnet --std-dev=$feats_std $dir/cmvn-g.stats -|" $feature_transform
 
+
+  // 执行前向传播 按照nnet结构中的层对应的Component进行执行.
+  // in:
+  // final.nnet nnet模型
+  // feature_r  输入特征
+  // out:
+  // feature_w  特征写入
+  int nnet_forward(int argc, char *argv[]) {
+    // 执行NNET的前向传播
+    const char *usage =
+        "Perform forward pass through Neural Network.\n"
+        "Usage: nnet-forward [options] <nnet1-in> <feature-rspecifier> <feature-wspecifier>\n"
+        "e.g.: nnet-forward final.nnet ark:input.ark ark:output.ark\n";
+
+
+
+    std::string
+        model_filename = po.GetArg(1),
+        feature_rspecifier = po.GetArg(2),
+        feature_wspecifier = po.GetArg(3);
+
+    // Select the GPU ---- CUDA编程
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().SelectGpuId(use_gpu);
+#endif
+
+    Nnet nnet_transf;
+    if (feature_transform != "") {
+      nnet_transf.Read(feature_transform);
+    }
+
+    Nnet nnet;
+    nnet.Read(model_filename);
+
+    // optionally remove softmax, 可选删除最后的softmax层
+    Component::ComponentType last_comp_type = nnet.GetLastComponent().GetType();
+    if (no_softmax) {
+      if (last_comp_type == Component::kSoftmax ||
+          last_comp_type == Component::kBlockSoftmax) {
+        KALDI_LOG << "Removing " << Component::TypeToMarker(last_comp_type)
+                  << " from the nnet " << model_filename;
+        nnet.RemoveLastComponent();
+      } else {
+        KALDI_WARN << "Last component 'NOT-REMOVED' by --no-softmax=true, "
+                   << "the component was " << Component::TypeToMarker(last_comp_type);
+      }
+    }
+
+    // avoid some bad option combinations,
+    if (apply_log && no_softmax) {
+      KALDI_ERR << "Cannot use both --apply-log=true --no-softmax=true, "
+                << "use only one of the two!";
+    }
+
+    // we will subtract log-priors later,
+    PdfPrior pdf_prior(prior_opts);
+
+    // disable dropout,
+    nnet_transf.SetDropoutRate(0.0);
+    nnet.SetDropoutRate(0.0);
+
+    kaldi::int64 tot_t = 0;
+
+
+    // 因为对于nnet来说每一层的输出 都是下一层的特征, 所以应用nnet_forward时候就相当于 特征变换
+    // 所以可以称nnet模型为 特征变换feature_transform 并且每层输出都能叫做特征.
+    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    BaseFloatMatrixWriter feature_writer(feature_wspecifier);
+
+    CuMatrix<BaseFloat> feats, feats_transf, nnet_out;
+    Matrix<BaseFloat> nnet_out_host;
+
+    Timer time;
+    double time_now = 0;
+    int32 num_done = 0;
+
+    // foreach utt feature
+    for (; !feature_reader.Done(); feature_reader.Next()) {
+      // read
+      Matrix<BaseFloat> mat = feature_reader.Value();
+      std::string utt = feature_reader.Key();
+      
+      // push it to gpu,
+      feats = mat;
+
+      // fwd-pass, feature transform,
+      // 此时nnet_transf 中没有Component ,
+      // Feedforward前向传播 不做任何变换  feats_transf == feats
+      nnet_transf.Feedforward(feats, &feats_transf);
+      if (!KALDI_ISFINITE(feats_transf.Sum())) {  // check there's no nan/inf,
+        KALDI_ERR << "NaN or inf found in transformed-features for " << utt;
+      }
+
+      // fwd-pass, nnet,
+      // nnet 中存在Splice转换层
+      nnet.Feedforward(feats_transf, &nnet_out);
+      if (!KALDI_ISFINITE(nnet_out.Sum())) {  // check there's no nan/inf,
+        KALDI_ERR << "NaN or inf found in nn-output for " << utt;
+      }
+
+      // convert posteriors to log-posteriors,
+      // 将后验概率 转化为 log后验概率
+      if (apply_log) {
+        if (!(nnet_out.Min() >= 0.0 && nnet_out.Max() <= 1.0)) {
+          KALDI_WARN << "Applying 'log()' to data which don't seem to be "
+                     << "probabilities," << utt;
+        }
+        nnet_out.Add(1e-20);  // avoid log(0),
+        nnet_out.ApplyLog();
+      }
+
+      // subtract log-priors from log-posteriors or pre-softmax,
+      // 从log后验概率中减去先验概率
+      if (prior_opts.class_frame_counts != "") {
+        pdf_prior.SubtractOnLogpost(&nnet_out);
+      }
+
+      // download from GPU,
+      // 从GPU中取出计算结果数据 ---> nnet_out_host
+      nnet_out_host = Matrix<BaseFloat>(nnet_out);
+
+      // write,
+      if (!KALDI_ISFINITE(nnet_out_host.Sum())) {  // check there's no nan/inf,
+        KALDI_ERR << "NaN or inf found in final output nn-output for " << utt;
+      }
+      feature_writer.Write(feature_reader.Key(), nnet_out_host);
+
+      num_done++;
+      tot_t += mat.NumRows();
+    }
+
+    // 关闭GPU
+#if HAVE_CUDA == 1
+    if (GetVerboseLevel() >= 1) {
+      CuDevice::Instantiate().PrintProfile();
+    }
+#endif
+  }
+  
+
+  // 链接多个nnet  ---> nnet_out
+  int nnet_concat(int argc, char *argv[]) {
+    const char *usage =
+        "Concatenate Neural Networks (and possibly change binary/text format)\n"
+        "Usage: nnet-concat [options] <nnet-in1> <...> <nnet-inN> <nnet-out>\n"
+        "e.g.:\n"
+        " nnet-concat --binary=false nnet.1 nnet.2 nnet.1.2\n";
+
+    ParseOptions po(usage);
+
+    bool binary_write = true;
+    po.Register("binary", &binary_write, "Write output in binary mode");
+    binary_write = false;
+
+
+    std::string model_in_filename = po.GetArg(1);
+    std::string model_in_filename_next;
+    std::string model_out_filename = po.GetArg(po.NumArgs());
+
+    // read the first nnet,
+    Nnet nnet;
+    {
+      bool binary_read;
+      Input ki(model_in_filename, &binary_read);
+      nnet.Read(ki.Stream(), binary_read);
+    }
+
+    // read all the other nnets,
+    for (int32 i = 2; i < po.NumArgs(); i++) {
+      // read the nnet,
+      model_in_filename_next = po.GetArg(i);
+      KALDI_LOG << "Concatenating " << model_in_filename_next;
+      Nnet nnet_next;
+      {
+        bool binary_read;
+        Input ki(model_in_filename_next, &binary_read);
+        nnet_next.Read(ki.Stream(), binary_read);
+      }
+
+      // 直接调用AppendNnet() 将nnet_next 中的所有Component 添加到 nnet中.
+      // append nnet_next to the network nnet,
+      nnet.AppendNnet(nnet_next);
+    }
+
+    // finally write the nnet to disk,
+    {
+      Output ko(model_out_filename, binary_write);
+      nnet.Write(ko.Stream(), binary_write);
+    }
+
+  }
+
+  // 构建一个 归一化的nnet 里面包含了两个Component  1 shift设置均值为0， 2 拉伸变换scale --归一化
+  int cmv_to_nnet(int argc, char *argv[]) {
+  try {
+    using namespace kaldi;
+    using namespace kaldi::nnet1;
+    typedef kaldi::int32 int32;
+
+    const char *usage =
+      "Convert cmvn-stats into <AddShift> and <Rescale> components.\n"
+      "Usage:  cmvn-to-nnet [options] <transf-in> <nnet-out>\n"
+      "e.g.:\n"
+      " cmvn-to-nnet --binary=false transf.mat nnet.mdl\n";
+
+
+    bool binary_write = false;
+    float std_dev = 1.0;
+    float var_floor = 1e-10;
+    float learn_rate_coef = 0.0;
+
+    ParseOptions po(usage);
+    po.Register("binary", &binary_write, "Write output in binary mode");
+    po.Register("std-dev", &std_dev, "Standard deviation of the output.");
+    po.Register("var-floor", &var_floor,
+        "Floor the variance, so the factors in <Rescale> are bounded.");
+    po.Register("learn-rate-coef", &learn_rate_coef,
+        "Initialize learning-rate coefficient to a value.");
+
+    po.Read(argc, argv);
+
+    if (po.NumArgs() != 2) {
+      po.PrintUsage();
+      exit(1);
+    }
+
+    std::string cmvn_stats_rxfilename = po.GetArg(1),
+        model_out_filename = po.GetArg(2);
+
+    // read the matrix,
+    Matrix<double> cmvn_stats;
+    {
+      bool binary_read;
+      Input ki(cmvn_stats_rxfilename, &binary_read);
+      cmvn_stats.Read(ki.Stream(), binary_read);
+    }
+    KALDI_ASSERT(cmvn_stats.NumRows() == 2);
+    KALDI_ASSERT(cmvn_stats.NumCols() > 1);
+
+    int32 num_dims = cmvn_stats.NumCols() - 1;
+    double frame_count = cmvn_stats(0, cmvn_stats.NumCols() - 1);
+
+    // buffers for shift and scale
+    Vector<BaseFloat> shift(num_dims);
+    Vector<BaseFloat> scale(num_dims);
+
+    // compute the shift and scale per each dimension
+    for (int32 d = 0; d < num_dims; d++) {
+      BaseFloat mean = cmvn_stats(0, d) / frame_count;
+      BaseFloat var = cmvn_stats(1, d) / frame_count - mean * mean;
+      if (var <= var_floor) {
+        KALDI_WARN << "Very small variance " << var
+                   << " flooring to " << var_floor;
+        var = var_floor;
+      }
+      shift(d) = -mean;
+      scale(d) = std_dev / sqrt(var);
+    }
+
+    // create empty nnet,
+    Nnet nnet;
+
+    // append shift component to nnet,
+    {
+      AddShift shift_component(shift.Dim(), shift.Dim());
+      shift_component.SetParams(shift);
+      shift_component.SetLearnRateCoef(learn_rate_coef);
+      nnet.AppendComponent(shift_component);
+    }
+
+    // append scale component to nnet,
+    {
+      Rescale scale_component(scale.Dim(), scale.Dim());
+      scale_component.SetParams(scale);
+      scale_component.SetLearnRateCoef(learn_rate_coef);
+      nnet.AppendComponent(scale_component);
+    }
+
+    // write the nnet,
+    {
+      Output ko(model_out_filename, binary_write);
+      nnet.Write(ko.Stream(), binary_write);
+      KALDI_LOG << "Written cmvn in 'nnet1' model to: " << model_out_filename;
+    }
+    return 0;
+  } catch(const std::exception &e) {
+    std::cerr << e.what();
+    return -1;
+  }
+}
+
+
+  
 
 }
 
