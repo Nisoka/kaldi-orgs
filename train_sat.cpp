@@ -46,7 +46,7 @@ train_tree=true
 tree_stats_opts=
 cluster_phones_opts=
 compile_questions_opts=
-# End configuration section. */
+# End configuration section. 
 
 
 
@@ -64,12 +64,15 @@ numleaves=$1  // 2500
 totgauss=$2   // 15000
 data=$3       // data/mfcc/train
 lang=$4       // data/lang
-alidir=$5     // exp/tri2b_ali
-dir=$6        // exp/tri3b
+alidir=$5     // exp/tri2b_ali   =====================  last ali result
+dir=$6        // exp/tri3b       =====================  this output
 
 
 numgauss=$numleaves
 incgauss=$[($totgauss-$numgauss)/$max_iter_inc]  # per-iter #gauss increment
+
+*/
+
 
 /*
 oov=`cat $lang/oov.int`
@@ -96,13 +99,15 @@ void MainInHere(){
 // sifeats  --- 经过lda_mllt(final.mat) 变换后的特征-  不考虑说话人的特征
 
 // sifeats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $alidir/final.mat ark:- ark:- |"
-//         cp $alidir/final.mat $dir
-//         cp $alidir/full.mat $dir 2>/dev/null
+
+// cp $alidir/final.mat $dir
+// cp $alidir/full.mat $dir 2>/dev/null
 
 
 
 
 
+// ======================================== gmm-est-fmllr =========================
 // ## Get initial fMLLR transforms (possibly from alignment dir)
 //   echo "$0: obtaining initial fMLLR transforms since not present in $alidir"
 // // 根据 trans-id 对齐序列 得到 probablly<pdf-id, prob> 对齐序列
@@ -111,6 +116,7 @@ void MainInHere(){
 
 //   gmm-est-fmllr --fmllr-update-type=$fmllr_update_type --spk2utt=ark:$sdata/JOB/spk2utt $alidir/final.mdl "$sifeats" \
 //                             ark:- ark:$dir/trans.JOB || exit 1;
+
 
 
 //                                 lda_mllt.mdl   sifeats           <posteriors,prob>对齐   多个转移矩阵
