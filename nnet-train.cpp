@@ -973,117 +973,132 @@ void PREPARE_FEATURES(){
 //         > $nnet_proto
 
 //   根据 inputdim, outputdim, hidden layers, hid_dims 构建整体的nnet网络结构 === >nnet.proto.
-void make_nnet_proto(){
+//   实际上是一个写 proto文件的过程.
+void make_nnet_proto_py(){
 
-// # Generated Nnet prototype, to be initialized by 'nnet-initialize'.
+  // # Generated Nnet prototype, to be initialized by 'nnet-initialize'.
 
-// from optparse import OptionParser
-// usage="%prog [options] <feat-dim> <num-leaves> <num-hid-layers> <num-hid-neurons> >nnet-proto-file"
-// parser = OptionParser(usage)
+  // ================ 使用方法
+  // from optparse import OptionParser
+  // usage="%prog [options] <feat-dim> <num-leaves> <num-hid-layers> <num-hid-neurons> >nnet-proto-file"
+  // parser = OptionParser(usage)
 
-// # Softmax related,
+  
+  // Softmax设置相关
+  // # Softmax related, 
 
-// # Topology related,
-// parser.add_option('--bottleneck-dim', dest='bottleneck_dim',
-//                    help='Make bottleneck network with desired bn-dim (0 = no bottleneck) [default: %default]',
-//                    default=0, type='int');
+  // 拓扑结果相关
+  // # Topology related,
+  // parser.add_option('--bottleneck-dim', dest='bottleneck_dim',
+  //                    help='Make bottleneck network with desired bn-dim (0 = no bottleneck) [default: %default]',
+  //                    default=0, type='int');
 
-// # A HACK TO PASS MULTI-WORD OPTIONS, WORDS ARE CONNECTED BY UNDERSCORES '_',
-// o.activation_opts = o.activation_opts.replace("_"," ")
-// o.affine_opts = o.affine_opts.replace("_"," ")
-// o.dropout_opts = o.dropout_opts.replace("_"," ")
-
-// 获得 输入dim  输出dim  隐藏层数目  隐藏层节点数
-// (feat_dim, num_leaves, num_hid_layers, num_hid_neurons) = map(int,args);
-
-
-
-// 如果使用softmax 必须要求softmax的输出dim == num_leaves?
-// if o.block_softmax_dims:
-//   assert(  sum(map(int, re.split("[,:]", o.block_softmax_dims))) == num_leaves ) 
-
-// # Optionaly scale
-// def Glorot(dim1, dim2):
-//   if o.with_glorot:
-//     # 35.0 = magic number, gives ~1.0 in inner layers for hid-dim 1024dim,
-//     return 35.0 * math.sqrt(2.0/(dim1+dim2));
-//   else:
-//     return 1.0
+  // o 是程序的配置选项, 主要用来控制nnet中各种Component的参数.
+  // ？？？？？？？？？？？？
+  // # A HACK TO PASS MULTI-WORD OPTIONS, WORDS ARE CONNECTED BY UNDERSCORES '_',
+  // o.activation_opts = o.activation_opts.replace("_"," ")
+  // o.affine_opts = o.affine_opts.replace("_"," ")
+  // o.dropout_opts = o.dropout_opts.replace("_"," ")
 
 
-// # NO HIDDEN LAYER, ADDING BOTTLENECK!
-// # No hidden layer while adding bottleneck means:
-// # - add bottleneck layer + hidden layer + output layer
-
-
-// # THE USUAL DNN PROTOTYPE STARTS HERE!
-// # Assuming we have >0 hidden layers,
-// assert(num_hid_layers > 0)
+  
+  // 获得 输入dim  输出dim  隐藏层数目  隐藏层节点数
+  // (feat_dim, num_leaves, num_hid_layers, num_hid_neurons) = map(int,args);
 
 
 
-
-// 构建proto过程
-// # Begin the prototype,
-// # First AffineTranform
-// print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
-//       (feat_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
-//        (o.param_stddev_factor * Glorot(feat_dim, num_hid_neurons) * \
-//         (math.sqrt(1.0/12.0) if o.smaller_input_weights else 1.0)), o.max_norm, o.affine_opts)
-
-// print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
-// if o.with_dropout:
-//   print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+  // 如果使用softmax 必须要求softmax的输出dim == num_leaves?
+  // if o.block_softmax_dims:
+  //   assert(  sum(map(int, re.split("[,:]", o.block_softmax_dims))) == num_leaves ) 
 
 
-// # Internal AffineTransforms,
-// for i in range(num_hid_layers-1):
-//   print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
-//         (num_hid_neurons, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
-//          (o.param_stddev_factor * Glorot(num_hid_neurons, num_hid_neurons)), o.max_norm, o.affine_opts)
-//   print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
-//   if o.with_dropout:
-//     print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+  
+  // # Optionaly scale
+  // def Glorot(dim1, dim2):
+  //   if o.with_glorot:
+  //     # 35.0 = magic number, gives ~1.0 in inner layers for hid-dim 1024dim,
+  //     return 35.0 * math.sqrt(2.0/(dim1+dim2));
+  //   else:
+  //     return 1.0
+
+
+  // # NO HIDDEN LAYER, ADDING BOTTLENECK!
+  // # No hidden layer while adding bottleneck means:
+  // # - add bottleneck layer + hidden layer + output layer
+
+
+  // # THE USUAL DNN PROTOTYPE STARTS HERE!
+  // # Assuming we have >0 hidden layers,
+  // assert(num_hid_layers > 0)
+
+
+
+
+  // 构建proto过程
+  // # Begin the prototype,
+  // # First AffineTranform
+  // print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
+  //       (feat_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+  //        (o.param_stddev_factor * Glorot(feat_dim, num_hid_neurons) * \
+  //         (math.sqrt(1.0/12.0) if o.smaller_input_weights else 1.0)), o.max_norm, o.affine_opts)
+
+  // print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
+  // if o.with_dropout:
+  //   print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+
+
+  // # Internal AffineTransforms,
+  // for i in range(num_hid_layers-1):
+  //   print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
+  //         (num_hid_neurons, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+  //          (o.param_stddev_factor * Glorot(num_hid_neurons, num_hid_neurons)), o.max_norm, o.affine_opts)
+  //   print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
+  //   if o.with_dropout:
+  //     print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
         
 
-// # Optionaly add bottleneck,
-// if o.bottleneck_dim != 0:
-//   assert(o.bottleneck_dim > 0)
-//   if o.bottleneck_trick:
-//     # 25% smaller stddev -> small bottleneck range, 10x smaller learning rate
-//     print "<LinearTransform> <InputDim> %d <OutputDim> %d <ParamStddev> %f <LearnRateCoef> %f" % \
-//      (num_hid_neurons, o.bottleneck_dim, \
-//       (o.param_stddev_factor * Glorot(num_hid_neurons, o.bottleneck_dim) * 0.75 ), 0.1)
-//     # 25% smaller stddev -> smaller gradient in prev. layer, 10x smaller learning rate for weigts & biases
-//     print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <LearnRateCoef> %f <BiasLearnRateCoef> %f <MaxNorm> %f %s" % \
-//      (o.bottleneck_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
-//       (o.param_stddev_factor * Glorot(o.bottleneck_dim, num_hid_neurons) * 0.75 ), 0.1, 0.1, o.max_norm, o.affine_opts)
-//   else:
-//     # Same learninig-rate and stddev-formula everywhere,
-//     print "<LinearTransform> <InputDim> %d <OutputDim> %d <ParamStddev> %f" % \
-//      (num_hid_neurons, o.bottleneck_dim, \
-//       (o.param_stddev_factor * Glorot(num_hid_neurons, o.bottleneck_dim)))
-//     print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
-//      (o.bottleneck_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
-//       (o.param_stddev_factor * Glorot(o.bottleneck_dim, num_hid_neurons)), o.max_norm, o.affine_opts)
-//   print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
-//   if o.with_dropout:
-//     print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+  // 可选 增加瓶颈层, 这里没有添加瓶颈层.
+  // # Optionaly add bottleneck,
+  // if o.bottleneck_dim != 0:
+  //   assert(o.bottleneck_dim > 0)
+  //   if o.bottleneck_trick:
+  //     # 25% smaller stddev -> small bottleneck range, 10x smaller learning rate
+  //     print "<LinearTransform> <InputDim> %d <OutputDim> %d <ParamStddev> %f <LearnRateCoef> %f" % \
+  //      (num_hid_neurons, o.bottleneck_dim, \
+  //       (o.param_stddev_factor * Glorot(num_hid_neurons, o.bottleneck_dim) * 0.75 ), 0.1)
+  //     # 25% smaller stddev -> smaller gradient in prev. layer, 10x smaller learning rate for weigts & biases
+  //     print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <LearnRateCoef> %f <BiasLearnRateCoef> %f <MaxNorm> %f %s" % \
+  //      (o.bottleneck_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+  //       (o.param_stddev_factor * Glorot(o.bottleneck_dim, num_hid_neurons) * 0.75 ), 0.1, 0.1, o.max_norm, o.affine_opts)
+  //   else:
+  //     # Same learninig-rate and stddev-formula everywhere,
+  //     print "<LinearTransform> <InputDim> %d <OutputDim> %d <ParamStddev> %f" % \
+  //      (num_hid_neurons, o.bottleneck_dim, \
+  //       (o.param_stddev_factor * Glorot(num_hid_neurons, o.bottleneck_dim)))
+  //     print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
+  //      (o.bottleneck_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+  //       (o.param_stddev_factor * Glorot(o.bottleneck_dim, num_hid_neurons)), o.max_norm, o.affine_opts)
+  //   print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
+  //   if o.with_dropout:
+  //     print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
 
-//   最终在softmax之前, 网络节点总数应该是与最终节点数相同, 然后经过softmax？ 
-//   # Last AffineTransform (10x smaller learning rate on bias)
-//   print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <LearnRateCoef> %f <BiasLearnRateCoef> %f" % \
-//       (num_hid_neurons, num_leaves, 0.0, 0.0, \
-//        (o.param_stddev_factor * Glorot(num_hid_neurons, num_leaves)), 1.0, 0.1)
+  
+  //   最终在softmax之前, 网络节点总数应该是与最终节点数相同, 然后经过softmax？ 
+  //   # Last AffineTransform (10x smaller learning rate on bias)
+  //   print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <LearnRateCoef> %f <BiasLearnRateCoef> %f" % \
+  //       (num_hid_neurons, num_leaves, 0.0, 0.0, \
+  //        (o.param_stddev_factor * Glorot(num_hid_neurons, num_leaves)), 1.0, 0.1)
 
-//   # Optionaly append softmax
-//   if o.with_softmax:
-//     if o.block_softmax_dims == "":
-//       print "<Softmax> <InputDim> %d <OutputDim> %d" % (num_leaves, num_leaves)
-//     else:
-//       print "<BlockSoftmax> <InputDim> %d <OutputDim> %d <BlockDims> %s" % (num_leaves, num_leaves, o.block_softmax_dims)
+  //   可选增加 softmax层
+  //   # Optionaly append softmax
+  //   if o.with_softmax:
+  //     if o.block_softmax_dims == "":
+  //       print "<Softmax> <InputDim> %d <OutputDim> %d" % (num_leaves, num_leaves)
+  //     else:
+  //       print "<BlockSoftmax> <InputDim> %d <OutputDim> %d <BlockDims> %s" % (num_leaves, num_leaves, o.block_softmax_dims)
 
 }
+
 
 //   nnet_initialize 根据 nnet.proto 生成 ====> nnet.init
 //   # initialize,
@@ -1091,7 +1106,8 @@ void make_nnet_proto(){
 //   echo "# initializing the NN '$nnet_proto' -> '$nnet_init'"
 //   nnet-initialize --seed=$seed $nnet_proto $nnet_init
 
-//   # optionally prepend dbn to the initialization,  可选使用dbn(受限玻尔兹曼机)应用到 得到的nnet.
+//   可选使用dbn(受限玻尔兹曼机)应用到 得到的nnet.
+//   # optionally prepend dbn to the initialization,  
 //   if [ ! -z "$dbn" ]; then
 //     nnet_init_old=$nnet_init; nnet_init=$dir/nnet_dbn_dnn.init
 //     nnet-concat "$dbn" $nnet_init_old $nnet_init
@@ -1101,7 +1117,7 @@ void make_nnet_proto(){
 
 
 // ###### TRAIN ######
-// 使用nnet_init模型， feat_train, feat_cv  label_train, label_cv 进行nnet的训练 最终将结果输出到$dir
+// 核心代码 train_scheduler.sh 使用nnet_init模型， feat_train, feat_cv  label_train, label_cv 进行nnet的训练 最终将结果输出到$dir
 
 // echo
 // echo "# RUNNING THE NN-TRAINING SCHEDULER"
@@ -1188,21 +1204,22 @@ void train_scheduler(){
   // mlp_base=${mlp_init##*/};
   // mlp_base=${mlp_base%.*}  去掉nnet网络结构文件的路径以及后缀 得到名字.
 
+  
   // 可以进行从最佳时期 恢复训练, 通过保存学习率 以及学习结果nnet 结构文件.
   // # optionally resume training from the best epoch, using saved learning-rate,
   // [ -e $dir/.mlp_best ] && mlp_best=$(cat $dir/.mlp_best)
   // [ -e $dir/.learn_rate ] && learn_rate=$(cat $dir/.learn_rate)
 
+
   // ------------------------------------------------------------------------------------
   // train_tool="nnet-train-frmshuff"
   // train_tool_opts="--minibatch-size=256 --randomizer-size=32768 --randomizer-seed=777"
   // ------------------------------------------------------------------------------------
-  
-  // 原始网络的交叉验证集合的设置？
+  // ==================================  原始网络的交叉验证集合的设置？
   // # cross-validation on original network,
   // log=$dir/log/iter00.initial.log; hostname>$log
 
-  // nnet-train-frmshuff  按帧进行nnet训练
+  // =============================  nnet-train-frmshuff  按帧进行nnet训练
   // 这里 实际上并没有训练，只是进行了一次前向传播, 然后通过xent交叉熵测试了下当前的nnet网络.
   // $train_tool --cross-validate=true --randomize=false --verbose=$verbose $train_tool_opts \
   //   ${feature_transform:+ --feature-transform=$feature_transform} \
@@ -1539,19 +1556,21 @@ void train_scheduler(){
   }
 
 
-  //  ============== 获得刚刚 nnet-train-frmshuff ============= 测试交叉验证集合的交叉熵 误差.
+  //  ============== 获得刚刚 nnet-train-frmshuff 测试交叉验证集合的交叉熵误差 并打印显示.
   // loss=$(cat $dir/log/iter00.initial.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
   // loss_type=$(cat $dir/log/iter00.initial.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $5; }')
   // echo "CROSSVAL PRERUN AVG.LOSS $(printf "%.4f" $loss) $loss_type"
 
-  
-  // # resume lr-halving,
+
+  // 恢复 lr-halving 减半
+  // # resume lr-halving,  
   // halving=0
   // [ -e $dir/.halving ] && halving=$(cat $dir/.halving)
 
   
-  //  ==========================  训练过程 ==========================
+  //  ==========================  迭代训练过程 ==========================
   // # training,
+  
   // for iter in $(seq -w $max_iters); do
   //   echo -n "ITERATION $iter: "
   //   mlp_next=$dir/nnet/${mlp_base}_iter${iter}
@@ -1559,6 +1578,7 @@ void train_scheduler(){
   //   # skip iteration (epoch) if already done,
   //   [ -e $dir/.done_iter$iter ] && echo -n "skipping... " && ls $mlp_next* && continue
 
+  //   ============ 判断当前迭代次数, 修改当前 nnet
   //   # set dropout-rate from the schedule,
   //   if [ -n ${dropout_array[$((${iter#0}-1))]-''} ]; then
   //     dropout_rate=${dropout_array[$((${iter#0}-1))]}
@@ -1566,41 +1586,43 @@ void train_scheduler(){
   //     mlp_best=${mlp_best}.dropout_rate${dropout_rate}
   //   fi
 
+  //   选择划分数据集？ 未进行划分
   //   # select the split,
-  //   feats_tr_portion="$feats_tr" # no split?
+  //   feats_tr_portion="$feats_tr"      # no split?
   //   if [ -n "$split_feats" ]; then
   //     portion=$((1 + iter % split_feats))
   //     feats_tr_portion="${feats_tr/train.scp/train.${portion}.scp}"
   //   fi
 
+
+  //   ====================== TRAINING ===================
   //   # training,
   //   log=$dir/log/iter${iter}.tr.log; hostname>$log
+  
   //   $train_tool --cross-validate=false --randomize=true --verbose=$verbose $train_tool_opts \
   //     --learn-rate=$learn_rate --momentum=$momentum \
   //     --l1-penalty=$l1_penalty --l2-penalty=$l2_penalty \
   //     ${feature_transform:+ --feature-transform=$feature_transform} \
-  //     ${frame_weights:+ "--frame-weights=$frame_weights"} \
-  //     ${utt_weights:+ "--utt-weights=$utt_weights"} \
   //     "$feats_tr_portion" "$labels_tr" $mlp_best $mlp_next \
-  //     2>> $log || exit 1;
 
+  //   获取训练数据交叉熵残差结果  --- 这种误差叫经验误差？ 在验证集上的是结构误差?
   //   tr_loss=$(cat $dir/log/iter${iter}.tr.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
   //   echo -n "TRAIN AVG.LOSS $(printf "%.4f" $tr_loss), (lrate$(printf "%.6g" $learn_rate)), "
 
+  //   交叉验证 ============= 通过交叉验证集合 判断nnet性能.
   //   # cross-validation,
   //   log=$dir/log/iter${iter}.cv.log; hostname>$log
   //   $train_tool --cross-validate=true --randomize=false --verbose=$verbose $train_tool_opts \
   //     ${feature_transform:+ --feature-transform=$feature_transform} \
-  //     ${frame_weights:+ "--frame-weights=$frame_weights"} \
-  //     ${utt_weights:+ "--utt-weights=$utt_weights"} \
   //     "$feats_cv" "$labels_cv" $mlp_next \
-  //     2>>$log || exit 1;
 
   //   loss_new=$(cat $dir/log/iter${iter}.cv.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
   //   echo -n "CROSSVAL AVG.LOSS $(printf "%.4f" $loss_new), "
 
+  //   性能满足 则停止训练迭代
   //   # accept or reject?
   //   loss_prev=$loss
+  //   误差有所下降 accept
   //   if [ 1 == $(awk "BEGIN{print($loss_new < $loss ? 1:0);}") -o $iter -le $keep_lr_iters -o $iter -le $min_iters ]; then
   //     # accepting: the loss was better, or we had fixed learn-rate, or we had fixed epoch-number,
   //     loss=$loss_new
@@ -1617,6 +1639,7 @@ void train_scheduler(){
   //     echo "nnet rejected ($(basename $mlp_reject))"
   //   fi
 
+  
   //   # create .done file, the iteration (epoch) is completed,
   //   touch $dir/.done_iter$iter
 
@@ -1647,6 +1670,7 @@ void train_scheduler(){
   //   fi
   // done
 
+  
   // # select the best network,
   // if [ $mlp_best != $mlp_init ]; then
   //   mlp_final=${mlp_best}_final_
@@ -1658,25 +1682,5 @@ void train_scheduler(){
   //   exit 1
   // fi
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
