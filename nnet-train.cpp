@@ -619,8 +619,6 @@ void PREPARE_FEATURES(){
   }
 
 
-
-
   //  ========================  为nnet 增加一个归一化层 ==============
   //   # Renormalize the MLP input to zero mean and unit variance,
   //   重新归一化 多层神经网络输入为 zero均值 单位协方差矩阵.
@@ -787,7 +785,6 @@ void PREPARE_FEATURES(){
     }
 #endif
   }
-  
 
   // 链接多个nnet  ---> nnet_out
   int nnet_concat(int argc, char *argv[]) {
@@ -841,18 +838,15 @@ void PREPARE_FEATURES(){
 
   }
 
-  // 构建一个 归一化的nnet 里面包含了两个Component  1 shift设置均值为0， 2 拉伸变换scale --归一化
+  // 构建一个 归一化的nnet 里面包含了两个Component
+  // 1 shift设置均值为0， 2 拉伸变换scale --归一化
   int cmv_to_nnet(int argc, char *argv[]) {
-  try {
-    using namespace kaldi;
-    using namespace kaldi::nnet1;
-    typedef kaldi::int32 int32;
-
     const char *usage =
-      "Convert cmvn-stats into <AddShift> and <Rescale> components.\n"
-      "Usage:  cmvn-to-nnet [options] <transf-in> <nnet-out>\n"
-      "e.g.:\n"
-      " cmvn-to-nnet --binary=false transf.mat nnet.mdl\n";
+        // 将cmvn-stats 转化为Component.
+        "Convert cmvn-stats into <AddShift> and <Rescale> components.\n"
+        "Usage:  cmvn-to-nnet [options] <transf-in> <nnet-out>\n"
+        "e.g.:\n"
+        " cmvn-to-nnet --binary=false transf.mat nnet.mdl\n";
 
 
     bool binary_write = false;
@@ -861,40 +855,31 @@ void PREPARE_FEATURES(){
     float learn_rate_coef = 0.0;
 
     ParseOptions po(usage);
-    po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("std-dev", &std_dev, "Standard deviation of the output.");
-    po.Register("var-floor", &var_floor,
-        "Floor the variance, so the factors in <Rescale> are bounded.");
-    po.Register("learn-rate-coef", &learn_rate_coef,
-        "Initialize learning-rate coefficient to a value.");
 
-    po.Read(argc, argv);
-
-    if (po.NumArgs() != 2) {
-      po.PrintUsage();
-      exit(1);
-    }
-
-    std::string cmvn_stats_rxfilename = po.GetArg(1),
+    std::string
+        cmvn_stats_rxfilename = po.GetArg(1),
         model_out_filename = po.GetArg(2);
 
-    // read the matrix,
+    // read the matrix
     Matrix<double> cmvn_stats;
     {
       bool binary_read;
       Input ki(cmvn_stats_rxfilename, &binary_read);
       cmvn_stats.Read(ki.Stream(), binary_read);
     }
-    KALDI_ASSERT(cmvn_stats.NumRows() == 2);
-    KALDI_ASSERT(cmvn_stats.NumCols() > 1);
-
+    // [2 X N]
+    // [ dim0-mean, dim1-mean, dim2-mean, frames-cnt
+    //   dim0-var,  dim1-var,  dim2-var,  NULL ]
     int32 num_dims = cmvn_stats.NumCols() - 1;
+    // (0, col-1) 保存的是帧总数. 具体要看cmvn_stats里面的数据结构.
     double frame_count = cmvn_stats(0, cmvn_stats.NumCols() - 1);
 
     // buffers for shift and scale
     Vector<BaseFloat> shift(num_dims);
     Vector<BaseFloat> scale(num_dims);
 
+    // 计算每个维度的 平移 和 拉伸
     // compute the shift and scale per each dimension
     for (int32 d = 0; d < num_dims; d++) {
       BaseFloat mean = cmvn_stats(0, d) / frame_count;
@@ -933,15 +918,7 @@ void PREPARE_FEATURES(){
       nnet.Write(ko.Stream(), binary_write);
       KALDI_LOG << "Written cmvn in 'nnet1' model to: " << model_out_filename;
     }
-    return 0;
-  } catch(const std::exception &e) {
-    std::cerr << e.what();
-    return -1;
   }
-}
-
-
-  
 
 }
 
@@ -949,55 +926,14 @@ void PREPARE_FEATURES(){
 
 
 
-
-
-
-
-
-// if [ ! -z $ivector ]; then
-//   echo
-//   echo "# ADDING IVECTOR FEATURES"
-//   # The iVectors are concatenated 'as they are' directly to the input of the neural network,
-//   # To do this, we paste the features, and use <ParallelComponent> where the 1st component
-//   # contains the transform and 2nd network contains <Copy> component.
-
-//   echo "# getting dims,"
-//   dim_raw=$(feat-to-dim "$feats_tr_10k" -)
-//   dim_raw_and_ivec=$(feat-to-dim "$feats_tr_10k $ivector_append_tool ark:- '$ivector' ark:- |" -)
-//   dim_ivec=$((dim_raw_and_ivec - dim_raw))
-//   echo "# dims, feats-raw $dim_raw, ivectors $dim_ivec,"
-
-//   # Should we do something with 'feature_transform'?
-//   if [ ! -z $ivector_dim ]; then
-//     # No, the 'ivector_dim' comes from dir with 'feature_transform' with iVec forwarding,
-//     echo "# assuming we got '$feature_transform' with ivector forwarding,"
-//     [ $ivector_dim != $dim_ivec ] && \
-//     echo -n "Error, i-vector dimensionality mismatch!" && \
-//     echo " (expected $ivector_dim, got $dim_ivec in $ivector)" && exit 1
-//   else
-//     # Yes, adjust the transform to do ``iVec forwarding'',
-//     feature_transform_old=$feature_transform
-//     feature_transform=${feature_transform%.nnet}_ivec_copy.nnet
-//     echo "# setting up ivector forwarding into '$feature_transform',"
-//     dim_transformed=$(feat-to-dim "$feats_tr_10k nnet-forward $feature_transform_old ark:- ark:- |" -)
-//     nnet-initialize --print-args=false <(echo "<Copy> <InputDim> $dim_ivec <OutputDim> $dim_ivec <BuildVector> 1:$dim_ivec </BuildVector>") $dir/tr_ivec_copy.nnet
-//     nnet-initialize --print-args=false <(echo "<ParallelComponent> <InputDim> $((dim_raw+dim_ivec)) <OutputDim> $((dim_transformed+dim_ivec)) \
-//                                                <NestedNnetFilename> $feature_transform_old $dir/tr_ivec_copy.nnet </NestedNnetFilename>") $feature_transform
-//   fi
-//   echo $dim_ivec >$dir/ivector_dim # mark down the iVec dim!
-//   echo $ivector_append_tool >$dir/ivector_append_tool
-
-//   # pasting the iVecs to the feaures,
-//   echo "# + ivector input '$ivector'"
-//   feats_tr="$feats_tr $ivector_append_tool ark:- '$ivector' ark:- |"
-//   feats_cv="$feats_cv $ivector_append_tool ark:- '$ivector' ark:- |"
-// fi
 
 // ###### Show the final 'feature_transform' in the log,
+// 显示最终的 特征转换 nnet.
 // echo
 // echo "### Showing the final 'feature_transform':"
 // nnet-info $feature_transform
 // echo "###"
+
 
 // ###### MAKE LINK TO THE FINAL feature_transform, so the other scripts will find it ######
 // [ -f $dir/final.feature_transform ] && unlink $dir/final.feature_transform
@@ -1007,97 +943,740 @@ void PREPARE_FEATURES(){
 
 // ###### INITIALIZE THE NNET ######
 // echo
+// 判断是否已经存在了nnet_init/nnet_proto可能的基本nnet模型,
+// 如果存在就合并刚刚得到的nnet 和 nnet_init/nnet_proto
 // echo "# NN-INITIALIZATION"
-// if [ ! -z $nnet_init ]; then
-//   echo "# using pre-initialized network '$nnet_init'"
-// elif [ ! -z $nnet_proto ]; then
-//   echo "# initializing NN from prototype '$nnet_proto'";
-//   nnet_init=$dir/nnet.init; log=$dir/log/nnet_initialize.log
-//   nnet-initialize --seed=$seed $nnet_proto $nnet_init
-// else
+// if [ ! -z $nnet_init ]; then                               NULL
+// elif [ ! -z $nnet_proto ]; then                            NULL
+// else                                                       THIS
 //   echo "# getting input/output dims :"
 //   # input-dim,
 //   get_dim_from=$feature_transform
+//   =============================================== $DBN is NULL
 //   [ ! -z "$dbn" ] && get_dim_from="nnet-concat $feature_transform '$dbn' -|"
+
+//   经过nnet后得到的 feats dim
 //   num_fea=$(feat-to-dim "$feats_tr_10k nnet-forward \"$get_dim_from\" ark:- ark:- |" -)
 
-//   # output-dim,
-//   [ -z $num_tgt ] && \
-//     num_tgt=$(hmm-info --print-args=false $alidir/final.mdl | grep pdfs | awk '{ print $NF }')
+//   # output-dim,  pdf-总数, 实际就是nnet目标维度.
+//   [ -z $num_tgt ] &&                    ===============    YES  pdf总数
+//       num_tgt=$(hmm-info --print-args=false $alidir/final.mdl | grep pdfs | awk '{ print $NF }')
 
-//   # make network prototype,
+//   # make network prototype, ============== 生成一个nnet网络原型 (实际上刚刚的已经是nnet网络原形了).
 //   nnet_proto=$dir/nnet.proto
 //   echo "# genrating network prototype $nnet_proto"
 //   case "$network_type" in
 //     dnn)
-//       utils/nnet/make_nnet_proto.py $proto_opts \
+//       utils/nnet/make_nnet_proto.py   $proto_opts  \
 //         ${bn_dim:+ --bottleneck-dim=$bn_dim} \
-//         $num_fea $num_tgt $hid_layers $hid_dim >$nnet_proto
-//       ;;
-//     cnn1d)
-//       delta_order=$([ -z $delta_opts ] && echo "0" || { echo $delta_opts | tr ' ' '\n' | grep "delta[-_]order" | sed 's:^.*=::'; })
-//       echo "Debug : $delta_opts, delta_order $delta_order"
-//       utils/nnet/make_cnn_proto.py $cnn_proto_opts \
-//         --splice=$splice --delta-order=$delta_order --dir=$dir \
-//         $num_fea >$nnet_proto
-//       cnn_fea=$(cat $nnet_proto | grep -v '^$' | tail -n1 | awk '{ print $5; }')
-//       utils/nnet/make_nnet_proto.py $proto_opts \
-//         --no-smaller-input-weights \
-//         ${bn_dim:+ --bottleneck-dim=$bn_dim} \
-//         "$cnn_fea" $num_tgt $hid_layers $hid_dim >>$nnet_proto
-//       ;;
-//     cnn2d)
-//       delta_order=$([ -z $delta_opts ] && echo "0" || { echo $delta_opts | tr ' ' '\n' | grep "delta[-_]order" | sed 's:^.*=::'; })
-//       echo "Debug : $delta_opts, delta_order $delta_order"
-//       utils/nnet/make_cnn2d_proto.py $cnn_proto_opts \
-//         --splice=$splice --delta-order=$delta_order --dir=$dir \
-//         $num_fea >$nnet_proto
-//       cnn_fea=$(cat $nnet_proto | grep -v '^$' | tail -n1 | awk '{ print $5; }')
-//       utils/nnet/make_nnet_proto.py $proto_opts \
-//         --no-smaller-input-weights \
-//         ${bn_dim:+ --bottleneck-dim=$bn_dim} \
-//         "$cnn_fea" $num_tgt $hid_layers $hid_dim >>$nnet_proto
-//       ;;
-//     lstm)
-//       utils/nnet/make_lstm_proto.py $proto_opts \
-//         $num_fea $num_tgt >$nnet_proto
-//       ;;
-//     blstm)
-//       utils/nnet/make_blstm_proto.py $proto_opts \
-//         $num_fea $num_tgt >$nnet_proto
-//       ;;
-//     *) echo "Unknown : --network-type $network_type" && exit 1;
-//   esac
+//         $num_fea   $num_tgt    $hid_layers    $hid_dim
+//         > $nnet_proto
 
+//   根据 inputdim, outputdim, hidden layers, hid_dims 构建整体的nnet网络结构 === >nnet.proto.
+void make_nnet_proto(){
+
+// # Generated Nnet prototype, to be initialized by 'nnet-initialize'.
+
+// from optparse import OptionParser
+// usage="%prog [options] <feat-dim> <num-leaves> <num-hid-layers> <num-hid-neurons> >nnet-proto-file"
+// parser = OptionParser(usage)
+
+// # Softmax related,
+
+// # Topology related,
+// parser.add_option('--bottleneck-dim', dest='bottleneck_dim',
+//                    help='Make bottleneck network with desired bn-dim (0 = no bottleneck) [default: %default]',
+//                    default=0, type='int');
+
+// # A HACK TO PASS MULTI-WORD OPTIONS, WORDS ARE CONNECTED BY UNDERSCORES '_',
+// o.activation_opts = o.activation_opts.replace("_"," ")
+// o.affine_opts = o.affine_opts.replace("_"," ")
+// o.dropout_opts = o.dropout_opts.replace("_"," ")
+
+// 获得 输入dim  输出dim  隐藏层数目  隐藏层节点数
+// (feat_dim, num_leaves, num_hid_layers, num_hid_neurons) = map(int,args);
+
+
+
+// 如果使用softmax 必须要求softmax的输出dim == num_leaves?
+// if o.block_softmax_dims:
+//   assert(  sum(map(int, re.split("[,:]", o.block_softmax_dims))) == num_leaves ) 
+
+// # Optionaly scale
+// def Glorot(dim1, dim2):
+//   if o.with_glorot:
+//     # 35.0 = magic number, gives ~1.0 in inner layers for hid-dim 1024dim,
+//     return 35.0 * math.sqrt(2.0/(dim1+dim2));
+//   else:
+//     return 1.0
+
+
+// # NO HIDDEN LAYER, ADDING BOTTLENECK!
+// # No hidden layer while adding bottleneck means:
+// # - add bottleneck layer + hidden layer + output layer
+
+
+// # THE USUAL DNN PROTOTYPE STARTS HERE!
+// # Assuming we have >0 hidden layers,
+// assert(num_hid_layers > 0)
+
+
+
+
+// 构建proto过程
+// # Begin the prototype,
+// # First AffineTranform
+// print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
+//       (feat_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+//        (o.param_stddev_factor * Glorot(feat_dim, num_hid_neurons) * \
+//         (math.sqrt(1.0/12.0) if o.smaller_input_weights else 1.0)), o.max_norm, o.affine_opts)
+
+// print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
+// if o.with_dropout:
+//   print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+
+
+// # Internal AffineTransforms,
+// for i in range(num_hid_layers-1):
+//   print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
+//         (num_hid_neurons, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+//          (o.param_stddev_factor * Glorot(num_hid_neurons, num_hid_neurons)), o.max_norm, o.affine_opts)
+//   print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
+//   if o.with_dropout:
+//     print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+        
+
+// # Optionaly add bottleneck,
+// if o.bottleneck_dim != 0:
+//   assert(o.bottleneck_dim > 0)
+//   if o.bottleneck_trick:
+//     # 25% smaller stddev -> small bottleneck range, 10x smaller learning rate
+//     print "<LinearTransform> <InputDim> %d <OutputDim> %d <ParamStddev> %f <LearnRateCoef> %f" % \
+//      (num_hid_neurons, o.bottleneck_dim, \
+//       (o.param_stddev_factor * Glorot(num_hid_neurons, o.bottleneck_dim) * 0.75 ), 0.1)
+//     # 25% smaller stddev -> smaller gradient in prev. layer, 10x smaller learning rate for weigts & biases
+//     print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <LearnRateCoef> %f <BiasLearnRateCoef> %f <MaxNorm> %f %s" % \
+//      (o.bottleneck_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+//       (o.param_stddev_factor * Glorot(o.bottleneck_dim, num_hid_neurons) * 0.75 ), 0.1, 0.1, o.max_norm, o.affine_opts)
+//   else:
+//     # Same learninig-rate and stddev-formula everywhere,
+//     print "<LinearTransform> <InputDim> %d <OutputDim> %d <ParamStddev> %f" % \
+//      (num_hid_neurons, o.bottleneck_dim, \
+//       (o.param_stddev_factor * Glorot(num_hid_neurons, o.bottleneck_dim)))
+//     print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <MaxNorm> %f %s" % \
+//      (o.bottleneck_dim, num_hid_neurons, o.hid_bias_mean, o.hid_bias_range, \
+//       (o.param_stddev_factor * Glorot(o.bottleneck_dim, num_hid_neurons)), o.max_norm, o.affine_opts)
+//   print "%s <InputDim> %d <OutputDim> %d %s" % (o.activation_type, num_hid_neurons, num_hid_neurons, o.activation_opts)
+//   if o.with_dropout:
+//     print "<Dropout> <InputDim> %d <OutputDim> %d %s" % (num_hid_neurons, num_hid_neurons, o.dropout_opts)
+
+//   最终在softmax之前, 网络节点总数应该是与最终节点数相同, 然后经过softmax？ 
+//   # Last AffineTransform (10x smaller learning rate on bias)
+//   print "<AffineTransform> <InputDim> %d <OutputDim> %d <BiasMean> %f <BiasRange> %f <ParamStddev> %f <LearnRateCoef> %f <BiasLearnRateCoef> %f" % \
+//       (num_hid_neurons, num_leaves, 0.0, 0.0, \
+//        (o.param_stddev_factor * Glorot(num_hid_neurons, num_leaves)), 1.0, 0.1)
+
+//   # Optionaly append softmax
+//   if o.with_softmax:
+//     if o.block_softmax_dims == "":
+//       print "<Softmax> <InputDim> %d <OutputDim> %d" % (num_leaves, num_leaves)
+//     else:
+//       print "<BlockSoftmax> <InputDim> %d <OutputDim> %d <BlockDims> %s" % (num_leaves, num_leaves, o.block_softmax_dims)
+
+}
+
+//   nnet_initialize 根据 nnet.proto 生成 ====> nnet.init
 //   # initialize,
 //   nnet_init=$dir/nnet.init
 //   echo "# initializing the NN '$nnet_proto' -> '$nnet_init'"
 //   nnet-initialize --seed=$seed $nnet_proto $nnet_init
 
-//   # optionally prepend dbn to the initialization,
+//   # optionally prepend dbn to the initialization,  可选使用dbn(受限玻尔兹曼机)应用到 得到的nnet.
 //   if [ ! -z "$dbn" ]; then
 //     nnet_init_old=$nnet_init; nnet_init=$dir/nnet_dbn_dnn.init
 //     nnet-concat "$dbn" $nnet_init_old $nnet_init
 //   fi
+
 // fi
 
 
 // ###### TRAIN ######
+// 使用nnet_init模型， feat_train, feat_cv  label_train, label_cv 进行nnet的训练 最终将结果输出到$dir
+
 // echo
 // echo "# RUNNING THE NN-TRAINING SCHEDULER"
 // steps/nnet/train_scheduler.sh \
-//   ${scheduler_opts} \
-//   ${train_tool:+ --train-tool "$train_tool"} \
-//   ${train_tool_opts:+ --train-tool-opts "$train_tool_opts"} \
 //   ${feature_transform:+ --feature-transform $feature_transform} \
-//   ${split_feats:+ --split-feats $split_feats} \
 //   --learn-rate $learn_rate \
-//   ${frame_weights:+ --frame-weights "$frame_weights"} \
-//   ${utt_weights:+ --utt-weights "$utt_weights"} \
-//   ${config:+ --config $config} \
 //   $nnet_init "$feats_tr" "$feats_cv" "$labels_tr" "$labels_cv" $dir
 
 // echo "$0: Successfuly finished. '$dir'"
 
-// sleep 3
-// exit 0
+void train_scheduler(){
+
+  // # Schedules epochs and controls learning rate during the neural network training
+  // 神经网络训练期间的 完整循环调度 以及 学习率控制
+
+  // # Begin configuration.
+  {
+    // # training options,
+    // learn_rate=0.008
+    // momentum=0
+    // l1_penalty=0
+    // l2_penalty=0
+
+    // # data processing,
+    // train_tool="nnet-train-frmshuff"
+    // train_tool_opts="--minibatch-size=256 --randomizer-size=32768 --randomizer-seed=777"
+    // feature_transform=
+
+    // split_feats= # int -> number of splits 'feats.scp -> feats.${i}.scp', starting from feats.1.scp,
+    //              # (data are alredy shuffled and split to N parts),
+    //              # empty -> no splitting,
+
+  
+    // # learn rate scheduling,
+    // max_iters=20
+    // min_iters=0 # keep training, disable weight rejection, start learn-rate halving as usual,
+    // keep_lr_iters=0 # fix learning rate for N initial epochs, disable weight rejection,
+    // dropout_schedule= # dropout-rates for N initial epochs, for example: 0.1,0.1,0.1,0.1,0.1,0.0
+    // start_halving_impr=0.01
+    // end_halving_impr=0.001
+    // halving_factor=0.5
+
+    // # misc,
+    // verbose=0 # 0 No GPU time-stats, 1 with GPU time-stats (slower),
+    // frame_weights=
+    // utt_weights=
+
+    // # End configuration.
+  }
+
+  // # USE
+  {
+    // if [ $# != 6 ]; then
+    //    echo "Usage: $0 <mlp-init> <feats-tr> <feats-cv> <labels-tr> <labels-cv> <exp-dir>"
+    //    echo " e.g.: $0 0.nnet scp:train.scp scp:cv.scp ark:labels_tr.ark ark:labels_cv.ark exp/dnn1"
+    //    echo "main options (for others, see top of script file)"
+    //    echo "  --config <config-file>  # config containing options"
+    //    exit 1;
+    // fi
+
+    // mlp_init=$1
+    // feats_tr=$2
+    // feats_cv=$3
+    // labels_tr=$4
+    // labels_cv=$5
+    // dir=$6
+
+    // [ ! -d $dir ] && mkdir $dir
+    // [ ! -d $dir/log ] && mkdir $dir/log
+    // [ ! -d $dir/nnet ] && mkdir $dir/nnet
+
+    
+    // dropout_array=($(echo ${dropout_schedule} | tr ',' ' '))
+
+    // # Skip training  //跳过训练, 如果存在了 final.nnet
+    // [ -e $dir/final.nnet ] && echo "'$dir/final.nnet' exists, skipping training" && exit 0
+  }
+
+  // ##############################
+  // # start training
+
+  // # choose mlp to start with,
+  // mlp_best=$mlp_init
+  // mlp_base=${mlp_init##*/};
+  // mlp_base=${mlp_base%.*}  去掉nnet网络结构文件的路径以及后缀 得到名字.
+
+  // 可以进行从最佳时期 恢复训练, 通过保存学习率 以及学习结果nnet 结构文件.
+  // # optionally resume training from the best epoch, using saved learning-rate,
+  // [ -e $dir/.mlp_best ] && mlp_best=$(cat $dir/.mlp_best)
+  // [ -e $dir/.learn_rate ] && learn_rate=$(cat $dir/.learn_rate)
+
+  // ------------------------------------------------------------------------------------
+  // train_tool="nnet-train-frmshuff"
+  // train_tool_opts="--minibatch-size=256 --randomizer-size=32768 --randomizer-seed=777"
+  // ------------------------------------------------------------------------------------
+  
+  // 原始网络的交叉验证集合的设置？
+  // # cross-validation on original network,
+  // log=$dir/log/iter00.initial.log; hostname>$log
+
+  // nnet-train-frmshuff  按帧进行nnet训练
+  // 这里 实际上并没有训练，只是进行了一次前向传播, 然后通过xent交叉熵测试了下当前的nnet网络.
+  // $train_tool --cross-validate=true --randomize=false --verbose=$verbose $train_tool_opts \
+  //   ${feature_transform:+ --feature-transform=$feature_transform} \
+  //   "$feats_cv" "$labels_cv" $mlp_best \
+
+  // 执行NNET训练的一次完整循环 训练目标是 pdf后验概率. 通过ali-to-post提供.
+  void nnet_train_frmshuff___liu_easyGo(){
+    const char *usage =
+        "Perform one iteration (epoch) of Neural Network training with\n"
+        "mini-batch Stochastic Gradient Descent. The training targets\n"
+        "are usually pdf-posteriors, prepared by ali-to-post.\n"
+        "Usage:  nnet-train-frmshuff [options] <feature-rspecifier> <targets-rspecifier> <model-in> [<model-out>]\n"
+        "e.g.: nnet-train-frmshuff scp:feats.scp ark:posterior.ark nnet.init nnet.iter1\n";
+
+    ParseOptions po(usage);
+
+    NnetTrainOptions trn_opts;
+    trn_opts.Register(&po);
+    NnetDataRandomizerOptions rnd_opts;
+    rnd_opts.Register(&po);
+    LossOptions loss_opts;
+    loss_opts.Register(&po);
+
+    // TRUE
+    bool crossvalidate = false;
+    po.Register("cross-validate", &crossvalidate,
+                "Perform cross-validation (don't back-propagate)");
+
+    // FALSE
+    bool randomize = true;
+    po.Register("randomize", &randomize,
+                "Perform the frame-level shuffling within the Cache::");
+
+    // TRANSFORM
+    std::string feature_transform;
+    po.Register("feature-transform", &feature_transform,
+                "Feature transform in Nnet format");
+
+    // 目标函数(损失函数)  xent 交叉熵损失函数.
+    std::string objective_function = "xent";
+    po.Register("objective-function", &objective_function,
+                "Objective function : xent|mse|multitask");
+
+    // 
+    int32 max_frames = 360000;
+    po.Register("max-frames", &max_frames,
+                "Maximum number of frames an utterance can have (skipped if longer)");
+
+    std::string use_gpu="yes";
+    po.Register("use-gpu", &use_gpu,
+                "yes|no|optional, only has effect if compiled with CUDA");
+
+    std::string
+        feature_rspecifier = po.GetArg(1),
+        targets_rspecifier = po.GetArg(2),
+        model_filename = po.GetArg(3);
+
+    // 如果不是交叉验证集 那就是在进行训练, 必须有输出NNET.
+    // 如果是交叉验证, 那就是直接输出结果即可.
+    std::string target_model_filename;
+    if (!crossvalidate) {
+      target_model_filename = po.GetArg(4);
+    }
+
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().SelectGpuId(use_gpu);
+#endif
+
+    Nnet nnet_transf;
+    if (feature_transform != "") {
+      nnet_transf.Read(feature_transform);
+    }
+
+    Nnet nnet;
+    nnet.Read(model_filename);
+    nnet.SetTrainOptions(trn_opts);
+
+    if (crossvalidate) {
+      nnet_transf.SetDropoutRate(0.0);
+      nnet.SetDropoutRate(0.0);
+    }
+
+    kaldi::int64 total_frames = 0;
+    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    RandomAccessPosteriorReader targets_reader(targets_rspecifier);
+    RandomAccessBaseFloatVectorReader weights_reader;
+    
+    RandomizerMask randomizer_mask(rnd_opts);
+    MatrixRandomizer feature_randomizer(rnd_opts);
+    PosteriorRandomizer targets_randomizer(rnd_opts);
+    VectorRandomizer weights_randomizer(rnd_opts);
+
+    // 交叉熵
+    Xent xent(loss_opts);
+    // 均方误差
+    Mse mse(loss_opts);
+
+    // 判断是否是多损失函数的训练.
+    MultiTaskLoss multitask(loss_opts);
+    if (0 == objective_function.compare(0, 9, "multitask")) {
+      // objective_function contains something like :
+      // 'multitask,xent,2456,1.0,mse,440,0.001'
+      //
+      // the meaning is following:
+      // 'multitask,<type1>,<dim1>,<weight1>,...,<typeN>,<dimN>,<weightN>'
+      multitask.InitFromString(objective_function);
+    }
+
+    
+    CuMatrix<BaseFloat> feats_transf, nnet_out, obj_diff;
+
+    Timer time;
+    KALDI_LOG << (crossvalidate ? "CROSS-VALIDATION" : "TRAINING")
+              << " STARTED";
+
+    int32
+        num_done = 0,
+        num_no_tgt_mat = 0,
+        num_other_error = 0;
+
+    // main loop,
+    while (!feature_reader.Done()) {
+#if HAVE_CUDA == 1
+      // check that GPU computes accurately,
+      CuDevice::Instantiate().CheckGpuHealth();
+#endif
+      // fill the randomizer,
+      for ( ; !feature_reader.Done(); feature_reader.Next()) {
+        
+        std::string utt = feature_reader.Key();
+        KALDI_VLOG(3) << "Reading " << utt;
+        // check that we have targets,
+
+        // get feature / target pair,
+        Matrix<BaseFloat> mat = feature_reader.Value();
+        Posterior targets = targets_reader.Value(utt);
+        
+        // skip too long utterances (or we run out of memory),
+        if (mat.NumRows() > max_frames) {
+          KALDI_WARN << "Utterance too long, skipping! " << utt
+                     << " (length " << mat.NumRows() << ", max_frames "
+                     << max_frames << ")";
+          num_other_error++;
+          continue;
+        }
+
+        // 修正有些(特征长度 与 对齐长度)匹配不上的句子, 或者都截断到最短, 或者直接舍弃.
+        // correct small length mismatch or drop sentence,
+        {
+          // add lengths to vector,
+          std::vector<int32> length;
+          length.push_back(mat.NumRows());
+          length.push_back(targets.size());
+          length.push_back(weights.Dim());
+          // find min, max,
+          int32 min = *std::min_element(length.begin(), length.end());
+          int32 max = *std::max_element(length.begin(), length.end());
+          // fix or drop ?
+          if (max - min < length_tolerance) {
+            // we truncate to shortest,
+            if (mat.NumRows() != min) mat.Resize(min, mat.NumCols(), kCopyData);
+            if (targets.size() != min) targets.resize(min);
+            if (weights.Dim() != min) weights.Resize(min, kCopyData);
+          } else {
+            KALDI_WARN << "Length mismatch! Targets " << targets.size()
+                       << ", features " << mat.NumRows() << ", " << utt;
+            num_other_error++;
+            continue;
+          }
+        }
+
+        // 应用 特征转换, 将 utt-feature 进行特征变换--> feats_transf.
+        // apply feature transform (if empty, input is copied),
+        nnet_transf.Feedforward(CuMatrix<BaseFloat>(mat), &feats_transf);
+
+        // 去掉 权重为0的帧 因为认为这些帧不重要.
+        // remove frames with '0' weight from training,
+        {
+          // are there any frames to be removed? (frames with zero weight),
+          BaseFloat weight_min = weights.Min();
+          KALDI_ASSERT(weight_min >= 0.0);
+          if (weight_min == 0.0) {
+            // create vector with frame-indices to keep,
+            std::vector<MatrixIndexT> keep_frames;
+            for (int32 i = 0; i < weights.Dim(); i++) {
+              if (weights(i) > 0.0) {
+                keep_frames.push_back(i);
+              }
+            }
+
+            // when all frames are removed, we skip the sentence,
+            if (keep_frames.size() == 0) continue;
+
+            // filter feature-frames,
+            CuMatrix<BaseFloat> tmp_feats(keep_frames.size(), feats_transf.NumCols());
+            tmp_feats.CopyRows(feats_transf, CuArray<MatrixIndexT>(keep_frames));
+            tmp_feats.Swap(&feats_transf);
+
+            // filter targets,
+            Posterior tmp_targets;
+            for (int32 i = 0; i < keep_frames.size(); i++) {
+              tmp_targets.push_back(targets[keep_frames[i]]);
+            }
+            tmp_targets.swap(targets);
+
+            // filter weights,
+            Vector<BaseFloat> tmp_weights(keep_frames.size());
+            for (int32 i = 0; i < keep_frames.size(); i++) {
+              tmp_weights(i) = weights(keep_frames[i]);
+            }
+            tmp_weights.Swap(&weights);
+          }
+        }
+
+        // utt-feats_transf 长度 一定会等于 对齐结果长度
+        // pass data to randomizers,
+        KALDI_ASSERT(feats_transf.NumRows() == targets.size());
+        feature_randomizer.AddData(feats_transf);
+        targets_randomizer.AddData(targets);
+        weights_randomizer.AddData(weights);
+        
+        num_done++;
+
+        // report the speed,  打印进度.
+        if (num_done % 5000 == 0) {
+          double time_now = time.Elapsed();
+          KALDI_VLOG(1) << "After " << num_done << " utterances: "
+                        << "time elapsed = " << time_now / 60 << " min; "
+                        << "processed " << total_frames / time_now << " frames per sec.";
+        }
+      }
+
+      // randomize,
+      if (!crossvalidate && randomize) {
+        const std::vector<int32>& mask =
+            randomizer_mask.Generate(feature_randomizer.NumFrames());
+        feature_randomizer.Randomize(mask);
+        targets_randomizer.Randomize(mask);
+        weights_randomizer.Randomize(mask);
+      }
+
+      // 从randomizers随机化数据中 进行训练, 使用Mini-batches 批量训练.
+      // train with data from randomizers (using mini-batches),
+      for ( ; !feature_randomizer.Done(); feature_randomizer.Next(),
+                targets_randomizer.Next(), weights_randomizer.Next()) {
+        // 获得一批 特征-对齐 用来训练
+        // get block of feature/target pairs,
+        const CuMatrixBase<BaseFloat>& nnet_in = feature_randomizer.Value();
+        const Posterior& nnet_tgt = targets_randomizer.Value();
+        const Vector<BaseFloat>& frm_weights = weights_randomizer.Value();
+
+        // 前向传播
+        // forward pass,
+        nnet.Propagate(nnet_in, &nnet_out);
+
+        // 求值  损失函数
+        // evaluate objective function we've chosen,
+        if (objective_function == "xent") {
+          // 根据计算中的帧权重 梯度重新计算拉伸
+          // gradients re-scaled by weights in Eval,
+          xent.Eval(frm_weights, nnet_out, nnet_tgt, &obj_diff);
+        } 
+
+        // 如果不是交叉验证 进行后向残差传播
+        if (!crossvalidate) {
+          // back-propagate, and do the update,
+          nnet.Backpropagate(obj_diff, NULL);
+        }
+        
+        // 1st mini-batch : show what happens in network,
+        if (total_frames == 0) {
+          KALDI_VLOG(1) << "### After " << total_frames << " frames,";
+          KALDI_VLOG(1) << nnet.InfoPropagate();
+          if (!crossvalidate) {
+            KALDI_VLOG(1) << nnet.InfoBackPropagate();
+            KALDI_VLOG(1) << nnet.InfoGradient();
+          }
+        }
+
+        // 冗余信息 日志
+        // VERBOSE LOG
+        // monitor the NN training (--verbose=2),
+        if (GetVerboseLevel() >= 2) {
+          static int32 counter = 0;
+          counter += nnet_in.NumRows();
+          // print every 25k frames,
+          if (counter >= 25000) {
+            KALDI_VLOG(2) << "### After " << total_frames << " frames,";
+            KALDI_VLOG(2) << nnet.InfoPropagate();
+            if (!crossvalidate) {
+              KALDI_VLOG(2) << nnet.InfoBackPropagate();
+              KALDI_VLOG(2) << nnet.InfoGradient();
+            }
+            counter = 0;
+          }
+        }
+
+        total_frames += nnet_in.NumRows();
+      }
+    }  // main loop,
+
+    // after last mini-batch : show what happens in network,
+    {
+    KALDI_VLOG(1) << "### After " << total_frames << " frames,";
+    KALDI_VLOG(1) << nnet.InfoPropagate();
+    if (!crossvalidate) {
+      KALDI_VLOG(1) << nnet.InfoBackPropagate();
+      KALDI_VLOG(1) << nnet.InfoGradient();
+    }
+    }
+
+    if (!crossvalidate) {
+      nnet.Write(target_model_filename, binary);
+    }
+
+    {
+    KALDI_LOG << "Done " << num_done << " files, "
+              << num_no_tgt_mat << " with no tgt_mats, "
+              << num_other_error << " with other errors. "
+              << "[" << (crossvalidate ? "CROSS-VALIDATION" : "TRAINING")
+              << ", " << (randomize ? "RANDOMIZED" : "NOT-RANDOMIZED")
+              << ", " << time.Elapsed() / 60 << " min, processing "
+              << total_frames / time.Elapsed() << " frames per sec.]";
+    }
+
+    if (objective_function == "xent") {
+      KALDI_LOG << xent.ReportPerClass();
+      KALDI_LOG << xent.Report();
+    }
+    
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().PrintProfile();
+#endif
+  }
+
+
+  //  ============== 获得刚刚 nnet-train-frmshuff ============= 测试交叉验证集合的交叉熵 误差.
+  // loss=$(cat $dir/log/iter00.initial.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
+  // loss_type=$(cat $dir/log/iter00.initial.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $5; }')
+  // echo "CROSSVAL PRERUN AVG.LOSS $(printf "%.4f" $loss) $loss_type"
+
+  
+  // # resume lr-halving,
+  // halving=0
+  // [ -e $dir/.halving ] && halving=$(cat $dir/.halving)
+
+  
+  //  ==========================  训练过程 ==========================
+  // # training,
+  // for iter in $(seq -w $max_iters); do
+  //   echo -n "ITERATION $iter: "
+  //   mlp_next=$dir/nnet/${mlp_base}_iter${iter}
+
+  //   # skip iteration (epoch) if already done,
+  //   [ -e $dir/.done_iter$iter ] && echo -n "skipping... " && ls $mlp_next* && continue
+
+  //   # set dropout-rate from the schedule,
+  //   if [ -n ${dropout_array[$((${iter#0}-1))]-''} ]; then
+  //     dropout_rate=${dropout_array[$((${iter#0}-1))]}
+  //     nnet-copy --dropout-rate=$dropout_rate $mlp_best ${mlp_best}.dropout_rate${dropout_rate}
+  //     mlp_best=${mlp_best}.dropout_rate${dropout_rate}
+  //   fi
+
+  //   # select the split,
+  //   feats_tr_portion="$feats_tr" # no split?
+  //   if [ -n "$split_feats" ]; then
+  //     portion=$((1 + iter % split_feats))
+  //     feats_tr_portion="${feats_tr/train.scp/train.${portion}.scp}"
+  //   fi
+
+  //   # training,
+  //   log=$dir/log/iter${iter}.tr.log; hostname>$log
+  //   $train_tool --cross-validate=false --randomize=true --verbose=$verbose $train_tool_opts \
+  //     --learn-rate=$learn_rate --momentum=$momentum \
+  //     --l1-penalty=$l1_penalty --l2-penalty=$l2_penalty \
+  //     ${feature_transform:+ --feature-transform=$feature_transform} \
+  //     ${frame_weights:+ "--frame-weights=$frame_weights"} \
+  //     ${utt_weights:+ "--utt-weights=$utt_weights"} \
+  //     "$feats_tr_portion" "$labels_tr" $mlp_best $mlp_next \
+  //     2>> $log || exit 1;
+
+  //   tr_loss=$(cat $dir/log/iter${iter}.tr.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
+  //   echo -n "TRAIN AVG.LOSS $(printf "%.4f" $tr_loss), (lrate$(printf "%.6g" $learn_rate)), "
+
+  //   # cross-validation,
+  //   log=$dir/log/iter${iter}.cv.log; hostname>$log
+  //   $train_tool --cross-validate=true --randomize=false --verbose=$verbose $train_tool_opts \
+  //     ${feature_transform:+ --feature-transform=$feature_transform} \
+  //     ${frame_weights:+ "--frame-weights=$frame_weights"} \
+  //     ${utt_weights:+ "--utt-weights=$utt_weights"} \
+  //     "$feats_cv" "$labels_cv" $mlp_next \
+  //     2>>$log || exit 1;
+
+  //   loss_new=$(cat $dir/log/iter${iter}.cv.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
+  //   echo -n "CROSSVAL AVG.LOSS $(printf "%.4f" $loss_new), "
+
+  //   # accept or reject?
+  //   loss_prev=$loss
+  //   if [ 1 == $(awk "BEGIN{print($loss_new < $loss ? 1:0);}") -o $iter -le $keep_lr_iters -o $iter -le $min_iters ]; then
+  //     # accepting: the loss was better, or we had fixed learn-rate, or we had fixed epoch-number,
+  //     loss=$loss_new
+  //     mlp_best=$dir/nnet/${mlp_base}_iter${iter}_learnrate${learn_rate}_tr$(printf "%.4f" $tr_loss)_cv$(printf "%.4f" $loss_new)
+  //     [ $iter -le $min_iters ] && mlp_best=${mlp_best}_min-iters-$min_iters
+  //     [ $iter -le $keep_lr_iters ] && mlp_best=${mlp_best}_keep-lr-iters-$keep_lr_iters
+  //     mv $mlp_next $mlp_best
+  //     echo "nnet accepted ($(basename $mlp_best))"
+  //     echo $mlp_best > $dir/.mlp_best
+  //   else
+  //     # rejecting,
+  //     mlp_reject=$dir/nnet/${mlp_base}_iter${iter}_learnrate${learn_rate}_tr$(printf "%.4f" $tr_loss)_cv$(printf "%.4f" $loss_new)_rejected
+  //     mv $mlp_next $mlp_reject
+  //     echo "nnet rejected ($(basename $mlp_reject))"
+  //   fi
+
+  //   # create .done file, the iteration (epoch) is completed,
+  //   touch $dir/.done_iter$iter
+
+  //   # continue with original learn-rate,
+  //   [ $iter -le $keep_lr_iters ] && continue
+
+  //   # stopping criterion,
+  //   rel_impr=$(awk "BEGIN{print(($loss_prev-$loss)/$loss_prev);}")
+  //   if [ 1 == $halving -a 1 == $(awk "BEGIN{print($rel_impr < $end_halving_impr ? 1:0);}") ]; then
+  //     if [ $iter -le $min_iters ]; then
+  //       echo we were supposed to finish, but we continue as min_iters : $min_iters
+  //       continue
+  //     fi
+  //     echo finished, too small rel. improvement $rel_impr
+  //     break
+  //   fi
+
+  //   # start learning-rate fade-out when improvement is low,
+  //   if [ 1 == $(awk "BEGIN{print($rel_impr < $start_halving_impr ? 1:0);}") ]; then
+  //     halving=1
+  //     echo $halving >$dir/.halving
+  //   fi
+
+  //   # reduce the learning-rate,
+  //   if [ 1 == $halving ]; then
+  //     learn_rate=$(awk "BEGIN{print($learn_rate*$halving_factor)}")
+  //     echo $learn_rate >$dir/.learn_rate
+  //   fi
+  // done
+
+  // # select the best network,
+  // if [ $mlp_best != $mlp_init ]; then
+  //   mlp_final=${mlp_best}_final_
+  //   ( cd $dir/nnet; ln -s $(basename $mlp_best) $(basename $mlp_final); )
+  //   ( cd $dir; ln -s nnet/$(basename $mlp_final) final.nnet; )
+  //   echo "$0: Succeeded training the Neural Network : '$dir/final.nnet'"
+  // else
+  //   echo "$0: Error training neural network..."
+  //   exit 1
+  // fi
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

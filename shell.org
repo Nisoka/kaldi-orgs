@@ -1,0 +1,15 @@
+shell 变量详解
+nan@nan:/nwork/svn/ai/sr/kaldi$ test=aa.net
+nan@nan:/nwork/svn/ai/sr/kaldi$ echo ${test:+ --testpar $test}                  
+--testpar aa.net
+nan@nan:/nwork/svn/ai/sr/kaldi$ test=
+nan@nan:/nwork/svn/ai/sr/kaldi$ echo ${test:+ --testpar $test}
+
+nan@nan:/nwork/svn/ai/sr/kaldi$ 
+
+nan@nan:/nwork/svn/ai/sr/kaldi$ test=aa.net                                     
+nan@nan:/nwork/svn/ai/sr/kaldi$ echo ${test%.net}                               
+aa
+nan@nan:/nwork/svn/ai/sr/kaldi$ 
+https://www.cnblogs.com/barrychiao/archive/2012/10/22/2733210.html
+
