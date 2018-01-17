@@ -1562,7 +1562,7 @@ void train_scheduler(){
   // echo "CROSSVAL PRERUN AVG.LOSS $(printf "%.4f" $loss) $loss_type"
 
 
-  // 恢复 lr-halving 减半
+  // 恢复      lr-halving 减半变量
   // # resume lr-halving,  
   // halving=0
   // [ -e $dir/.halving ] && halving=$(cat $dir/.halving)
@@ -1578,7 +1578,9 @@ void train_scheduler(){
   //   # skip iteration (epoch) if already done,
   //   [ -e $dir/.done_iter$iter ] && echo -n "skipping... " && ls $mlp_next* && continue
 
-  //   ============ 判断当前迭代次数, 修改当前 nnet
+  //   ============ 判断当前迭代次数, 修改当前 nnet中的dropout率.
+  //   (()) 是进行整数求值
+  //   -'' 表示变量清除无用的''?? 是为了确定变量正常
   //   # set dropout-rate from the schedule,
   //   if [ -n ${dropout_array[$((${iter#0}-1))]-''} ]; then
   //     dropout_rate=${dropout_array[$((${iter#0}-1))]}
@@ -1595,21 +1597,689 @@ void train_scheduler(){
   //   fi
 
 
+  //  penalty 处罚 verbose=0 冗余? momentum 动量???
   //   ====================== TRAINING ===================
   //   # training,
   //   log=$dir/log/iter${iter}.tr.log; hostname>$log
-  
+
+  // ------------------------------------------------------------------------------------
+  // train_tool="nnet-train-frmshuff"
+  // train_tool_opts="--minibatch-size=256 --randomizer-size=32768 --randomizer-seed=777"
+  // ------------------------------------------------------------------------------------
   //   $train_tool --cross-validate=false --randomize=true --verbose=$verbose $train_tool_opts \
   //     --learn-rate=$learn_rate --momentum=$momentum \
   //     --l1-penalty=$l1_penalty --l2-penalty=$l2_penalty \
   //     ${feature_transform:+ --feature-transform=$feature_transform} \
   //     "$feats_tr_portion" "$labels_tr" $mlp_best $mlp_next \
-
+ 
   //   获取训练数据交叉熵残差结果  --- 这种误差叫经验误差？ 在验证集上的是结构误差?
   //   tr_loss=$(cat $dir/log/iter${iter}.tr.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
   //   echo -n "TRAIN AVG.LOSS $(printf "%.4f" $tr_loss), (lrate$(printf "%.6g" $learn_rate)), "
 
-  //   交叉验证 ============= 通过交叉验证集合 判断nnet性能.
+  // frm帧 shuff?? 真实训练过程
+  int nnet_train_frmshuff(int argc, char *argv[]) {
+    const char *usage =
+        "Perform one iteration (epoch) of Neural Network training with\n"
+        "mini-batch Stochastic Gradient Descent. The training targets\n"
+        "are usually pdf-posteriors, prepared by ali-to-post.\n"
+        "Usage:  nnet-train-frmshuff [options] <feature-rspecifier> <targets-rspecifier> <model-in> [<model-out>]\n"
+        "e.g.: nnet-train-frmshuff scp:feats.scp ark:posterior.ark nnet.init nnet.iter1\n";
+
+    ParseOptions po(usage);
+
+    NnetTrainOptions trn_opts;
+    trn_opts.Register(&po);
+    NnetDataRandomizerOptions rnd_opts;
+    rnd_opts.Register(&po);
+    LossOptions loss_opts;
+    loss_opts.Register(&po);
+
+    {
+      bool binary = true;
+      po.Register("binary", &binary, "Write output in binary mode");
+
+      bool crossvalidate = false;
+      po.Register("cross-validate", &crossvalidate,
+                  "Perform cross-validation (don't back-propagate)");
+
+      bool randomize = true;
+      po.Register("randomize", &randomize,
+                  "Perform the frame-level shuffling within the Cache::");
+
+      std::string feature_transform;
+      po.Register("feature-transform", &feature_transform,
+                  "Feature transform in Nnet format");
+
+      std::string objective_function = "xent";
+      po.Register("objective-function", &objective_function,
+                  "Objective function : xent|mse|multitask");
+
+      int32 max_frames = 360000;
+      po.Register("max-frames", &max_frames,
+                  "Maximum number of frames an utterance can have (skipped if longer)");
+
+      int32 length_tolerance = 5;
+      po.Register("length-tolerance", &length_tolerance,
+                  "Allowed length mismatch of features/targets/weights "
+                  "(in frames, we truncate to the shortest)");
+
+      std::string frame_weights;
+      po.Register("frame-weights", &frame_weights,
+                  "Per-frame weights, used to re-scale gradients.");
+
+      std::string utt_weights;
+      po.Register("utt-weights", &utt_weights,
+                  "Per-utterance weights, used to re-scale frame-weights.");
+
+      std::string use_gpu="yes";
+      po.Register("use-gpu", &use_gpu,
+                  "yes|no|optional, only has effect if compiled with CUDA");
+
+      po.Read(argc, argv);
+
+      if (po.NumArgs() != 3 + (crossvalidate ? 0 : 1)) {
+        po.PrintUsage();
+        exit(1);
+      }
+
+    }
+
+    std::string
+        feature_rspecifier = po.GetArg(1),
+        targets_rspecifier = po.GetArg(2),
+        model_filename = po.GetArg(3);
+
+    // 非验证集合
+    std::string target_model_filename;
+    if (!crossvalidate) {
+      target_model_filename = po.GetArg(4);
+    }
+
+    using namespace kaldi;
+    using namespace kaldi::nnet1;
+    typedef kaldi::int32 int32;
+
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().SelectGpuId(use_gpu);
+#endif
+
+    // 预处理 nnet 特征转换
+    Nnet nnet_transf;
+    if (feature_transform != "") {
+      nnet_transf.Read(feature_transform);
+    }
+
+    // nnet 神经网络模型
+    Nnet nnet;
+    nnet.Read(model_filename);
+    nnet.SetTrainOptions(trn_opts);
+    // false
+    if (crossvalidate) {
+      nnet_transf.SetDropoutRate(0.0);
+      nnet.SetDropoutRate(0.0);
+    }
+
+    kaldi::int64 total_frames = 0;
+    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    RandomAccessPosteriorReader targets_reader(targets_rspecifier);
+    
+    RandomAccessBaseFloatVectorReader weights_reader;
+    if (frame_weights != "") {
+      weights_reader.Open(frame_weights);
+    }
+    RandomAccessBaseFloatReader utt_weights_reader;
+    if (utt_weights != "") {
+      utt_weights_reader.Open(utt_weights);
+    }
+
+    // 随机化容器
+    RandomizerMask randomizer_mask(rnd_opts);
+    MatrixRandomizer feature_randomizer(rnd_opts);
+    PosteriorRandomizer targets_randomizer(rnd_opts);
+    VectorRandomizer weights_randomizer(rnd_opts);
+
+    Xent xent(loss_opts);
+    Mse mse(loss_opts);
+
+    // 是否是综合损失函数(综合多个损失函数)
+    MultiTaskLoss multitask(loss_opts);
+    if (0 == objective_function.compare(0, 9, "multitask")) {
+      // objective_function contains something like :
+      // 'multitask,xent,2456,1.0,mse,440,0.001'
+      //
+      // the meaning is following:
+      // 'multitask,<type1>,<dim1>,<weight1>,...,<typeN>,<dimN>,<weightN>'
+      multitask.InitFromString(objective_function);
+    }
+
+    // 转换后特征、nnet_out网络输出、 
+    CuMatrix<BaseFloat> feats_transf, nnet_out, obj_diff;
+    Timer time;
+    KALDI_LOG << (crossvalidate ? "CROSS-VALIDATION" : "TRAINING")
+              << " STARTED";
+
+    int32
+        num_done = 0,
+        num_no_tgt_mat = 0,
+        num_other_error = 0;
+
+    // main loop, 读取特征
+    while (!feature_reader.Done()) {
+#if HAVE_CUDA == 1
+      // check that GPU computes accurately,
+      CuDevice::Instantiate().CheckGpuHealth();
+#endif
+      // 填充随机化容器, 等待用来进行训练.
+      // fill the randomizer,
+      for ( ; !feature_reader.Done(); feature_reader.Next()) {
+        if (feature_randomizer.IsFull()) {
+          // break the loop without calling Next(),
+          // we keep the 'utt' for next round,
+          break;
+        }
+        
+        std::string utt = feature_reader.Key();
+        KALDI_VLOG(3) << "Reading " << utt;
+
+        // check that we have targets,
+        if (!targets_reader.HasKey(utt)) {
+          KALDI_WARN << utt << ", missing targets";
+          num_no_tgt_mat++;
+          continue;
+        }
+        // check we have per-frame weights,
+        if (frame_weights != "" && !weights_reader.HasKey(utt)) {
+          KALDI_WARN << utt << ", missing per-frame weights";
+          num_other_error++;
+          continue;
+        }
+        // check we have per-utterance weights,
+        if (utt_weights != "" && !utt_weights_reader.HasKey(utt)) {
+          KALDI_WARN << utt << ", missing per-utterance weight";
+          num_other_error++;
+          continue;
+        }
+
+
+        // 获得feature - 对齐目标
+        // get feature / target pair,
+        Matrix<BaseFloat> mat = feature_reader.Value();
+        Posterior targets = targets_reader.Value(utt);
+        
+        // get per-frame weights,
+        Vector<BaseFloat> weights;
+        if (frame_weights != "") {
+          weights = weights_reader.Value(utt);
+        } else {  // all per-frame weights are 1.0,
+          weights.Resize(mat.NumRows());
+          weights.Set(1.0);
+        }
+
+        // multiply with per-utterance weight,
+        if (utt_weights != "") {
+          BaseFloat w = utt_weights_reader.Value(utt);
+          KALDI_ASSERT(w >= 0.0);
+          if (w == 0.0) continue;  // remove sentence from training,
+          weights.Scale(w);
+        }
+
+        // 如果utt帧过长, skip 否则会内存不足
+        // skip too long utterances (or we run out of memory),
+        if (mat.NumRows() > max_frames) {
+          KALDI_WARN << "Utterance too long, skipping! " << utt
+                     << " (length " << mat.NumRows() << ", max_frames "
+                     << max_frames << ")";
+          num_other_error++;
+          continue;
+        }
+
+        // 修正某些匹配 有些缺点的utt, 或者直接skip。
+        // correct small length mismatch or drop sentence,
+        {
+          // add lengths to vector,
+          std::vector<int32> length;
+          length.push_back(mat.NumRows());
+          length.push_back(targets.size());
+          length.push_back(weights.Dim());
+          // find min, max,
+          int32 min = *std::min_element(length.begin(), length.end());
+          int32 max = *std::max_element(length.begin(), length.end());
+          
+          // fix or drop ?
+          if (max - min < length_tolerance) {
+            // we truncate to shortest,
+            if (mat.NumRows() != min) mat.Resize(min, mat.NumCols(), kCopyData);
+            if (targets.size() != min) targets.resize(min);
+            if (weights.Dim() != min) weights.Resize(min, kCopyData);
+          } else {
+            KALDI_WARN << "Length mismatch! Targets " << targets.size()
+                       << ", features " << mat.NumRows() << ", " << utt;
+            num_other_error++;
+            continue;
+          }
+        }
+        
+        // 进行feature transf 特征转换, 只需要使用nnete_transf 网络前向传播即可.
+        // apply feature transform (if empty, input is copied),
+        nnet_transf.Feedforward(CuMatrix<BaseFloat>(mat), &feats_transf);
+
+        
+        // remove frames with '0' weight from training,
+        {
+          // are there any frames to be removed? (frames with zero weight),
+          BaseFloat weight_min = weights.Min();
+          KALDI_ASSERT(weight_min >= 0.0);
+          if (weight_min == 0.0) {
+            // create vector with frame-indices to keep,
+            std::vector<MatrixIndexT> keep_frames;
+            for (int32 i = 0; i < weights.Dim(); i++) {
+              if (weights(i) > 0.0) {
+                keep_frames.push_back(i);
+              }
+            }
+
+            // when all frames are removed, we skip the sentence,
+            if (keep_frames.size() == 0) continue;
+
+            // filter feature-frames,
+            CuMatrix<BaseFloat> tmp_feats(keep_frames.size(), feats_transf.NumCols());
+            tmp_feats.CopyRows(feats_transf, CuArray<MatrixIndexT>(keep_frames));
+            tmp_feats.Swap(&feats_transf);
+
+            // filter targets,
+            Posterior tmp_targets;
+            for (int32 i = 0; i < keep_frames.size(); i++) {
+              tmp_targets.push_back(targets[keep_frames[i]]);
+            }
+            tmp_targets.swap(targets);
+
+            // filter weights,
+            Vector<BaseFloat> tmp_weights(keep_frames.size());
+            for (int32 i = 0; i < keep_frames.size(); i++) {
+              tmp_weights(i) = weights(keep_frames[i]);
+            }
+            tmp_weights.Swap(&weights);
+          }
+        }
+
+        // 将数据加入到 randomizer 容器中, 随机化进行训练
+        // pass data to randomizers,
+        KALDI_ASSERT(feats_transf.NumRows() == targets.size());
+        feature_randomizer.AddData(feats_transf);
+        targets_randomizer.AddData(targets);
+        weights_randomizer.AddData(weights);
+        num_done++;
+
+        // report the speed,
+        if (num_done % 5000 == 0) {
+          double time_now = time.Elapsed();
+          KALDI_VLOG(1) << "After " << num_done << " utterances: "
+                        << "time elapsed = " << time_now / 60 << " min; "
+                        << "processed " << total_frames / time_now << " frames per sec.";
+        }
+      }
+
+      // 随机化数据集的排列
+      // randomize,
+      if (!crossvalidate && randomize) {
+        const std::vector<int32>& mask =
+            randomizer_mask.Generate(feature_randomizer.NumFrames());
+        feature_randomizer.Randomize(mask);
+        targets_randomizer.Randomize(mask);
+        weights_randomizer.Randomize(mask);
+      }
+
+
+
+      // ==========================================
+      // 使用随机化数据进行 mini-batches 训练
+      // train with data from randomizers (using mini-batches),
+      for ( ; !feature_randomizer.Done(); feature_randomizer.Next(),
+                targets_randomizer.Next(),
+                weights_randomizer.Next()) {
+
+        // 取一个 mini batch 数据量
+        // get block of feature/target pairs,
+        const CuMatrixBase<BaseFloat>& nnet_in = feature_randomizer.Value();
+        const Posterior& nnet_tgt = targets_randomizer.Value();
+        const Vector<BaseFloat>& frm_weights = weights_randomizer.Value();
+
+        // forward pass,前向传播计算
+        nnet.Propagate(nnet_in, &nnet_out);
+        
+        void Nnet::Propagate(const CuMatrixBase<BaseFloat> &in,
+                             CuMatrix<BaseFloat> *out) {
+          
+          // In case of empty network copy input to output,
+          if (NumComponents() == 0) {
+            (*out) = in;  // copy,
+            return;
+          }
+          // We need C+1 buffers,
+          if (propagate_buf_.size() != NumComponents()+1) {
+            propagate_buf_.resize(NumComponents()+1);
+          }
+          // Copy input to first buffer,
+          propagate_buf_[0] = in;
+          // Propagate through all the components,
+          for (int32 i = 0; i < static_cast<int32>(components_.size()); i++) {
+            components_[i]->Propagate(propagate_buf_[i], &propagate_buf_[i+1]);
+          }
+          // Copy the output from the last buffer,
+          (*out) = propagate_buf_[NumComponents()];
+        }
+
+
+        // 估计损失--> obj_diff
+        // obj_diff 的行是所有frame, 列是one-hot形式的误差(每种可能的pdf都会产生误差)
+        // 一个frame可能生成所有可能的pdf，one-hot内部不同的pdf概率不同.
+        // evaluate objective function we've chosen,
+        if (objective_function == "xent") {
+          // gradients re-scaled by weights in Eval,
+          //       帧权重      nnet输出    nnet真实值  nnet_out - nnet_tgt?
+          xent.Eval(frm_weights, nnet_out, nnet_tgt, &obj_diff);
+
+
+          // 计算xent损失
+          void Xent::Eval(const VectorBase<BaseFloat> &frame_weights,
+                          const CuMatrixBase<BaseFloat> &net_out,
+                          const Posterior &post,
+                          CuMatrix<BaseFloat> *diff) {
+            int32
+                num_frames = net_out.NumRows(),
+                num_pdf = net_out.NumCols();
+            KALDI_ASSERT(num_frames == post.size());
+            // convert posterior to matrix,
+            PosteriorToMatrix(post, num_pdf, &tgt_mat_);
+            // call the other eval function,
+            Eval(frame_weights, net_out, tgt_mat_, diff);
+          }
+          
+
+          // post_dim 的维度是 num_pdf, 将frame的真实结果 映射为Matrix
+          void PosteriorToMatrix(const Posterior &post,
+                                 const int32 post_dim, Matrix<Real> *mat) {
+            // Make a host-matrix,
+            int32 num_rows = post.size();
+            mat->Resize(num_rows, post_dim, kSetZero);  // zero-filled
+            
+            // Fill from Posterior,
+            for (int32 t = 0; t < post.size(); t++) {
+              for (int32 i = 0; i < post[t].size(); i++) {
+                int32 col = post[t][i].first;
+                if (col >= post_dim) {
+                  KALDI_ERR << "Out-of-bound Posterior element with index " << col
+                            << ", higher than number of columns " << post_dim;
+                }
+                (*mat)(t, col) = post[t][i].second;
+              }
+            }
+          }
+
+
+
+          void Xent::Eval(const VectorBase<BaseFloat> &frame_weights,
+                          const CuMatrixBase<BaseFloat> &net_out,
+                          const CuMatrixBase<BaseFloat> &targets,
+                          CuMatrix<BaseFloat> *diff) {
+            // frame_weight 每帧权重 == 1.0   [FrameCnt x 1]
+            // net_out   nnet 输出结果 [FrameCnt x Num_pdf]
+            // targets   nnet 真实标签 [FrameCnt x Num_pdf]
+            // check inputs,
+            KALDI_ASSERT(net_out.NumCols() == targets.NumCols());
+            KALDI_ASSERT(net_out.NumRows() == targets.NumRows());
+            KALDI_ASSERT(net_out.NumRows() == frame_weights.Dim());
+
+            KALDI_ASSERT(KALDI_ISFINITE(frame_weights.Sum()));
+            KALDI_ASSERT(KALDI_ISFINITE(net_out.Sum()));
+            KALDI_ASSERT(KALDI_ISFINITE(targets.Sum()));
+
+            // 每个pdf的主要统计量 (nnet 输出结果[Num_pdf x 1])
+            // buffer initialization,
+            int32 num_classes = targets.NumCols();
+            if (frames_.Dim() == 0) {
+              frames_.Resize(num_classes);
+              xentropy_.Resize(num_classes);
+              entropy_.Resize(num_classes);
+              correct_.Resize(num_classes);
+            }
+
+            // get frame_weights to GPU,
+            frame_weights_ = frame_weights;
+
+            // 有一些帧的 输出结果总和 = 0, 多语言训练时会出现.这里可以不考虑
+            {
+              // There may be frames for which the sum of targets is zero.
+              // This happens in multi-lingual training when the frame
+              // has target class in the softmax of another language.
+              // We 'switch-off' such frames by masking the 'frame_weights_',
+              target_sum_.Resize(targets.NumRows());
+              target_sum_.AddColSumMat(1.0, targets, 0.0);
+              frame_weights_.MulElements(target_sum_);
+            }
+
+            // 计算 上一层神经元激活函数的导数
+            // compute derivative wrt. activations of last layer of neurons,
+            // （Y-T）
+            *diff = net_out;
+            diff->AddMat(-1.0, targets);
+            diff->MulRowsVec(frame_weights_);  // weighting,
+
+            // 计算pdf的帧总数
+            // count frames per class,
+            frames_aux_ = targets;
+            frames_aux_.MulRowsVec(frame_weights_);
+            frames_.AddRowSumMat(1.0, CuMatrix<double>(frames_aux_));
+
+            // 估计帧 级别的分类结果?
+            // evaluate the frame-level classification,
+            // 找到每行row 的最大概率的pdf-id 
+            net_out.FindRowMaxId(&max_id_out_);  // find max in nn-output
+            targets.FindRowMaxId(&max_id_tgt_);  // find max in targets
+
+            // 统计所有pdf-id 的正确frame数量(weighted加权重的)  ===> correct_
+            CountCorrectFramesWeighted(max_id_out_, max_id_tgt_,
+                                       frame_weights_, &correct_);
+
+
+            // 计算交叉熵
+            // calculate cross_entropy (in GPU),
+            xentropy_aux_ = net_out;  // y
+            xentropy_aux_.Add(1e-20);  // avoid log(0)
+            xentropy_aux_.ApplyLog();  // log(y)
+            xentropy_aux_.MulElements(targets);  // t*log(y)
+            xentropy_aux_.MulRowsVec(frame_weights_);  // w*t*log(y)
+            xentropy_.AddRowSumMat(-1.0, CuMatrix<double>(xentropy_aux_));
+
+            // 计算熵
+            // caluculate entropy (in GPU),
+            entropy_aux_ = targets;  // t
+            entropy_aux_.Add(1e-20);  // avoid log(0)
+            entropy_aux_.ApplyLog();  // log(t)
+            entropy_aux_.MulElements(targets);  // t*log(t)
+            entropy_aux_.MulRowsVec(frame_weights_);  // w*t*log(t)
+            entropy_.AddRowSumMat(-1.0, CuMatrix<double>(entropy_aux_));
+
+            // progressive loss reporting
+            // 过程中损失报告
+            if (opts_.loss_report_frames > 0) {
+              // 帧权重总损失
+              frames_progress_ += frame_weights_.Sum();
+              // 交叉熵总体值
+              xentropy_progress_ += -xentropy_aux_.Sum();
+              // 熵总体值
+              entropy_progress_ += -entropy_aux_.Sum();
+
+              KALDI_ASSERT(KALDI_ISFINITE(xentropy_progress_));
+              KALDI_ASSERT(KALDI_ISFINITE(entropy_progress_));
+
+              if (frames_progress_ > opts_.loss_report_frames) {
+                // loss value,  交叉熵与 真实熵误差率
+                double progress_value =
+                    (xentropy_progress_ - entropy_progress_) / frames_progress_;
+
+                // time-related info (fps is weighted),
+                double time_now = timer_.Elapsed();
+                double fps = frames_progress_ / (time_now - elapsed_seconds_);
+                double elapsed_hours = time_now / 3600;
+                elapsed_seconds_ = time_now; // store,
+
+                // print,
+                KALDI_LOG << "ProgressLoss[last "
+                    << static_cast<int>(frames_progress_/100/3600) << "h of "
+                    << static_cast<int>(frames_.Sum()/100/3600) << "h]: "
+                          << progress_value << " (Xent)"
+                          << ", fps=" << fps
+                          << std::setprecision(3)
+                          << ", elapsed " << elapsed_hours << "h";
+                // store,
+                loss_vec_.push_back(progress_value);
+                // reset,
+                frames_progress_ = 0;
+                xentropy_progress_ = 0.0;
+                entropy_progress_ = 0.0;
+              }
+            }
+          }
+         
+          
+        }
+
+        // 后向传播 残差分配,进行参数更新
+        if (!crossvalidate) {
+          // back-propagate, and do the update,
+          nnet.Backpropagate(obj_diff, NULL);
+
+          /**
+           * Error back-propagation through the network,
+           * (from last component to first).
+           */
+          void Nnet::Backpropagate(const CuMatrixBase<BaseFloat> &out_diff,
+                                   CuMatrix<BaseFloat> *in_diff) {
+
+            // std::vector<CuMatrix<BaseFloat> > propagate_buf_;  
+            // std::vector<CuMatrix<BaseFloat> > backpropagate_buf_;
+            
+            // Copy the derivative in case of empty network,
+            if (NumComponents() == 0) {
+              (*in_diff) = out_diff;  // copy,
+              return;
+            }
+            // We need C+1 buffers,
+            KALDI_ASSERT(static_cast<int32>(propagate_buf_.size()) == NumComponents()+1);
+            
+            if (backpropagate_buf_.size() != NumComponents()+1) {
+              backpropagate_buf_.resize(NumComponents()+1);
+            }
+
+            
+            // Copy 'out_diff' to last buffer,
+            backpropagate_buf_[NumComponents()] = out_diff;
+
+            // Loop from last Component to the first,
+            for (int32 i = NumComponents()-1; i >= 0; i--) {
+              // Backpropagate through 'Component',
+              components_[i]->Backpropagate(propagate_buf_[i],
+                                            propagate_buf_[i+1],
+                                            backpropagate_buf_[i+1],
+                                            &backpropagate_buf_[i]);
+              // Update 'Component' (if applicable),
+              if (components_[i]->IsUpdatable()) {
+                UpdatableComponent* uc =
+                    dynamic_cast<UpdatableComponent*>(components_[i]);
+                uc->Update(propagate_buf_[i], backpropagate_buf_[i+1]);
+              }
+            }
+
+            // Export the derivative (if applicable),
+            if (NULL != in_diff) {
+              (*in_diff) = backpropagate_buf_[0];
+            }
+          }  // end Backpropagate
+
+          
+        }
+
+        // 1st mini-batch : show what happens in network,
+        if (total_frames == 0) {
+          KALDI_VLOG(1) << "### After " << total_frames << " frames,";
+          KALDI_VLOG(1) << nnet.InfoPropagate();
+          if (!crossvalidate) {
+            KALDI_VLOG(1) << nnet.InfoBackPropagate();
+            KALDI_VLOG(1) << nnet.InfoGradient();
+          }
+        }
+        
+        // VERBOSE LOG  冗余日志?? 监视NN训练过程.
+        // monitor the NN training (--verbose=2),
+        if (GetVerboseLevel() >= 2) {
+          static int32 counter = 0;
+          counter += nnet_in.NumRows();
+          // print every 25k frames,
+          if (counter >= 25000) {
+            KALDI_VLOG(2) << "### After " << total_frames << " frames,";
+            KALDI_VLOG(2) << nnet.InfoPropagate();
+            if (!crossvalidate) {
+              KALDI_VLOG(2) << nnet.InfoBackPropagate();
+              KALDI_VLOG(2) << nnet.InfoGradient();
+            }
+            counter = 0;
+          }
+        }
+
+        
+        total_frames += nnet_in.NumRows();
+      }
+    }  // main loop,
+
+    // 显示nnetwork 训练结果
+    // after last mini-batch : show what happens in network,
+    KALDI_VLOG(1) << "### After " << total_frames << " frames,";
+    KALDI_VLOG(1) << nnet.InfoPropagate();
+    if (!crossvalidate) {
+      KALDI_VLOG(1) << nnet.InfoBackPropagate();
+      KALDI_VLOG(1) << nnet.InfoGradient();
+    }
+
+    // 将nnet模型 写入nnet模型文件
+    if (!crossvalidate) {
+      nnet.Write(target_model_filename, binary);
+    }
+
+    KALDI_LOG << "Done " << num_done << " files, "
+              << num_no_tgt_mat << " with no tgt_mats, "
+              << num_other_error << " with other errors. "
+              << "[" << (crossvalidate ? "CROSS-VALIDATION" : "TRAINING")
+              << ", " << (randomize ? "RANDOMIZED" : "NOT-RANDOMIZED")
+              << ", " << time.Elapsed() / 60 << " min, processing "
+              << total_frames / time.Elapsed() << " frames per sec.]";
+
+    // 交叉熵的log信息
+    if (objective_function == "xent") {
+      KALDI_LOG << xent.ReportPerClass();
+      KALDI_LOG << xent.Report();
+    }
+
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().PrintProfile();
+#endif
+
+    return 0;
+  
+  }
+
+
+  
+  
+
+  
+
+
+
+
+  
+  
+  //   交叉验证 ============= 通过交叉验证集合的loss 判断nnet性能.
   //   # cross-validation,
   //   log=$dir/log/iter${iter}.cv.log; hostname>$log
   //   $train_tool --cross-validate=true --randomize=false --verbose=$verbose $train_tool_opts \
@@ -1619,19 +2289,26 @@ void train_scheduler(){
   //   loss_new=$(cat $dir/log/iter${iter}.cv.log | grep "AvgLoss:" | tail -n 1 | awk '{ print $4; }')
   //   echo -n "CROSSVAL AVG.LOSS $(printf "%.4f" $loss_new), "
 
+
+  
   //   性能满足 则停止训练迭代
   //   # accept or reject?
   //   loss_prev=$loss
   //   误差有所下降 accept
-  //   if [ 1 == $(awk "BEGIN{print($loss_new < $loss ? 1:0);}") -o $iter -le $keep_lr_iters -o $iter -le $min_iters ]; then
+  //                             keep_lr_iters = 0, min_iters=0;
+  //   if [ 损失下降 or 迭代次数<keep_lr_iters or 迭代次数<最小迭代次数]; 说明此时还需要继续训练.
+    //   if [ 1 == $(awk "BEGIN{print($loss_new < $loss ? 1:0);}") -o $iter -le $keep_lr_iters -o $iter -le $min_iters ]; then
   //     # accepting: the loss was better, or we had fixed learn-rate, or we had fixed epoch-number,
+  //     认为当前的nnet结构更好 将其设置为mlp_best.
   //     loss=$loss_new
   //     mlp_best=$dir/nnet/${mlp_base}_iter${iter}_learnrate${learn_rate}_tr$(printf "%.4f" $tr_loss)_cv$(printf "%.4f" $loss_new)
+  //     如果是如下两种情况, 则使用如下的名字. 这里不会进入.
   //     [ $iter -le $min_iters ] && mlp_best=${mlp_best}_min-iters-$min_iters
   //     [ $iter -le $keep_lr_iters ] && mlp_best=${mlp_best}_keep-lr-iters-$keep_lr_iters
   //     mv $mlp_next $mlp_best
   //     echo "nnet accepted ($(basename $mlp_best))"
   //     echo $mlp_best > $dir/.mlp_best
+  //   否则此时 不需要再进行训练 把当前的nnet结果设置为拒绝的mlp
   //   else
   //     # rejecting,
   //     mlp_reject=$dir/nnet/${mlp_base}_iter${iter}_learnrate${learn_rate}_tr$(printf "%.4f" $tr_loss)_cv$(printf "%.4f" $loss_new)_rejected
@@ -1639,30 +2316,41 @@ void train_scheduler(){
   //     echo "nnet rejected ($(basename $mlp_reject))"
   //   fi
 
-  
+
+  //   创建.done file， 当前迭代完成
   //   # create .done file, the iteration (epoch) is completed,
   //   touch $dir/.done_iter$iter
 
+  //   按照原始学习率 继续迭代学习?
   //   # continue with original learn-rate,
   //   [ $iter -le $keep_lr_iters ] && continue
 
+  //   停止准则, 损失提升率 (loss-prev - loss) / loss_prev
   //   # stopping criterion,
   //   rel_impr=$(awk "BEGIN{print(($loss_prev-$loss)/$loss_prev);}")
+  //   if [ 减半学习率 = 1 &&　提升率较小]
   //   if [ 1 == $halving -a 1 == $(awk "BEGIN{print($rel_impr < $end_halving_impr ? 1:0);}") ]; then
   //     if [ $iter -le $min_iters ]; then
+  //       建议停止, 但是应该要至少继续完成了　最少迭代次数.
   //       echo we were supposed to finish, but we continue as min_iters : $min_iters
   //       continue
   //     fi
+  // 　　提升率较小.
   //     echo finished, too small rel. improvement $rel_impr
   //     break
   //   fi
 
+  
+
+  //   if 损失提升率较小,　则设置减半变量.
   //   # start learning-rate fade-out when improvement is low,
   //   if [ 1 == $(awk "BEGIN{print($rel_impr < $start_halving_impr ? 1:0);}") ]; then
   //     halving=1
   //     echo $halving >$dir/.halving
   //   fi
 
+  
+  //   判断减半变量, 降低学习率
   //   # reduce the learning-rate,
   //   if [ 1 == $halving ]; then
   //     learn_rate=$(awk "BEGIN{print($learn_rate*$halving_factor)}")
@@ -1670,8 +2358,10 @@ void train_scheduler(){
   //   fi
   // done
 
-  
+
+  // 选择最佳nnetwork
   // # select the best network,
+  // 如果最佳网络 不同于初始化的网络 则认为训练有效
   // if [ $mlp_best != $mlp_init ]; then
   //   mlp_final=${mlp_best}_final_
   //   ( cd $dir/nnet; ln -s $(basename $mlp_best) $(basename $mlp_final); )
