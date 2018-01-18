@@ -1949,18 +1949,22 @@ void train_scheduler(){
         
         void Nnet::Propagate(const CuMatrixBase<BaseFloat> &in,
                              CuMatrix<BaseFloat> *out) {
-          
           // In case of empty network copy input to output,
           if (NumComponents() == 0) {
             (*out) = in;  // copy,
             return;
           }
-          // We need C+1 buffers,
+          
+          // 前向传播中各层神经元节点输出值.
           if (propagate_buf_.size() != NumComponents()+1) {
             propagate_buf_.resize(NumComponents()+1);
           }
+          
           // Copy input to first buffer,
           propagate_buf_[0] = in;
+          // 经过各层神经网络向后传播, 直到propagate_buf_[NumComponents()]  --- out
+          // [0 - Cnt]
+          // 0 是输入层, 1 是第一层的输出节点, Cnt 是最后一层的输出节点
           // Propagate through all the components,
           for (int32 i = 0; i < static_cast<int32>(components_.size()); i++) {
             components_[i]->Propagate(propagate_buf_[i], &propagate_buf_[i+1]);
@@ -2018,6 +2022,14 @@ void train_scheduler(){
 
 
 
+          // in:
+          // frame_weights 帧权重
+          // net_out   网络输出
+          // targets   结果标签
+          // out:
+          // diff      out-targets (基于softmax的交叉熵的导数, 计算残差用)
+          // use:
+          // 根据帧权重, 通过net_out, targets 计算误差, 计算熵, 假设交叉熵, diff 实际上是交叉熵的导数, 
           void Xent::Eval(const VectorBase<BaseFloat> &frame_weights,
                           const CuMatrixBase<BaseFloat> &net_out,
                           const CuMatrixBase<BaseFloat> &targets,
@@ -2154,6 +2166,8 @@ void train_scheduler(){
            * Error back-propagation through the network,
            * (from last component to first).
            */
+          // out_diff 是输出节点的误差.
+          // in_diff 是反向传导回到输入节点.
           void Nnet::Backpropagate(const CuMatrixBase<BaseFloat> &out_diff,
                                    CuMatrix<BaseFloat> *in_diff) {
 
@@ -2176,18 +2190,91 @@ void train_scheduler(){
             // Copy 'out_diff' to last buffer,
             backpropagate_buf_[NumComponents()] = out_diff;
 
+            // 逐层 进行反向传播.
             // Loop from last Component to the first,
             for (int32 i = NumComponents()-1; i >= 0; i--) {
+              // 反向传播 神经元 残差!!
               // Backpropagate through 'Component',
               components_[i]->Backpropagate(propagate_buf_[i],
                                             propagate_buf_[i+1],
                                             backpropagate_buf_[i+1],
                                             &backpropagate_buf_[i]);
+
+
+              void Softmax::BackpropagateFnc(const CuMatrixBase<BaseFloat> &in,
+                                    const CuMatrixBase<BaseFloat> &out,
+                                    const CuMatrixBase<BaseFloat> &out_diff,
+                                    CuMatrixBase<BaseFloat> *in_diff) {
+                // out_diff虽然是简单的(out - target),但是经过推导, 实际上out_diff是
+                // 上一层的的残差直接是上一层神经元的输出与输入相等 所以直接是残差. 
+                in_diff->CopyFromMat(out_diff);
+              }
+
+              void AffineTranform::BackpropagateFnc(const CuMatrixBase<BaseFloat> &in,
+                                    const CuMatrixBase<BaseFloat> &out,
+                                    const CuMatrixBase<BaseFloat> &out_diff,
+                                    CuMatrixBase<BaseFloat> *in_diff) {
+                // multiply error derivative by weights
+                in_diff->AddMatMat(1.0, out_diff, kNoTrans, linearity_, kNoTrans, 0.0);
+              }
+
+              // 利用本层神经元前向输出 与 本层神经元的反向残差 更新参数 (两者在数组中index 差1)
               // Update 'Component' (if applicable),
               if (components_[i]->IsUpdatable()) {
                 UpdatableComponent* uc =
                     dynamic_cast<UpdatableComponent*>(components_[i]);
                 uc->Update(propagate_buf_[i], backpropagate_buf_[i+1]);
+
+                // 按照公式进行逐层的 W b等参数更新.
+                void AffineTranform::Update(const CuMatrixBase<BaseFloat> &input,
+                                            const CuMatrixBase<BaseFloat> &diff) {
+
+                  // W b 的学习率
+                  // we use following hyperparameters from the option class
+                  const BaseFloat lr = opts_.learn_rate * learn_rate_coef_;
+                  const BaseFloat lr_bias = opts_.learn_rate * bias_learn_rate_coef_;
+
+                  // 动量 与 惩罚项
+                  const BaseFloat mmt = opts_.momentum;
+                  const BaseFloat l2 = opts_.l2_penalty;
+                  const BaseFloat l1 = opts_.l1_penalty;
+                  
+                  // we will also need the number of frames in the mini-batch
+                  const int32 num_frames = input.NumRows();
+                  // 残差对W的梯度
+                  // compute gradient (incl. momentum)
+                  linearity_corr_.AddMatMat(1.0, diff, kTrans, input, kNoTrans, mmt);
+                  // 残差对b的梯度
+                  bias_corr_.AddRowSumMat(1.0, diff, mmt);
+                  
+                  // l2 regularization
+                  if (l2 != 0.0) {
+                    linearity_.AddMat(-lr*l2*num_frames, linearity_);
+                  }
+                  // l1 regularization
+                  if (l1 != 0.0) {
+                    cu::RegularizeL1(&linearity_, &linearity_corr_, lr*l1*num_frames, lr);
+                  }
+
+                  // W = W + 学习率*梯度
+                  // update
+                  linearity_.AddMat(-lr, linearity_corr_);
+                  bias_.AddVec(-lr_bias, bias_corr_);
+                  
+                  // max-norm
+                  if (max_norm_ > 0.0) {
+                    CuMatrix<BaseFloat> lin_sqr(linearity_);
+                    lin_sqr.MulElements(linearity_);
+                    CuVector<BaseFloat> l2(OutputDim());
+                    l2.AddColSumMat(1.0, lin_sqr, 0.0);
+                    l2.ApplyPow(0.5);  // we have per-neuron L2 norms,
+                    CuVector<BaseFloat> scl(l2);
+                    scl.Scale(1.0/max_norm_);
+                    scl.ApplyFloor(1.0);
+                    scl.InvertElements();
+                    linearity_.MulRowsVec(scl);  // shink to sphere!
+                  }
+                }
               }
             }
 
