@@ -4,10 +4,6 @@
 //1  根据ctx_dep决策树(pdf-id) topo结构(phone,Hmm-State,pdf-class) 构建初始化的转移模型-trans-model（没有需要统计量?）
 //2  根据统计量初始化AmDiagGmm (通过统计量 对每个pdf-id构建一个DiagGmm，然后综合得到 AmDiagGmm)
 void gmm_init_model(){
-  using namespace kaldi;
-  using namespace kaldi;
-  typedef kaldi::int32 int32;
-
   const char *usage =
       "Initialize GMM from decision tree and tree stats\n"
       "Usage:  gmm-init-model [options] <tree-in> <tree-stats-in> <topo-file> <model-out> [<old-tree> <old-model>]\n"
@@ -32,6 +28,7 @@ void gmm_init_model(){
       old_tree_filename = po.GetOptArg(5),
       old_model_filename = po.GetOptArg(6);
 
+  // ctx_dep tree
   ContextDependency ctx_dep;
   ReadKaldiObject(tree_filename, &ctx_dep);
 
@@ -48,7 +45,9 @@ void gmm_init_model(){
   HmmTopology topo;
   ReadKaldiObject(topo_filename, &topo);
 
+  
   // 根据ctx_dep 对象得到 EventMap 对象指针.
+  // EventMap ==== 通过EventType -> pdf-id
   const EventMap &to_pdf = ctx_dep.ToPdfMap();  // not owned here.
 
   TransitionModel trans_model(ctx_dep, topo);
