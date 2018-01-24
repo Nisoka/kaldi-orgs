@@ -57,7 +57,6 @@ void align_sh(){
   // data=$1       //fbank  特征
   // lang=$2       //lang/---> L_disambig.fst  L.fst  oov.int  oov.txt  phones  phones.txt  topo  words.txt 
   // srcdir=$3     // srcdir=exp/tri4b_dnn
-
   // dir=$4        // srcdir=exp/tri4b_dnn_ali
 
   
@@ -146,29 +145,15 @@ void align_sh(){
   //       "$feats" "ark,t:|gzip -c >$dir/ali.JOB.gz" || exit 1;
   // fi
 
-  
-  // 可选的 生成lattice格式的对齐结果, 这里并不生成, 稍后会进行生成lattice结果.
-  // # Optionally align to lattice format (handy to get word alignment)
-  // if [ "$align_to_lats" == "true" ]; then
-  //   echo "$0: aligning also to lattices '$dir/lat.*.gz'"
-  //   $cmd JOB=1:$nj $dir/log/align_lat.JOB.log \
-  //     compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $lats_graph_scales $dir/tree $dir/final.mdl  $lang/L.fst "$tra" ark:- \| \
-  //     latgen-faster-mapped $lats_decode_opts --word-symbol-table=$lang/words.txt $dir/final.mdl ark:- \
-  //       "$feats" "ark:|gzip -c >$dir/lat.JOB.gz" || exit 1;
-  // fi
-
-  // echo "$0: done aligning data."
-
-}
-// ------------------------------------------------------------------------------
-// scale_opts="--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1"
-// beam=10
-// retry_beam=40
-// -------------------------------------------------------------------------------
-//     align-compiled-mapped $scale_opts --beam=$beam --retry-beam=$retry_beam
-//     $dir/final.mdl     ark:-          "$feats"             "ark,t:|gzip -c >$dir/ali.JOB.gz" || exit 1;
-//     转移模型            简图            utt trian-feats         输出对齐结果
-int align_compiled_mapped(int argc, char *argv[]) {
+  // ------------------------------------------------------------------------------
+  // scale_opts="--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1"
+  // beam=10
+  // retry_beam=40
+  // -------------------------------------------------------------------------------
+  //     align-compiled-mapped $scale_opts --beam=$beam --retry-beam=$retry_beam
+  //     $dir/final.mdl     ark:-          "$feats"             "ark,t:|gzip -c >$dir/ali.JOB.gz" || exit 1;
+  //     转移模型            简图            utt trian-feats         输出对齐结果 exp/tri4b_dnn_ali/
+  int align_compiled_mapped(int argc, char *argv[]) {
     const char *usage =
         "Generate alignments, reading log-likelihoods as matrices.\n"
         " (model is needed only for the integer mappings in its transition-model)\n"
@@ -250,6 +235,23 @@ int align_compiled_mapped(int argc, char *argv[]) {
 }
 
 
+  
+  
+  // 可选的 生成lattice格式的对齐结果, 这里并不生成, 稍后会进行生成lattice结果.
+  // # Optionally align to lattice format (handy to get word alignment)
+  // if [ "$align_to_lats" == "true" ]; then
+  //   echo "$0: aligning also to lattices '$dir/lat.*.gz'"
+  //   $cmd JOB=1:$nj $dir/log/align_lat.JOB.log \
+  //     compile-train-graphs --read-disambig-syms=$lang/phones/disambig.int $lats_graph_scales $dir/tree $dir/final.mdl  $lang/L.fst "$tra" ark:- \| \
+  //     latgen-faster-mapped $lats_decode_opts --word-symbol-table=$lang/words.txt $dir/final.mdl ark:- \
+  //       "$feats" "ark:|gzip -c >$dir/lat.JOB.gz" || exit 1;
+  // fi
+
+  // echo "$0: done aligning data."
+
+}
+
+
 
 // 生成MPE lattice 过程   =>> exp/tri4b_dnn_denlats/lat......scp
 void make_denlats(){
@@ -274,68 +276,49 @@ void make_denlats(){
   // # by something like 5 or 10 to get real bytes (not sure why so large)
   
   // # End configuration section.
-  
-  //       use_gpu=no # yes|no|optional
-  //       parallel_opts="--num-threads 2"
-  //       ivector=         # rx-specifier with i-vectors (ark-with-vectors),
 
-
-  //       if [ $# != 4 ]; then
-  //                           echo "Usage: steps/$0 [options] <data-dir> <lang-dir> <src-dir> <exp-dir>"
-  //                           echo "  e.g.: steps/$0 data/train data/lang exp/tri1 exp/tri1_denlats"
-  
-  //                           echo "Works for plain features (or CMN, delta), forwarded through feature-transform."
-  //                           echo ""
-  //                           echo "Main options (for others, see top of script file)"
-  //                           echo "  --config <config-file>                           # config containing options"
-  //                           echo "  --nj <nj>                                        # number of parallel jobs"
-  //                           echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
-  //                           echo "  --sub-split <n-split>                            # e.g. 40; use this for "
-  //                           echo "                           # large databases so your jobs will be smaller and"
-  //                           echo "                           # will (individually) finish reasonably soon."
-  //                           exit 1;
-  //   fi
+ 
 
   //       data=$1    //  data/fbank/train/
   //       lang=$2    //  data/lang
   //       srcdir=$3  //  exp/tri4b_dnn
   //       dir=$4     //  exp/tri4b_denlat
 
-  //       oov=`cat $lang/oov.int` || exit 1;
-  //       检查因素
-  //       utils/lang/check_phones_compatible.sh $lang/phones.txt $srcdir/phones.txt
 
+
+  //       oov=`cat $lang/oov.int` || exit 1;
+  //       检查音素
+  //       utils/lang/check_phones_compatible.sh $lang/phones.txt $srcdir/phones.txt
   //       cp -r $lang $dir/
 
 
-
-
+  
+  //===========================   构建语法FST图 对应为 unigram的语法解码图.
+  //                               怎么生成 unigram语法FST呢? 如果没有语法关系, 那所有词构成一个环就完了啊.?
   //       # Compute grammar FST which corresponds to unigram decoding graph.
-  //       在目标路径生成 lang/
+
+  
+  //       在目标路径生成 lang 目录
   //       new_lang="$dir/"$(basename "$lang")
 
-  //       怎么算 unigram语法FST呢? 如果没有语法关系, 那所有词构成一个环就完了啊.?
-  //       # 生成 unigram 的词语法 FST ==> new_lang
+    
+  //======= make_unigram_grammer.pl 生成 unigram 的词语法 FST ==> new_lang/G.fst.
   //       echo "Making unigram grammar FST in $new_lang"
-  //       将text(标注结果) words.txt 也是标注结果 构建G.fst G.fst 是unigram的
-  //       cat $data/text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
+  //       cat $data/text | utils/sym2int.pl --map-oov $oov -f 2-    $lang/words.txt(word - id Table) | \
   //       awk '{for(n=2;n<=NF;n++){ printf("%s ", $n); } printf("\n"); }' | \
   //       utils/make_unigram_grammar.pl | fstcompile | fstarcsort --sort_type=ilabel > $new_lang/G.fst \
-  //       || exit 1;
 
-  // mkgraph 会生成一个完整的解码目录,
+
+  // ====== mkgraph.sh   生成一个完整的解码目录, 包含 HCLG.fst 各种words.txt phones.txt 等等.
   // 1  组合 L_disambig.fst G.fst final.mdl  ==> HCLG.fst
   // 2  将一些解码需要的 phone 什么的 放入到 $dir 中
-  // mkgraph.sh expects a whole directory "lang", so put everything in one directory...
-  // it gets L_disambig.fst and G.fst (among other things) from $dir/lang, and final.mdl from $srcdir;
-  // the output HCLG.fst goes in $dir/graph.
+  
+  //   mkgraph.sh expects a whole directory "lang", so put everything in one directory...
+  //   it gets L_disambig.fst and G.fst (among other things) from $dir/lang, and final.mdl from $srcdir;
+  //   the output HCLG.fst goes in $dir/graph.
   
   //   echo "Compiling decoding graph in $dir/dengraph"
-  //       if [ -s $dir/dengraph/HCLG.fst ] && [ $dir/dengraph/HCLG.fst -nt $srcdir/final.mdl ]; then
-  //         echo "Graph $dir/dengraph/HCLG.fst already exists: skipping graph creation."
-  //       else
-  //         utils/mkgraph.sh $new_lang $srcdir $dir/dengraph || exit 1;
-  //   fi
+  //   utils/mkgraph.sh $new_lang $srcdir $dir/dengraph || exit 1;
   void mkgraph_sh(){
     // # This script creates a fully expanded decoding graph (HCLG) that represents
     // # all the language-model, pronunciation dictionary (lexicon), context-dependency,
@@ -398,12 +381,11 @@ void make_denlats(){
 
     // mkdir -p $lang/tmp
     // trap "rm -f $lang/tmp/LG.fst.$$" EXIT HUP INT PIPE TERM
-    // # Note: [[ ]] is like [ ] but enables certain extra constructs, e.g. || in
-    // # place of -o
     
-    // 构图 compose L+G  | determinize | minimizen | pushspechial | sort ---> LG.fst.
+    // ===============   构图 compose L+G  | determinize | minimizen | pushspechial | sort === > LG.fst.
     // if [[ ! -s $lang/tmp/LG.fst || $lang/tmp/LG.fst -ot $lang/G.fst || \
     //       $lang/tmp/LG.fst -ot $lang/L_disambig.fst ]]; then
+    
     //   fsttablecompose $lang/L_disambig.fst $lang/G.fst | fstdeterminizestar --use-log=true | \
     //     fstminimizeencoded | fstpushspecial | \
     //     fstarcsort --sort_type=ilabel > $lang/tmp/LG.fst.$$ || exit 1;
@@ -411,7 +393,7 @@ void make_denlats(){
     //   fstisstochastic $lang/tmp/LG.fst || echo "[info]: LG not stochastic."
     // fi
     
-
+    // ================ 构图   =============== > CLG.fst
     // clg=$lang/tmp/CLG_${N}_${P}.fst
     // clg_tmp=$clg.$$
     // ilabels=$lang/tmp/ilabels_${N}_${P}
@@ -429,6 +411,7 @@ void make_denlats(){
     //   fstisstochastic $clg || echo "[info]: CLG not stochastic."
     // fi
 
+    // ================ 构图   =============== > Ha.fst.
     // trap "rm -f $dir/Ha.fst.$$" EXIT HUP INT PIPE TERM
     // if [[ ! -s $dir/Ha.fst || $dir/Ha.fst -ot $model  \
     //     || $dir/Ha.fst -ot $lang/tmp/ilabels_${N}_${P} ]]; then
@@ -438,6 +421,7 @@ void make_denlats(){
     //   mv $dir/Ha.fst.$$ $dir/Ha.fst
     // fi
 
+    //  ====================================>  HCLGa.FST
     // trap "rm -f $dir/HCLGa.fst.$$" EXIT HUP INT PIPE TERM
     // if [[ ! -s $dir/HCLGa.fst || $dir/HCLGa.fst -ot $dir/Ha.fst || \
     //       $dir/HCLGa.fst -ot $clg ]]; then
@@ -453,6 +437,7 @@ void make_denlats(){
     //   fstisstochastic $dir/HCLGa.fst || echo "HCLGa is not stochastic"
     // fi
 
+    //  ==================================>  HCLG.fst
     // trap "rm -f $dir/HCLG.fst.$$" EXIT HUP INT PIPE TERM
     // if [[ ! -s $dir/HCLG.fst || $dir/HCLG.fst -ot $dir/HCLGa.fst ]]; then
     //   add-self-loops --self-loop-scale=$loopscale --reorder=true \
@@ -465,17 +450,7 @@ void make_denlats(){
     //   fi
     // fi
 
-    // # note: the empty FST has 66 bytes.  this check is for whether the final FST
-    // # is the empty file or is the empty FST.
-    // if ! [ $(head -c 67 $dir/HCLG.fst | wc -c) -eq 67 ]; then
-    //   echo "$0: it looks like the result in $dir/HCLG.fst is empty"
-    //   exit 1
-    // fi
-
-    
-    // # save space.
-    // rm $dir/HCLGa.fst $dir/Ha.fst 2>/dev/null || true
-
+   
     // 保存lexicon 的副本, 和一系列的静音因素 这样我们解码就不需要 $lang目录了
     // # keep a copy of the lexicon and a list of silence phones with HCLG...
     // # this means we can decode without reference to the $lang directory.
@@ -496,11 +471,11 @@ void make_denlats(){
 
   }
 
-
   
   // cp $srcdir/{tree,final.mdl} $dir
 
   // # Select default locations to model files
+  
   // nnet=$srcdir/final.nnet;
   // class_frame_counts=$srcdir/ali_train_pdf.counts
   // feature_transform=$srcdir/final.feature_transform
@@ -530,6 +505,7 @@ void make_denlats(){
   // # add-deltas (optional),
   // [ ! -z "$delta_opts" ] && feats="$feats add-deltas $delta_opts ark:- ark:- |"
 
+  
 
   // # nnet-forward,
   // feats="$feats nnet-forward $nnet_forward_opts --feature-transform=$feature_transform --class-frame-counts=$class_frame_counts --use-gpu=$use_gpu $nnet ark:- ark:- |"
@@ -542,16 +518,24 @@ void make_denlats(){
   // }
   // trap "cleanup" INT QUIT TERM EXIT
 
+  // ============================= 当前 feats 变成 pdf-id 的matrix<pdf-id prob>
 
+
+
+
+  
   // echo "$0: generating denlats from data '$data', putting lattices in '$dir'"
   // MPE 会需要使用 Lattice 做 MPE损失函数的分母, 进行去区分性训练
-  // 
+  
+
+  // ================================ 使用　latgen-faster-mapped 生成一句utt的lattice
+  
   // #1) Generate the denominator lattices
   // if [ $sub_split -eq 1 ]; then
-
   //   准备SCP 文件 用来分离保存所有的 lattice,
   //   每个lattice都被gizp到一个 exp/tri4b_dnn_denlat/latn/utt.gz文件中.
   //   此时 实际上只是提供了目标地址, 后面 latgen-faster-mapped 是生成lattice过程
+  
   //   # Prepare 'scp' for storing lattices separately and gzipped
   //   for n in `seq $nj`; do
   //     [ ! -d $dir/lat$n ] && mkdir $dir/lat$n;
@@ -573,28 +557,13 @@ void make_denlats(){
   // fi
 
 
-  // 
-  // #2) Generate 'scp' for reading the lattices
-  // 测试 就是更改为绝对路径
-  // # make $dir an absolute pathname.
-  // [ '/' != ${dir:0:1} ] && dir=$PWD/$dir
 
-  // 将所有 *.gz 经过怎么处理 然后 > $dir/lat.scp.
-  // for n in `seq $nj`; do
-  //   find $dir/lat${n} -name "*.gz" | perl -ape 's:.*/([^/]+)\.gz$:$1 gunzip -c $& |:; '
-  // done | sort >$dir/lat.scp
-  // [ -s $dir/lat.scp ] || exit 1
-
-  // echo "$0: done generating denominator lattices."
-}
-
-
-// latgen-faster-mapped --beam=$beam --lattice-beam=$lattice_beam --acoustic-scale=$acwt \
-// --max-mem=$max_mem --max-active=$max_active --word-symbol-table=$lang/words.txt
-// $srcdir/final.mdl    $dir/dengraph/HCLG.fst   "$feats"                          "scp:$dir/lat.store_separately_as_gz.scp"
-// transition-model     HCLG.fst                  pdf-id's log-likelihood          out> lattice write scp 写描述符
-
-void latgen_faster_mapped(){
+  // latgen-faster-mapped --beam=$beam --lattice-beam=$lattice_beam --acoustic-scale=$acwt \
+  // --max-mem=$max_mem --max-active=$max_active --word-symbol-table=$lang/words.txt(word - wordid)
+  // $srcdir/final.mdl    $dir/dengraph/HCLG.fst   "$feats"                    "scp:$dir/lat.store_separately_as_gz.scp"
+  // transition-model     HCLG.fst                  pdf-id's log-likelihood    out> lattice write scp 写描述符(写的是utt lattice)
+  //                                                                            dir=exp/tri4b_dnn_denlat
+  void latgen_faster_mapped(){
     const char *usage =
         "Generate lattices, reading log-likelihoods as matrices\n"
         " (model is needed only for the integer mappings in its transition-model)\n"
@@ -643,7 +612,7 @@ void latgen_faster_mapped(){
 
     Int32VectorWriter alignment_writer(alignment_wspecifier);
 
-    //  将utt 标注 >> word_syms
+    // words - word-id 的对应表
     fst::SymbolTable *word_syms = NULL;
     if (word_syms_filename != "")
       if (!(word_syms = fst::SymbolTable::ReadText(word_syms_filename)))
@@ -676,7 +645,7 @@ void latgen_faster_mapped(){
           DecodableMatrixScaledMapped decodable(trans_model, loglikes, acoustic_scale);
 
           double like;
-          // 根据pdf-id 结果  +  decode_fst + word_syms 标注Table(内部会识别具体的words) + utt_key
+          // 根据pdf-id 结果  +  decode_fst + word_syms (word - id Table) + utt_key
           if (DecodeUtteranceLatticeFaster(
                   decoder, decodable, trans_model, word_syms, utt,
                   acoustic_scale, determinize, allow_partial, &alignment_writer, &words_writer,
@@ -695,6 +664,25 @@ void latgen_faster_mapped(){
 
     delete word_syms;
 }
+  
+  
+  
+  // #2) Generate 'scp' for reading the lattices
+  // 测试 就是更改为绝对路径
+  // # make $dir an absolute pathname.
+  // [ '/' != ${dir:0:1} ] && dir=$PWD/$dir
+
+  // 将所有 *.gz 经过怎么处理 然后 > $dir/lat.scp.
+  // for n in `seq $nj`; do
+  //   find $dir/lat${n} -name "*.gz" | perl -ape 's:.*/([^/]+)\.gz$:$1 gunzip -c $& |:; '
+  // done | sort >$dir/lat.scp
+  // [ -s $dir/lat.scp ] || exit 1
+
+  // echo "$0: done generating denominator lattices."
+}
+
+
+
 
   
 
@@ -712,14 +700,12 @@ void latgen_faster_mapped(){
 
 
 //  =======================  MPE区分性训练 训练过程
+//                           通过3次MPE为目标函数的迭代 重新训练 DNN.
+//      srcdir=exp/tri4b_dnn
+//      outdir=exp/tri4b_dnn_mpe
 
-// if [ $stage -le 3 ]; then
-//   outdir=exp/tri4b_dnn_mpe
-
-//   通过3 iter MPE 重新训练 DNN.
-//   #Re-train the DNN by 3 iteration of MPE
 //   steps/nnet/train_mpe.sh --cmd "$cuda_cmd" --num-iters 3 --acwt $acwt --do-smbr false \
-//     data/fbank/train      data/lang    $srcdir     ${srcdir}_ali    ${srcdir}_denlats    $outdir || exit 1
+//     data/fbank/train      data/lang    $srcdir     ${srcdir}_ali    ${srcdir}_denlats    $outdir 
 
 void nnet_train_mpe_sh(){
   // 序列-区分性 MPE/sMBR 的DNN训练
@@ -776,14 +762,17 @@ void nnet_train_mpe_sh(){
   }
 
 
-  //     data/fbank/train      data/lang    $srcdir     ${srcdir}_ali    ${srcdir}_denlats    $outdir || exit 1
+  // data/fbank/train      data/lang    $srcdir     ${srcdir}_ali    ${srcdir}_denlats    $outdir || exit 1
+  
   // data=$1
   // lang=$2
   // srcdir=$3               exp/tri4b_dnn
-  // alidir=$4               exp/tri4b_dnn_ali
-  // denlatdir=$5            exp/tri4b_dnn_denlat
+  // alidir=$4               exp/tri4b_dnn_ali           mpe通过dnn训练结果, 准备好的对齐结果
+  // denlatdir=$5            exp/tri4b_dnn_denlat        mpe通过dnn训练结果, 准备好的lattice结果
+
   // dir=$6                  exp/tri4b_dnn_mpe
 
+  // check files
   // for f in $data/feats.scp $denlatdir/lat.scp \
   //          $alidir/{tree,final.mdl,ali.1.gz} \
   //          $srcdir/{final.nnet,final.feature_transform}; do
@@ -802,9 +791,11 @@ void nnet_train_mpe_sh(){
     // utils/lang/check_phones_compatible.sh $lang/phones.txt $srcdir/phones.txt
     // utils/lang/check_phones_compatible.sh $lang/phones.txt $alidir/phones.txt
     // cp $lang/phones.txt $dir
+
     
     // cp $alidir/{final.mdl,tree} $dir
     // [ -z $silphonelist ] && silphonelist=`cat $lang/phones/silence.csl` # Default 'silphonelist',
+    // silphonelist --> 一般就是一个因素.
 
 
 
@@ -840,10 +831,8 @@ void nnet_train_mpe_sh(){
   // [ -n "$unkphonelist" ] && echo "WARNING: The option '--unkphonelist' is now deprecated. Please remove it from your recipe..."
   // [ -n "$exclude_silphones" ] && echo "WARNING: The option '--exclude-silphones' is now deprecated. Please remove it from your recipe..."
 
-  
-  // ###
+
   // ### PREPARE FEATURE EXTRACTION PIPELINE
-  // ###
   // # import config,
   // cmvn_opts=
   // delta_opts=
@@ -854,34 +843,20 @@ void nnet_train_mpe_sh(){
   // [ -e $D/delta_opts ] && delta_opts=$(cat $D/delta_opts)
 
 
-  // # =================== 创建特征 steam  feats + cmvn + delta 
+  // # =================== 创建特征 steam  feats + cmvn + delta   ===> 还是特征.
   // # Create the feature stream,
   {
     // feats="ark,o:copy-feats scp:$dir/train.scp ark:- |"
+
     // # apply-cmvn (optional),
     // [ ! -z "$cmvn_opts" -a ! -f $data/cmvn.scp ] && echo "$0: Missing $data/cmvn.scp" && exit 1
     // [ ! -z "$cmvn_opts" ] && feats="$feats apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp ark:- ark:- |"
+
     // # add-deltas (optional),
     // [ ! -z "$delta_opts" ] && feats="$feats add-deltas $delta_opts ark:- ark:- |"
+
     // # add-pytel transform (optional),
     // [ -e $D/pytel_transform.py ] && feats="$feats /bin/env python $D/pytel_transform.py |"
-
-    // # add-ivector (optional),
-    // if [ -e $D/ivector_dim ]; then
-    //   [ -z $ivector ] && echo "Missing --ivector, they were used in training!" && exit 1
-    //   # Get the tool,
-    //   ivector_append_tool=append-vector-to-feats # default,
-    //   [ -e $D/ivector_append_tool ] && ivector_append_tool=$(cat $D/ivector_append_tool)
-    //   # Check dims,
-    //   dim_raw=$(feat-to-dim "$feats" -)
-    //   dim_raw_and_ivec=$(feat-to-dim "$feats $ivector_append_tool ark:- '$ivector' ark:- |" -)
-    //   dim_ivec=$((dim_raw_and_ivec - dim_raw))
-    //   [ $dim_ivec != "$(cat $D/ivector_dim)" ] && \
-    //     echo "Error, i-vector dim. mismatch (expected $(cat $D/ivector_dim), got $dim_ivec in '$ivector')" && \
-    //     exit 1
-    //   # Append to feats,
-    //   feats="$feats $ivector_append_tool ark:- '$ivector' ark:- |"
-    // fi
   }
   
   // ### Record the setup,
@@ -893,17 +868,14 @@ void nnet_train_mpe_sh(){
   // ###
 
 
-  
-  // ###
+  // ====================== 获得通过上面 align.sh 生成的 exp/tri4b_dnn_ali/ali.*.gz 对齐结果.
   // ### Prepare the alignments
-  // ###
   // # Assuming all alignments will fit into memory
   // ali="ark:gunzip -c $alidir/ali.*.gz |"
 
 
-  // ###
+  // ====================== 获得 make_denlat.sh 生成的 exp/tri4b_dnn_denlat/lat.scp utt-lattice
   // ### Prepare the lattices
-  // ###
   // # The lattices are indexed by SCP (they are not gziped because of the random access in SGD)
   // lats="scp:$denlatdir/lat.scp"
 
@@ -932,16 +904,643 @@ void nnet_train_mpe_sh(){
   //        ${silphonelist:+ --silence-phones=$silphonelist} \
   //        $cur_mdl $alidir/final.mdl "$feats" "$lats" "$ali" $dir/$x.nnet
   //   fi
+  
   //   cur_mdl=$dir/$x.nnet
-
   //   #report the progress
   //   grep -B 2 "Overall average frame-accuracy" $dir/log/mpe.$x.log | sed -e 's|.*)||'
-
   //   x=$((x+1))
   //   learn_rate=$(awk "BEGIN{print($learn_rate*$halving_factor)}")
-
   // done
 
+
+  // $cur_mdl         $alidir/final.mdl      "$feats"               "$lats"      "$ali"     $dir/$x.nnet
+  // 当前模型nnet.n   转移模型 final.mdl     fbank特征+cmvn+delta   lattices      ali       nnet.n+1
+  // 进行一次 MPE训练迭代 对 per-utt 使用SGD随机梯度下降.
+  void nnet_train_mpe_sequential(){
+   
+    NnetTrainOptions trn_opts;
+    trn_opts.learn_rate = 0.00001;  // changing default,
+    trn_opts.Register(&po);
+
+    bool binary = true;
+
+    std::string feature_transform;
+    po.Register("feature-transform", &feature_transform,
+                "Feature transform in 'nnet1' format");
+
+    // 只有一个 silence phoen  --- sil
+    std::string silence_phones_str;
+    po.Register("silence-phones", &silence_phones_str,
+                "Colon-separated list of integer id's of silence phones, e.g. 46:47");
+
+    PdfPriorOptions prior_opts;
+    prior_opts.Register(&po);
+
+    BaseFloat acoustic_scale = 1.0,
+        lm_scale = 1.0,
+        old_acoustic_scale = 0.0;
+
+    po.Register("acoustic-scale", &acoustic_scale,
+                "Scaling factor for acoustic likelihoods");
+
+    po.Register("lm-scale", &lm_scale,
+                "Scaling factor for \"graph costs\" (including LM costs)");
+
+    po.Register("old-acoustic-scale", &old_acoustic_scale,
+                "Add in the scores in the input lattices with this scale, rather "
+                "than discarding them.");
+
+    bool one_silence_class = false;
+    po.Register("one-silence-class", &one_silence_class,
+                "If true, the newer behavior reduces insertions.");
+
+    kaldi::int32 max_frames = 6000;
+    po.Register("max-frames", &max_frames,
+                "Maximum number of frames an utterance can have (skipped if longer)");
+
+    bool do_smbr = false;
+    po.Register("do-smbr", &do_smbr,
+                "Use state-level accuracies instead of phone accuracies.");
+
+    std::string use_gpu="yes";
+    po.Register("use-gpu", &use_gpu,
+                "yes|no|optional, only has effect if compiled with CUDA");
+
+    po.Read(argc, argv);
+
+    if (po.NumArgs() != 6) {
+      po.PrintUsage();
+      exit(1);
+    }
+
+    std::string model_filename = po.GetArg(1),
+        transition_model_filename = po.GetArg(2),
+        feature_rspecifier = po.GetArg(3),
+        den_lat_rspecifier = po.GetArg(4),
+        ref_ali_rspecifier = po.GetArg(5),
+        target_model_filename = po.GetArg(6);
+
+    std::vector<int32> silence_phones;
+    if (!kaldi::SplitStringToIntegers(silence_phones_str, ":", false,
+                                      &silence_phones)) {
+      KALDI_ERR << "Invalid silence-phones string " << silence_phones_str;
+    }
+    
+    kaldi::SortAndUniq(&silence_phones);
+    if (silence_phones.empty()) {
+      KALDI_LOG << "No silence phones specified.";
+    }
+
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().SelectGpuId(use_gpu);
+#endif
+
+    Nnet nnet_transf;
+    if (feature_transform != "") {
+      nnet_transf.Read(feature_transform);
+    }
+
+    Nnet nnet;
+    nnet.Read(model_filename);
+
+    // we will use pre-softmax activations, removing softmax,
+    // - pre-softmax activations are equivalent to 'log-posterior + C_frame',
+    // - all paths crossing a frame share same 'C_frame',
+    // - with GMM, we also have the unnormalized acoustic likelihoods,
+    
+    if (nnet.GetLastComponent().GetType() ==
+        kaldi::nnet1::Component::kSoftmax) {
+      KALDI_LOG << "Removing softmax from the nnet " << model_filename;
+      nnet.RemoveLastComponent();
+    }
+    
+    nnet.SetTrainOptions(trn_opts);
+
+
+    
+    // -------------------------  读取 class-frame-counts 计算先验概率 pdf-id的先验概率
+    // Read the class-frame-counts, compute priors,
+    PdfPrior log_prior(prior_opts);
+    // 通过统计 / sum , 然后 取log , 得到先验概率的log值.
+    PdfPrior::PdfPrior(const PdfPriorOptions &opts)
+        : prior_scale_(opts.prior_scale) {
+
+      // 从 class_frame_counts 计算 pdf-id的先验概率
+      KALDI_LOG << "Computing pdf-priors from : " << opts.class_frame_counts;
+
+      
+      Vector<double> frame_counts, rel_freq, log_priors;
+      {
+        Input in;
+        in.OpenTextMode(opts.class_frame_counts);
+        frame_counts.Read(in.Stream(), false);
+        in.Close();
+      }
+
+      // cnt-pdf/cnt-sum
+      // get relative frequencies,
+      rel_freq = frame_counts;
+      rel_freq.Scale(1.0/frame_counts.Sum());
+
+      // get the log-prior,
+      log_priors = rel_freq;
+      log_priors.Add(1e-20);
+      log_priors.ApplyLog();
+
+
+      // Make the priors for classes with low counts +inf (i.e. -log(0))
+      // such that the classes have 0 likelihood (i.e. -inf log-likelihood).
+      // We use sqrt(FLT_MAX) instead of -kLogZeroFloat to prevent NANs
+      // from appearing in computation.
+      
+      int32 num_floored = 0;
+      // foreach pdf-id priors
+      for (int32 i = 0; i < log_priors.Dim(); i++) {
+        // 如果某个pdf-id的统计量太少 使用FLT_MAX作为概率
+        if (rel_freq(i) < opts.prior_floor) {
+          log_priors(i) = sqrt(FLT_MAX);
+          num_floored++;
+        }
+      }
+
+      // push to GPU,
+      log_priors_ = Vector<BaseFloat>(log_priors);
+    }
+
+
+
+    // Read transition model,
+    TransitionModel trans_model;
+    ReadKaldiObject(transition_model_filename, &trans_model);
+
+    // fbank  reader
+    SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+    // denlat reader
+    RandomAccessLatticeReader den_lat_reader(den_lat_rspecifier);
+    // ali reader
+    RandomAccessInt32VectorReader ref_ali_reader(ref_ali_rspecifier);
+
+    CuMatrix<BaseFloat> feats_transf, nnet_out, nnet_diff;
+    Matrix<BaseFloat> nnet_out_h;
+
+    Timer time;
+    double time_now = 0;
+    KALDI_LOG << "TRAINING STARTED";
+
+    int32
+        num_done = 0,
+        num_no_ref_ali = 0,
+        num_no_den_lat = 0,
+        num_other_error = 0;
+
+    kaldi::int64 total_frames = 0;
+    double total_frame_acc = 0.0, utt_frame_acc;
+
+    // main loop  foreach utt feature
+    for (; !feature_reader.Done(); feature_reader.Next()) {
+      std::string utt = feature_reader.Key();
+
+      
+      // 1) get the features, numerator alignment,
+      const Matrix<BaseFloat> &mat = feature_reader.Value();
+      const std::vector<int32> &ref_ali = ref_ali_reader.Value(utt);
+
+
+      // ============ 获得分母 lattice图 每个utt 一个lattice图.
+      //              应该是为了生成lattice快一点 所以构建lattice的G.fst 使用unigrame的
+      // 2) get the denominator lattice, preprocess
+      Lattice den_lat = den_lat_reader.Value(utt);
+      
+      // optional sort it topologically
+      kaldi::uint64 props = den_lat.Properties(fst::kFstProperties, false);
+      if (!(props & fst::kTopSorted)) {
+        if (fst::TopSort(&den_lat) == false) {
+          KALDI_ERR << "Cycles detected in lattice.";
+        }
+      }
+
+      // 将lattice 的state 和 time 生成一个网络, 用于MPE计算
+      // get the lattice length and times of states
+      std::vector<int32> state_times;
+      // 为lattice 中所有state都标记frame time ==> state_times
+      int32 max_time = kaldi::LatticeStateTimes(den_lat, &state_times);
+      // get dims,  --- feats fbank-dim = 40?
+      int32 num_frames = mat.NumRows();
+
+
+      // ============== 获得softmax 之前的NN输出结果 ---------------> nnet_out
+      // 3) get the pre-softmax outputs from NN,
+      // apply transform,
+      nnet_transf.Feedforward(CuMatrix<BaseFloat>(mat), &feats_transf);
+      // propagate through the nnet (we know it's w/o softmax),
+      nnet.Propagate(feats_transf, &nnet_out);
+
+      // ------------  此时的nnet_out未经过softmax,输出值.
+      //            nnet_out - log_prior 应该是后面计算需要  -------> nnet_out = nnet_out - prior.
+      // subtract the log_prior,
+      if (prior_opts.class_frame_counts != "") {
+        // pdf 后验输出 - alpha*log_prior. 但是此时 nnet_out并不是后验概率.
+        log_prior.SubtractOnLogpost(&nnet_out);
+        
+        void PdfPrior::SubtractOnLogpost(CuMatrixBase<BaseFloat> *llk) {
+          // llk loglike 对数似然
+          // llk -prior_scale_*log_priors
+          llk->AddVecToRows(-prior_scale_, log_priors_);
+        }
+      }
+      
+      // transfer it back to the host,
+      nnet_out_h = Matrix<BaseFloat>(nnet_out);
+      // release the buffers we don't need anymore
+      feats_transf.Resize(0, 0);
+      nnet_out.Resize(0, 0);
+
+
+      // ===============重新打分 lattice 用nnet_out_h 得到的值向 den_lat中增加概率
+      // 4) rescore the latice
+      LatticeAcousticRescore(nnet_out_h, trans_model, state_times, &den_lat);
+
+      void LatticeAcousticRescore(const Matrix<BaseFloat> &log_like,
+                                  const TransitionModel &trans_model,
+                                  const std::vector<int32> &state_times,
+                                  Lattice *lat) {
+        kaldi::uint64 props = lat->Properties(fst::kFstProperties, false);
+        if (!(props & fst::kTopSorted))
+          KALDI_ERR << "Input lattice must be topologically sorted.";
+
+        KALDI_ASSERT(!state_times.empty());
+
+        // 按frame长度 构建 time-state 的table 每个时间的所有可能state
+        std::vector<std::vector<int32> > time_to_state(log_like.NumRows());
+        // 根据time_to_state 构建每个时间的所有可能state构建的 所有可能的 utt
+        for (size_t i = 0; i < state_times.size(); i++) {
+          // 将某个状态的帧id < log_like.NumRows, 将state-id 写入到 time_to_state[time][state-ids]
+          if (state_times[i] < log_like.NumRows())  // end state may be past this..
+            time_to_state[state_times[i]].push_back(i);
+        }
+
+        // foreach frame 时间 tn
+        for (int32 t = 0; t < log_like.NumRows(); t++) {
+          // foreach frame tn 可能的state
+          for (size_t i = 0; i < time_to_state[t].size(); i++) {
+            int32 state = time_to_state[t][i];
+
+            // foreach lattice 中所有的转移弧
+            for (fst::MutableArcIterator<Lattice> aiter(lat, state); !aiter.Done();
+                 aiter.Next()) {
+              LatticeArc arc = aiter.Value();
+              int32 trans_id = arc.ilabel;
+              if (trans_id != 0) {  // Non-epsilon input label on arc
+                int32 pdf_id = trans_model.TransitionIdToPdf(trans_id);
+                // log_like 是 t frame 对应的所有可能pdf-id的概率, 这就是获得改概率值. 增加到arc的weight.Value2()()
+                arc.weight.SetValue2(-log_like(t, pdf_id) + arc.weight.Value2());
+                aiter.SetValue(arc);
+              }
+            }
+          }
+        }
+      }
+
+      
+      if (acoustic_scale != 1.0 || lm_scale != 1.0)
+        fst::ScaleLattice(fst::LatticeScale(lm_scale, acoustic_scale), &den_lat);
+
+      // ================= 获得post 后验概率?
+      kaldi::Posterior post;
+      if (do_smbr) {
+      } else {
+
+        // 使用音素级别的正确率 MPFE最小音素误差来 更新 nnet.
+        // use phone-level accuracies, i.e. MPFE (minimum phone frame error),
+        utt_frame_acc = LatticeForwardBackwardMpeVariants(
+            trans_model, silence_phones, den_lat, ref_ali, "mpfe",
+            one_silence_class, &post);
+
+        // latitce 所有的前向的概率 实际上就是lattice所有可选路径的前向得分总和 也就是分母
+        // 其中 num_ali 是对齐序列, 对齐序列对应路径 的前向得分就是 分子.
+        // 让分子/分母 为目标函数, 那么
+        // 通过前向后向算法,利用帧的phone 正确帧总数
+        BaseFloat LatticeForwardBackwardMpeVariants(
+            const TransitionModel &trans,
+            const std::vector<int32> &silence_phones,
+            const Lattice &lat,
+            const std::vector<int32> &num_ali,
+            std::string criterion,
+            bool one_silence_class,
+            Posterior *post) {
+
+          bool is_mpfe = (criterion == "mpfe");
+
+          if (lat.Properties(fst::kTopSorted, true) == 0)
+            KALDI_ERR << "Input lattice must be topologically sorted.";
+          KALDI_ASSERT(lat.Start() == 0);
+
+          int32 num_states = lat.NumStates();
+          vector<int32> state_times;
+          int32 max_time = LatticeStateTimes(lat, &state_times);
+
+          // 每个状态的 alpha beta  smbr?
+          std::vector<double>
+              alpha(num_states, kLogZeroDouble),
+              alpha_smbr(num_states, 0), //forward variable for sMBR
+              beta(num_states, kLogZeroDouble),
+              beta_smbr(num_states, 0); //backward variable for sMBR
+
+          double tot_forward_prob = kLogZeroDouble;
+          double tot_forward_score = 0;
+
+          post->clear();
+          // 时间帧的后验概率 
+          post->resize(max_time);
+
+
+
+
+
+
+          
+          // state=0 的alpha 值
+          alpha[0] = 0.0;
+          
+          // alpha 是前向概率 
+          // First Pass Forward,
+          for (StateId s = 0; s < num_states; s++) {
+            double this_alpha = alpha[s];
+            // 
+            for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+              const Arc &arc = aiter.Value();
+              // 声学概率--- arc.weight 代表的是声学概率(对ilabel(trans-id-pdf-id) 对应特征的概率)+图转移概率(图上的转移概率)
+              double arc_like = -ConvertToCost(arc.weight);
+              // alpha 是某个状态的 前向概率 (之前的状态概率 + arc_like + 其他转移到本地的概率)
+              alpha[arc.nextstate] = LogAdd(alpha[arc.nextstate], this_alpha + arc_like);
+            }
+
+            // 判断是否是个终止状态, 并计算整体前向得分.
+            Weight f = lat.Final(s);
+            if (f != Weight::Zero()) {
+              double final_like = this_alpha - (f.Value1() + f.Value2());
+              tot_forward_prob = LogAdd(tot_forward_prob, final_like);
+              KALDI_ASSERT(state_times[s] == max_time &&
+                           "Lattice is inconsistent (final-prob not at max_time)");
+            }
+          }
+
+
+          // beta 是后向概率
+          // First Pass Backward,
+          for (StateId s = num_states-1; s >= 0; s--) {
+            Weight f = lat.Final(s);
+            double this_beta = -(f.Value1() + f.Value2());
+            // 所有后向弧的目标状态 为当前状态贡献 log 得分  this_beta = logAdd(this_beta + arc_beta)
+            for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+              const Arc &arc = aiter.Value();
+              double arc_like = -ConvertToCost(arc.weight),
+                  arc_beta = beta[arc.nextstate] + arc_like;
+              this_beta = LogAdd(this_beta, arc_beta);
+            }
+            beta[s] = this_beta;
+          }
+
+          // 总体后向得分
+          // First Pass Forward-Backward Check
+          double tot_backward_prob = beta[0];
+
+          // 前向后向得分应该一致
+          // may loose the condition somehow here 1e-6 (was 1e-8)
+          if (!ApproxEqual(tot_forward_prob, tot_backward_prob, 1e-6)) {
+            KALDI_ERR << "Total forward probability over lattice = " << tot_forward_prob
+                      << ", while total backward probability = " << tot_backward_prob;
+          }
+
+
+
+
+
+          
+          alpha_smbr[0] = 0.0;
+          
+
+          // Second Pass Forward, calculate forward for MPFE/SMBR
+          for (StateId s = 0; s < num_states; s++) {
+            double this_alpha = alpha[s];
+            for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+              const Arc &arc = aiter.Value();
+              // arc 的得分 = 声学 + 转移概率
+              double arc_like = -ConvertToCost(arc.weight);
+              double frame_acc = 0.0;
+
+              
+              if (arc.ilabel != 0) {
+                int32 cur_time = state_times[s];
+                int32
+                    // phone 通过arc.ilabel 得到的phone
+                    phone = trans.TransitionIdToPhone(arc.ilabel),
+                    // align.sh生成的到的 对齐对应的phone
+                    ref_phone = trans.TransitionIdToPhone(num_ali[cur_time]);
+                bool
+                    phone_is_sil = std::binary_search(silence_phones.begin(),
+                                                       silence_phones.end(),
+                                                       phone),
+                    ref_phone_is_sil = std::binary_search(silence_phones.begin(),
+                                                          silence_phones.end(),
+                                                          ref_phone),
+                    
+                    both_sil = phone_is_sil && ref_phone_is_sil;
+
+                // 帧正确统计 - phone==ref_phone 并且 不为sil.
+                if (!is_mpfe) { // smbr.
+                } else {
+                  if (!one_silence_class)  // old behavior
+                    frame_acc = (phone == ref_phone && !phone_is_sil) ? 1.0 : 0.0;
+                  else
+                    frame_acc = (phone == ref_phone || both_sil) ? 1.0 : 0.0;
+                }
+              }
+              
+              //  alpha[nextstate] = logAdd(alpha[nextstate] + alpha[s] + arc_like)
+              // arc_scale = exp(log(其他状态到nextstate的概率总和)) == 其他状态到nextstate的概率总和
+              double arc_scale = Exp(alpha[s] + arc_like - alpha[arc.nextstate]);
+              // alpha_smbr = 其他状态到nextstate的转移概率 * (当前状态的smbr值 + 帧正确率)
+              alpha_smbr[arc.nextstate] += arc_scale * (alpha_smbr[s] + frame_acc);
+            }
+            
+            Weight f = lat.Final(s);
+            if (f != Weight::Zero()) {
+              double final_like = this_alpha - (f.Value1() + f.Value2());
+              double arc_scale = Exp(final_like - tot_forward_prob);
+              tot_forward_score += arc_scale * alpha_smbr[s];
+              KALDI_ASSERT(state_times[s] == max_time &&
+                           "Lattice is inconsistent (final-prob not at max_time)");
+            }
+          }
+
+
+          
+          // Second Pass Backward, collect Mpe style posteriors
+          for (StateId s = num_states-1; s >= 0; s--) {
+            for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+              const Arc &arc = aiter.Value();
+              double arc_like = -ConvertToCost(arc.weight),
+                  arc_beta = beta[arc.nextstate] + arc_like;
+              double frame_acc = 0.0;
+              int32 transition_id = arc.ilabel;
+              if (arc.ilabel != 0) {
+                int32 cur_time = state_times[s];
+                int32 phone = trans.TransitionIdToPhone(arc.ilabel),
+                    ref_phone = trans.TransitionIdToPhone(num_ali[cur_time]);
+                bool phone_is_sil = std::binary_search(silence_phones.begin(),
+                                                       silence_phones.end(), phone),
+                    ref_phone_is_sil = std::binary_search(silence_phones.begin(),
+                                                          silence_phones.end(),
+                                                          ref_phone),
+                    both_sil = phone_is_sil && ref_phone_is_sil;
+                if (!is_mpfe) { // smbr.
+                } else {
+                  if (!one_silence_class)  // old behavior
+                    frame_acc = (phone == ref_phone && !phone_is_sil) ? 1.0 : 0.0;
+                  else
+                    frame_acc = (phone == ref_phone || both_sil) ? 1.0 : 0.0;
+                }
+              }
+
+              
+              double arc_scale = Exp(beta[arc.nextstate] + arc_like - beta[s]);
+              // check arc_scale NAN,
+              // this is to prevent partial paths in Lattices
+              // i.e., paths don't survive to the final state
+              if (KALDI_ISNAN(arc_scale)) arc_scale = 0;
+              beta_smbr[s] += arc_scale * (beta_smbr[arc.nextstate] + frame_acc);
+
+              if (transition_id != 0) { // Arc has a transition-id on it [not epsilon]
+                double posterior = Exp(alpha[s] + arc_beta - tot_forward_prob);
+                double acc_diff = alpha_smbr[s] + frame_acc + beta_smbr[arc.nextstate]
+                    - tot_forward_score;
+                double posterior_smbr = posterior * acc_diff;
+                (*post)[state_times[s]].push_back(std::make_pair(transition_id,
+                                                                 static_cast<BaseFloat>(posterior_smbr)));
+              }
+            }
+          }
+
+          
+          //Second Pass Forward Backward check
+          double tot_backward_score = beta_smbr[0];  // Initial state id == 0
+          // may loose the condition somehow here 1e-5/1e-4
+          if (!ApproxEqual(tot_forward_score, tot_backward_score, 1e-4)) {
+            KALDI_ERR << "Total forward score over lattice = " << tot_forward_score
+                      << ", while total backward score = " << tot_backward_score;
+          }
+
+          
+          // Output the computed posteriors
+          for (int32 t = 0; t < max_time; t++)
+            MergePairVectorSumming(&((*post)[t]));
+          return tot_forward_score;
+        }
+
+      }
+
+      // 整个句子utt 属于 w1 的后延概率?
+
+      
+      // 6) convert the Posterior to a matrix,
+      PosteriorToPdfMatrix(post, trans_model, &nnet_diff);
+      // nnet_diff实际上是导数
+      nnet_diff.Scale(-1.0);  // need to flip the sign of derivative,
+
+      // 残差是什么?  
+      // 反向传播 更新nnet
+      // 7) backpropagate through the nnet, update,
+      nnet.Backpropagate(nnet_diff, NULL);
+
+
+
+      // increase time counter
+      total_frame_acc += utt_frame_acc;
+      total_frames += num_frames;
+      num_done++;
+
+      if (num_done % 100 == 0) {
+        time_now = time.Elapsed();
+        KALDI_VLOG(1) << "After " << num_done << " utterances: "
+                      << "time elapsed = " << time_now / 60 << " min; "
+                      << "processed " << total_frames / time_now << " frames per sec.";
+#if HAVE_CUDA == 1
+        // check that GPU computes accurately,
+        CuDevice::Instantiate().CheckGpuHealth();
+#endif
+      }
+
+      // GRADIENT LOGGING
+      // First utterance,
+      if (num_done == 1) {
+        KALDI_VLOG(1) << nnet.InfoPropagate();
+        KALDI_VLOG(1) << nnet.InfoBackPropagate();
+        KALDI_VLOG(1) << nnet.InfoGradient();
+      }
+      // Every 1000 utterances (--verbose=2),
+      if (GetVerboseLevel() >= 2) {
+        if (num_done % 1000 == 0) {
+          KALDI_VLOG(2) << nnet.InfoPropagate();
+          KALDI_VLOG(2) << nnet.InfoBackPropagate();
+          KALDI_VLOG(2) << nnet.InfoGradient();
+        }
+      }
+      
+    }  // main loop over utterances,
+
+    // 最中的 前向传播 后向传播 梯度
+    // After last utterance,
+    KALDI_VLOG(1) << nnet.InfoPropagate();
+    KALDI_VLOG(1) << nnet.InfoBackPropagate();
+    KALDI_VLOG(1) << nnet.InfoGradient();
+
+    // Add the softmax layer back before writing,
+    KALDI_LOG << "Appending the softmax " << target_model_filename;
+
+    // nnet 增加 softmax 
+    nnet.AppendComponentPointer(new Softmax(nnet.OutputDim(), nnet.OutputDim()));
+    // Store the nnet,
+    nnet.Write(target_model_filename, binary);
+
+    time_now = time.Elapsed();
+    KALDI_LOG << "TRAINING FINISHED; "
+              << "Time taken = " << time_now / 60 << " min; processed "
+              << total_frames / time_now << " frames per second.";
+
+    KALDI_LOG << "Done " << num_done << " files, "
+              << num_no_ref_ali << " with no reference alignments, "
+              << num_no_den_lat << " with no lattices, "
+              << num_other_error << " with other errors.";
+
+    KALDI_LOG << "Overall average frame-accuracy is "
+              << total_frame_acc / total_frames << " over "
+              << total_frames << " frames.";
+
+#if HAVE_CUDA == 1
+    CuDevice::Instantiate().PrintProfile();
+#endif
+    
+  }
+  
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+  
 
 
 
