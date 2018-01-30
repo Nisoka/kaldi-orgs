@@ -4,3 +4,7 @@
 http://blog.csdn.net/u010182633/article/details/45937051
 对于概率论数学特征的理解
 http://blog.csdn.net/thesnowboy_2/article/details/69564226
+
+* webset
+在线文档编辑, 可编辑公式
+https://stackedit.io/editor#
