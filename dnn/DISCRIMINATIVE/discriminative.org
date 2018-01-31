@@ -2,3 +2,5 @@
 
 声学模型学习笔记（五） SDT(MMI/BMMI/MPE/sMBR)
 http://blog.csdn.net/xmdxcsj/article/details/52760111
+基于最小音素错误（MPE）训练算法语音识别技术研究.pdf
+https://max.book118.com/html/2014/0706/8990094.shtm

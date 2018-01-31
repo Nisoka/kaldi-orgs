@@ -1122,9 +1122,10 @@ void nnet_train_mpe_sh(){
       // 将lattice 的state 和 time 生成一个网络, 用于MPE计算
       // get the lattice length and times of states
       std::vector<int32> state_times;
+      
       // 为lattice 中所有state都标记frame time ==> state_times
       int32 max_time = kaldi::LatticeStateTimes(den_lat, &state_times);
-      // get dims,  --- feats fbank-dim = 40?
+      // time -- frames --- states
       int32 num_frames = mat.NumRows();
 
 
@@ -1164,14 +1165,13 @@ void nnet_train_mpe_sh(){
                                   const TransitionModel &trans_model,
                                   const std::vector<int32> &state_times,
                                   Lattice *lat) {
+        
         kaldi::uint64 props = lat->Properties(fst::kFstProperties, false);
-        if (!(props & fst::kTopSorted))
-          KALDI_ERR << "Input lattice must be topologically sorted.";
 
-        KALDI_ASSERT(!state_times.empty());
-
-        // 按frame长度 构建 time-state 的table 每个时间的所有可能state
+        // 按frame长度 构建 time-state 的table   每个时间的所有可能state
+        // calculate forward-backward scores throgh this structure.
         std::vector<std::vector<int32> > time_to_state(log_like.NumRows());
+
         // 根据time_to_state 构建每个时间的所有可能state构建的 所有可能的 utt
         for (size_t i = 0; i < state_times.size(); i++) {
           // 将某个状态的帧id < log_like.NumRows, 将state-id 写入到 time_to_state[time][state-ids]
@@ -1179,20 +1179,26 @@ void nnet_train_mpe_sh(){
             time_to_state[state_times[i]].push_back(i);
         }
 
-        // foreach frame 时间 tn
+        
+        // foreach frame 
         for (int32 t = 0; t < log_like.NumRows(); t++) {
-          // foreach frame tn 可能的state
+          // foreach frame's probable states
           for (size_t i = 0; i < time_to_state[t].size(); i++) {
+
             int32 state = time_to_state[t][i];
 
-            // foreach lattice 中所有的转移弧
+            // foreach lattice arc which go out from the state.
             for (fst::MutableArcIterator<Lattice> aiter(lat, state); !aiter.Done();
                  aiter.Next()) {
+              
               LatticeArc arc = aiter.Value();
               int32 trans_id = arc.ilabel;
-              if (trans_id != 0) {  // Non-epsilon input label on arc
+              // Non-epsilon input label on arc
+              if (trans_id != 0) {
+                
                 int32 pdf_id = trans_model.TransitionIdToPdf(trans_id);
-                // log_like 是 t frame 对应的所有可能pdf-id的概率, 这就是获得改概率值. 增加到arc的weight.Value2()()
+                // log_like 是 t frame 对应的所有可能的pdf-id的(Z - pdf-priori)概率.
+                // 增加到arc的weight.Value2()? 那么原本Value2 是什么呢?
                 arc.weight.SetValue2(-log_like(t, pdf_id) + arc.weight.Value2());
                 aiter.SetValue(arc);
               }
@@ -1207,6 +1213,7 @@ void nnet_train_mpe_sh(){
 
       // ================= 获得post 后验概率?
       kaldi::Posterior post;
+      
       if (do_smbr) {
       } else {
 
@@ -1231,10 +1238,6 @@ void nnet_train_mpe_sh(){
 
           bool is_mpfe = (criterion == "mpfe");
 
-          if (lat.Properties(fst::kTopSorted, true) == 0)
-            KALDI_ERR << "Input lattice must be topologically sorted.";
-          KALDI_ASSERT(lat.Start() == 0);
-
           int32 num_states = lat.NumStates();
           vector<int32> state_times;
           int32 max_time = LatticeStateTimes(lat, &state_times);
@@ -1250,13 +1253,7 @@ void nnet_train_mpe_sh(){
           double tot_forward_score = 0;
 
           post->clear();
-          // 时间帧的后验概率 
           post->resize(max_time);
-
-
-
-
-
 
           
           // state=0 的alpha 值
@@ -1269,13 +1266,16 @@ void nnet_train_mpe_sh(){
             // 
             for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
               const Arc &arc = aiter.Value();
-              // 声学概率--- arc.weight 代表的是声学概率(对ilabel(trans-id-pdf-id) 对应特征的概率)+图转移概率(图上的转移概率)
+              // 弧整体概率--- arc.weight 代表的是声学概率(对ilabel(pdf-id) 对应的声学概率)+图转移概率(图上的转移LM+lexicon?概率)
               double arc_like = -ConvertToCost(arc.weight);
               // alpha 是某个状态的 前向概率 (之前的状态概率 + arc_like + 其他转移到本地的概率)
               alpha[arc.nextstate] = LogAdd(alpha[arc.nextstate], this_alpha + arc_like);
             }
 
+
             // 判断是否是个终止状态, 并计算整体前向得分.
+            // this_alpha 是当前状态state 的 前向得分
+            // tot_forward_prob 是所有终止状态的 前向得分和
             Weight f = lat.Final(s);
             if (f != Weight::Zero()) {
               double final_like = this_alpha - (f.Value1() + f.Value2());
@@ -1294,7 +1294,8 @@ void nnet_train_mpe_sh(){
             // 所有后向弧的目标状态 为当前状态贡献 log 得分  this_beta = logAdd(this_beta + arc_beta)
             for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
               const Arc &arc = aiter.Value();
-              double arc_like = -ConvertToCost(arc.weight),
+              double
+                  arc_like = -ConvertToCost(arc.weight),
                   arc_beta = beta[arc.nextstate] + arc_like;
               this_beta = LogAdd(this_beta, arc_beta);
             }
@@ -1315,21 +1316,21 @@ void nnet_train_mpe_sh(){
 
 
 
-
           
           alpha_smbr[0] = 0.0;
           
-
           // Second Pass Forward, calculate forward for MPFE/SMBR
           for (StateId s = 0; s < num_states; s++) {
             double this_alpha = alpha[s];
+
+            // foreach arc go out from state s.
             for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
               const Arc &arc = aiter.Value();
               // arc 的得分 = 声学 + 转移概率
               double arc_like = -ConvertToCost(arc.weight);
               double frame_acc = 0.0;
 
-              
+              // arc accuracy
               if (arc.ilabel != 0) {
                 int32 cur_time = state_times[s];
                 int32
@@ -1346,21 +1347,21 @@ void nnet_train_mpe_sh(){
                                                           ref_phone),
                     
                     both_sil = phone_is_sil && ref_phone_is_sil;
-
                 // 帧正确统计 - phone==ref_phone 并且 不为sil.
                 if (!is_mpfe) { // smbr.
                 } else {
                   if (!one_silence_class)  // old behavior
-                    frame_acc = (phone == ref_phone && !phone_is_sil) ? 1.0 : 0.0;
+                    ;
                   else
                     frame_acc = (phone == ref_phone || both_sil) ? 1.0 : 0.0;
                 }
               }
               
-              //  alpha[nextstate] = logAdd(alpha[nextstate] + alpha[s] + arc_like)
+              // alpha[nextstate] = logAdd(alpha[nextstate], alpha[s] + arc_like)
               // arc_scale = exp(log(其他状态到nextstate的概率总和)) == 其他状态到nextstate的概率总和
+              // 通过这个arc_scale 可以通过 arc_scale * 
               double arc_scale = Exp(alpha[s] + arc_like - alpha[arc.nextstate]);
-              // alpha_smbr = 其他状态到nextstate的转移概率 * (当前状态的smbr值 + 帧正确率)
+              // alpha_smbr = 其他状态到nextstate的转移概率 * (当前状态的smbr值 + 帧正确)
               alpha_smbr[arc.nextstate] += arc_scale * (alpha_smbr[s] + frame_acc);
             }
             
@@ -1380,7 +1381,8 @@ void nnet_train_mpe_sh(){
           for (StateId s = num_states-1; s >= 0; s--) {
             for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
               const Arc &arc = aiter.Value();
-              double arc_like = -ConvertToCost(arc.weight),
+              double
+                  arc_like = -ConvertToCost(arc.weight),
                   arc_beta = beta[arc.nextstate] + arc_like;
               double frame_acc = 0.0;
               int32 transition_id = arc.ilabel;
@@ -1412,10 +1414,14 @@ void nnet_train_mpe_sh(){
               beta_smbr[s] += arc_scale * (beta_smbr[arc.nextstate] + frame_acc);
 
               if (transition_id != 0) { // Arc has a transition-id on it [not epsilon]
+                // rDen.
                 double posterior = Exp(alpha[s] + arc_beta - tot_forward_prob);
+                // A(s=sr) - A
                 double acc_diff = alpha_smbr[s] + frame_acc + beta_smbr[arc.nextstate]
                     - tot_forward_score;
+                // rDen*{ A(s=sr) - A }
                 double posterior_smbr = posterior * acc_diff;
+                // 对 nnet softmax 对 logp(o|r) 的偏导数.
                 (*post)[state_times[s]].push_back(std::make_pair(transition_id,
                                                                  static_cast<BaseFloat>(posterior_smbr)));
               }
@@ -1425,6 +1431,7 @@ void nnet_train_mpe_sh(){
           
           //Second Pass Forward Backward check
           double tot_backward_score = beta_smbr[0];  // Initial state id == 0
+          
           // may loose the condition somehow here 1e-5/1e-4
           if (!ApproxEqual(tot_forward_score, tot_backward_score, 1e-4)) {
             KALDI_ERR << "Total forward score over lattice = " << tot_forward_score
@@ -1436,11 +1443,37 @@ void nnet_train_mpe_sh(){
           for (int32 t = 0; t < max_time; t++)
             MergePairVectorSumming(&((*post)[t]));
           return tot_forward_score;
+
+
+          // post[t] --- <tid-derived>
+          template<typename I, typename F>
+              inline void MergePairVectorSumming(std::vector<std::pair<I, F> > *vec) {
+
+            CompareFirstMemberOfPair<I, F> c;
+            std::sort(vec->begin(), vec->end(), c);  // sort on 1st element --- tid
+            
+            typename std::vector<std::pair<I, F> >::iterator out = vec->begin(),
+                in = vec->begin(), end = vec->end();
+
+            while (in < end) {
+              // We reach this point only at the first element of
+              // each stretch of identical .first elements.
+              *out = *in;
+              ++in;
+              
+              while (in < end && in->first == out->first) {
+                out->second += in->second;  // this is the merge operation.
+                ++in;
+              }
+              if (out->second != static_cast<F>(0))  // Don't keep zero elements.
+                out++;
+            }
+            vec->erase(out, end);
+          }
+   
         }
 
       }
-
-      // 整个句子utt 属于 w1 的后延概率?
 
       
       // 6) convert the Posterior to a matrix,
