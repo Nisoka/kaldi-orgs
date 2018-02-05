@@ -1,0 +1,339 @@
+* Data types in "nnet3" setup
+** Objectives and background
+   nnet1 nnet2 都是基于Component 对象构建的神经网络.
+   Component 构建layer, 使用一个窍门 一个layer 使用一个affine+nonlinearity构建.实际两个Component构建一个layer.
+   Component 具有propagate backprop 函数, 都是基于minibatch的函数.
+   
+   两者都不仅仅支持 nonlinearities的线性序列.
+   nnet1 可以使用component within component 构建复杂的网络结构
+   nnet2 有一个time-index的时延概念 来支持 时序上特征的剪切拼接 进而直接作为框架的一部分
+   这通过将隐藏层进行切片剪切 能够支持TDNN.
+   nnet3 能够支持nnet1 nnet2中的topo结构, 并且用一种更自然 以配置文件驱动的机制, 我们不需要coding 就能够支持
+   绝大多数想要的结构.
+
+   
+** outline of approach
+   nnet3 不像nnet1 nnet2 结构只有一个线性的component序列, 而是一个更通用的graph结构.
+   1 一系列component, 没有固定顺序
+   2 一个graph结构, 描述component的结构
+
+   nnet3 网络 是由 操作components + 一个基于nodes的描述计算流程的 ComputationGraph构成的.
+   Component 是各种函数.
+   ComputationGraph内部是由 节点Cindex - node构成的,node上描述了需要的component.
+   所以nnet网络本体由components + nodes 构成, 但是流程由ComputationGraph描述.
+   
+   graph 通过name 引用components.
+   利用config-file 来描述一个 nnet3的 数据流图,
+   Components + graph + inputs provided + outpu requested.
+   这四个部分 构建了一个 计算图 -- ComputationGraph. 是一个有向无环图.
+   
+
+** Basic data structures in nnet3
+   ComputationGraph中的node  identified  
+   对应为:
+       nnet中的一个层node-in-network + index (n)(代表minibathch中的第n个examples) + time(t) + 额外的index (x) 现在无用.
+
+   Cindex = (node-index, Index)
+   Index = (n, t, x)
+   *where the node-index is the index corresponding to a node in the neural network (i.e., the layer)*
+   实际创建的计算图 在编译期间就表现为 基于 Cindex的有向无环图.
+   
+
+*** Indexes (n, t, x)
+    Indexes 对应为 Matrix中的rows sample1 sample2 sample ... samplen
+    内部按 n t x进行排序,并且 t x都可以简略, 表示为如下
+    [ (0, -1:1) (1, -1:1) ... ]
+*** Cindex (node-index, (n, t, x))
+    node-index 是nnet网络的node节点index. 
+    Cindexes 对应计算图中的一个特定计算.
+    Cindexes 对应为 某个确定tensor.
+    其中
+    nodex-index 描述nnet整体中的层node
+    n 描述层node中的 sample-index
+    t 描述层node中的 sample-index 下的 t frame
+
+*** ComputationGraph
+    ComputationGraph 是基于Cindexes 的一个有向图, 每个Cindex都以其他Cindexes为依赖.
+    ComputationGraph 保存了Cindexes 的数组.
+    cindex_id 是 Cindexes 数组的索引index. 使用起来高效
+    
+    
+*** ComputationRequest 计算目标
+    ComputationRequest 描述了一系列的 input output Cindexnode, 
+    inputnodes 描述了哪些indexes对应的vector-valued quantities 被用于进行计算
+    outputnodes 描述了哪些indexes 需要被计算.
+    
+    有了计算目标, 就能够根据图 进行计算.
+
+    
+*** NnetComputation 
+    通过ComputationRequest描述了的计算目标 + nnet结构中的graph计算流图 构建的NnetComputation流程.
+    包含一些列的 commands,每个命令都是一个基于矩阵变量上执行的propagate backprop操作.
+    
+*** NnetComputer
+    nnet 计算子
+    作用是实际执行NnetComputation计算步骤.
+    这部分就是循环计算更新参数, 因为大部分构建流程的步骤都在 NnetComputation的 compilation 和 optimization中完成了
+
+
+** Neural networks in nnet3
+   上面概览的介绍了 nnet3框架.
+   详细介绍框架, 组件如何组合 以及 如何表示像t-1那样的依赖关系.
+   
+*** Components 
+    Propagate  Backprop
+    input output 的每个row 是对应的, 并且对应与 indexes中的每个对象
+    
+    properties 属性
+    返回一个 bitmask的flag属性 ComponentProperties
+    描述component具有的不同特性.
+    
+    component 不再用来处理 帧切片拼接等工作, 这些工作使用Descriptor来实现.
+
+
+*** Neural network nodes (outline)
+    We previously explained that a neural net is a collection of named Components together with a graph on "network nodes", 
+    but we haven't yet explained what a "network node" is.
+
+    四种可能的 nodes
+    enum NodeType { kInput, kDescriptor, kComponent, kDimRange };
+    kComponent 是模块
+    kDescriptor 是胶水, 并支持一些特殊性 如 切分 循环 以及 output
+
+
+*** Neural network config files
+    
+*** Descriptors in config files
+    描述了 Descriptor 但是还是不太理解.
+
+*** Descriptors in code
+    实际中Descriptor结构, 是一个层次性的结构, 用来粘合不同component
+    每个Descriptor 是以一个component的输出作为输入的.
+    并且Descriptor能够描述 自己代表的计算步骤 是否能够执行computation.
+    
+    
+*** Neural network nodes 
+    enum NodeType { kInput, kDescriptor, kComponent, kDimRange };
+    
+
+*** Neural network  Nnet
+    class Nnet {
+    public:
+    ...
+    private:
+    std::vector<std::string> component_names_;
+    std::vector<Component*> components_;
+    std::vector<std::string> node_names_;
+    std::vector<NetworkNode> nodes_;
+    
+    };
+
+*** NnetComputation 
+    代表一个编译完成的计算图, 包含一些列的 Commands 以及必须的一些信息
+    定义了很多Command
+
+    enum CommandType {
+    kAllocMatrixUndefined, kAllocMatrixZeroed,
+    kDeallocMatrix, kPropagate, kStoreStats, kBackprop,
+    kMatrixCopy, kMatrixAdd, kCopyRows, kAddRows,
+    kCopyRowsMulti, kCopyToRowsMulti, kAddRowsMulti, kAddToRowsMulti,
+    kAddRowRanges, kNoOperation, kNoOperationMarker };
+    
+    struct Command {
+    CommandType command_type;
+    int32 arg1;
+    int32 arg2;
+    int32 arg3;
+    int32 arg4;
+    int32 arg5;
+    int32 arg6;
+    };
+    一个实际的Command 包含具体的 command_type 和多个参数
+    参数一般是引用具体的 matrix 或者 Component.
+    
+    struct NnetComputation {
+    ...
+    std::vector<Command> commands;
+    std::vector<MatrixInfo> matrices;
+    std::vector<SubMatrixInfo> submatrices;
+    // used in kAddRows, kAddToRows, kCopyRows, kCopyToRows.  contains row-indexes.
+    std::vector<std::vector<int32> > indexes;
+    // used in kAddRowsMulti, kAddToRowsMulti, kCopyRowsMulti, kCopyToRowsMulti.
+    // contains pairs (sub-matrix index, row index)- or (-1,-1) meaning don't
+    // do anything for this row.
+    std::vector<std::vector<std::pair<int32,int32> > > indexes_multi;
+    // Indexes used in kAddRowRanges commands, containing pairs (start-index,
+    // end-index)
+    std::vector<std::vector<std::pair<int32,int32> > > indexes_ranges;
+    // Information about where the values and derivatives of inputs and outputs of
+    // the neural net live.
+    unordered_map<int32, std::pair<int32, int32> > input_output_info;
+    bool need_model_derivative;
+    // the following is only used in non-simple Components; ignore for now.
+    std::vector<ComponentPrecomputedIndexes*> component_precomputed_indexes;
+    ...
+    };
+
+    
+    
+    
+    
+    
+   
+
+   
+   
+   
+   
+   
+
+   
+
+
+
+* Compilation in the "nnet3" setup 
+  
+** Overview of Compilation
+   Compilation 将Nnet和ComputationRequest作为输入, 输出一个NnetComputation.
+   NnetComputation 就是一个完整的计算. 是一个过程结构.
+   ComputationRequest 包含 作为目标输出的indexes 和 可用的作为输入的indexes.
+
+
+** Creating the computation graph
+
+*** Details of ComputationGraph
+    struct ComputationGraph {
+    // The mapping of cindex_id to Cindex.
+    std::vector<Cindex> cindexes;
+    
+    // For each Cindex this tells us whether it was provided as an input to the
+    // computation.
+    std::vector<bool> is_input;
+    
+    // dependencies[cindex_id] gives you the list of other cindex_ids that this
+    // particular cindex_id directly depends on to compute it.
+    std::vector<std::vector<int32> > dependencies;
+    private:
+    // Maps each Cindex to an integer cindex_id: reverse mapping of "cindexes".
+    // Must be accessed via the GetCindexId() function.
+    unordered_map<Cindex, int32, CindexHasher> cindex_to_cindex_id_;
+    };
+    
+    is_input 可以通过判断一个node 的 type 是否是一个kInput来确定, 但是这么设计并不冗余
+    因为 is_input 设计出来 以便能够让已经计算好的computed 的component 作为输入, 然后这样
+    能够实现 online decoding 的设想.
+    
+*** Building the ComputationGraph
+    
+**** intruduction
+    ComputationGraphBuilder 负责构建 ComputationGraph
+    1 从network的 目标输出 output 开始
+    2 计算 output-node 的 dependences , 并将这些dependences加入计算图,
+    3 直到dependence 都达到 input node 否则, 循环继续反向寻找dependence 并加入到计算图
+    
+    最终在都成为了input node 对应的 Cindexes 应该都是已经在ComputationRequest中提供好了的
+
+    算法就是 构建一个完整ComputationGraph的完整过程.
+    
+**** Basic algorithm
+**** Motivate for the algorithm we use
+     类似循环神经网络这样的结果, 当一个node 依赖于 时延的 t-1 node 时
+     而基本算法中, 是在back添加一个dependence是否可计算时候, 才去查看是否能够计算
+     所以基本算法 会出现问题??
+
+**** The algorithm we use
+     为了避免 RNN中的-索引依赖 不存在问题, 会使用 
+     enum ComputableInfo {
+     kUnknown = 0,
+     kComputable = 1,
+     kNotComputable = 2,
+     kWillNotCompute = 3
+     };
+     然后通过标记的使用 避免无限循环.?
+
+     ComputationGraphBuilder 保持两个queues
+     1 对Cindexes 还没有添加他们依赖到graph 中的Cindexes
+     2 computable_queue_ 对Cindexes 需要重新评价是否是computable 通过更新他们的ComputableInfo 如果一个Cindex的ComputableInfo更新了
+     那么需要递归向上检查依赖他们的Cindex是否需要更新. 就通过将对应的Cindex -> computable_queue_
+     
+**** Interface of ComputationGraphBuilder     
+     几个接口函数
+
+     void Compute()  执行初始化 计算computation
+     void AllOutputAreComputable
+     void Prune()    剪掉不必要的Cindex.
+
+      
+     
+** Organizing the computation into *steps*
+  
+*** Introduction to *steps*
+    因为逐个进行Matrix计算, 十分低效, 当使用GPU时尤其是, 所以希望能够将Cindexes分为batch
+    以便同batch的Cindexes可以同时进行计算, 这样一个batch 叫做一个 step.
+    并且这样的一个step 粗略上就对应为是NnetComputation中的一个Command.
+
+    所以最重要的是 怎么整理 cindex_ids 为一系列的steps, 且需要满足一些条件属性.
+    1 一个step中的所有cindex_ids 都必须映射到 graph图中的同一个节点
+    2 一个cindex_ids的所有依赖 必须在之前的steps 中计算完成
+
+    
+*** Creating the sequence of steps (basic algorithm)
+    
+    A, 将对应为Input Output的Cindexes 分开, 按照在ComputationRequest中的顺序进行排序.先放在一边
+    B, 处理哪些非input output的Cindexes
+          1 将这些剩下的Cindexes 组织为 phases 的多个集合. 其中第一个phases中的Cindexes都只依赖自己
+          2 其他的n个phases 中的Cindexes都依赖与 之前的n-1中的Cindexes
+          
+    C, 从phases中remove所有非kComponent 类型的 Cindexes  (非kComponent 就是 kDimRange 和 Component-Input nodes)
+    D, 将steps排序
+    E, component-input node 创建steps
+    F, dim-range node 创建steps
+    
+    G, 重新排序所有steps
+    
+    基本算法的问题是 
+    最终将产生很多steps
+    例如假设有一个循环层, 并后面立刻接一个前向层,循环层会被分割为很多steps
+    因为这里是有time index, 但是上面的算法会分割全连接层的计算为很多steps 因为
+    这些Cindexes????
+
+*** creating the sequence of steps  (actual algorithm)
+    为了处理RNN这样的结构 并且不希望产生过多的计算steps..
+    ??????
+    
+    
+          
+    
+** Class Compiler
+   
+*** Introduction to class Compiler
+    Compiler 全面负责 将 ComputationRequest 和 Nnet 转化为一个 NnetComputation
+    内部首先创建一个 ComputationGraph 和使用上面介绍过的函数创建一些列的steps 
+    
+*** Creating the computation
+    
+    void Compiler::CreateComputation(const CompilerOptions &opts,
+                              NnetComputation *computation) {
+      #  使用Builder 构建 ComputationGraph
+      ComputationGraphBuilder builder(nnet_, request_, &graph_);
+      builder.Compute();
+      builder.Prune();
+      
+      # 组织Computation 为 steps.....
+      // see function declaration's comment for meaning of "phases".
+      std::vector<std::vector<int32> > phases;
+      ComputeComputationPhases(nnet_, graph_, &phases);
+      std::vector<std::vector<int32> > steps;
+      ComputeComputationSteps(nnet_, request_, phases, &graph_, &steps);
+      phases.clear();
+
+      CreateLocationInfo(steps);
+
+      std::vector<bool> deriv_needed;
+      ComputeDerivNeeded(steps, &deriv_needed);
+      CreateStepInfo(deriv_needed, &steps, computation);
+      AddCommands(deriv_needed, computation);
+
+      if (opts.output_debug_info)
+         OutputDebugInfo(computation);
+    }
