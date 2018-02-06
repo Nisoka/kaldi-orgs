@@ -1,0 +1,14 @@
+
+# Lexicon Preparation,
+local/aishell_prepare_dict.sh $data/resource_aishell || exit 1;
+
+# in:
+# data/resource_aishell          目录,下面包含 lexicon.txt
+
+# out:
+# nonsilence_phones.txt                从lexicon.txt 获得的 非静音音素
+# extra_questions.txt                  sil + 一些通过perl语言处理nonsilence_phones.txt 获得 音素集合 只有几行
+# silence_phones.txt                   sil
+# optional_silence.txt                 sil
+
+
