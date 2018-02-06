@@ -46,7 +46,7 @@
 *** Cindex (node-index, (n, t, x))
     node-index 是nnet网络的node节点index. 
     Cindexes 对应计算图中的一个特定计算.
-    Cindexes 对应为 某个确定tensor.
+    Cindexes 也描述为某个确定tensor,通过依赖进行计算得到的结果tensor.
     其中
     nodex-index 描述nnet整体中的层node
     n 描述层node中的 sample-index
@@ -57,7 +57,6 @@
     ComputationGraph 保存了Cindexes 的数组.
     cindex_id 是 Cindexes 数组的索引index. 使用起来高效
     
-    
 *** ComputationRequest 计算目标
     ComputationRequest 描述了一系列的 input output Cindexnode, 
     inputnodes 描述了哪些indexes对应的vector-valued quantities 被用于进行计算
@@ -65,7 +64,6 @@
     
     有了计算目标, 就能够根据图 进行计算.
 
-    
 *** NnetComputation 
     通过ComputationRequest描述了的计算目标 + nnet结构中的graph计算流图 构建的NnetComputation流程.
     包含一些列的 commands,每个命令都是一个基于矩阵变量上执行的propagate backprop操作.
@@ -80,7 +78,7 @@
    上面概览的介绍了 nnet3框架.
    详细介绍框架, 组件如何组合 以及 如何表示像t-1那样的依赖关系.
    
-*** Components 
+*** Components
     Propagate  Backprop
     input output 的每个row 是对应的, 并且对应与 indexes中的每个对象
     
@@ -89,7 +87,6 @@
     描述component具有的不同特性.
     
     component 不再用来处理 帧切片拼接等工作, 这些工作使用Descriptor来实现.
-
 
 *** Neural network nodes (outline)
     We previously explained that a neural net is a collection of named Components together with a graph on "network nodes", 
@@ -100,8 +97,8 @@
     kComponent 是模块
     kDescriptor 是胶水, 并支持一些特殊性 如 切分 循环 以及 output
 
-
 *** Neural network config files
+    kaldi
     
 *** Descriptors in config files
     描述了 Descriptor 但是还是不太理解.
@@ -111,11 +108,9 @@
     每个Descriptor 是以一个component的输出作为输入的.
     并且Descriptor能够描述 自己代表的计算步骤 是否能够执行computation.
     
-    
 *** Neural network nodes 
     enum NodeType { kInput, kDescriptor, kComponent, kDimRange };
     
-
 *** Neural network  Nnet
     class Nnet {
     public:
@@ -128,7 +123,7 @@
     
     };
 
-*** NnetComputation 
+*** NnetComputation
     代表一个编译完成的计算图, 包含一些列的 Commands 以及必须的一些信息
     定义了很多Command
 
@@ -195,6 +190,7 @@
   
 ** Overview of Compilation
    Compilation 将Nnet和ComputationRequest作为输入, 输出一个NnetComputation.
+
    NnetComputation 就是一个完整的计算. 是一个过程结构.
    ComputationRequest 包含 作为目标输出的indexes 和 可用的作为输入的indexes.
 
@@ -224,18 +220,40 @@
     能够实现 online decoding 的设想.
     
 *** Building the ComputationGraph
+    根据数据成员可以看出 ComputationGraph是用来描述各个Cindex的依赖的.
+    根据依赖关系, 构建了一个完整的计算流图.  Cindex 就实际对应一个就算节点.
+    std::vector<std::vector<int32>> dependencies;
+
+    并将Cindex ---- cindex_id 互相对应, 便于使用cindex_id 找到Cindex
     
 **** intruduction
     ComputationGraphBuilder 负责构建 ComputationGraph
+    process:
     1 从network的 目标输出 output 开始
     2 计算 output-node 的 dependences , 并将这些dependences加入计算图,
-    3 直到dependence 都达到 input node 否则, 循环继续反向寻找dependence 并加入到计算图
+    3 直到dependence 都达到 input node 否则, 继续递归反向寻找dependence 并加入到计算图
     
     最终在都成为了input node 对应的 Cindexes 应该都是已经在ComputationRequest中提供好了的
 
-    算法就是 构建一个完整ComputationGraph的完整过程.
+    算法就是 递归找寻依赖Cindex, 将Cindex添加入ComputationGraph的过程.
     
 **** Basic algorithm
+
+     1, First follow back all possible dependencies from 
+     the output using the GetDependencies() functions of Descriptors and Components.
+     递归找寻依赖
+
+     2, In the opposite direction, starting from the input, 
+     work out which Cindexes are computable (using IsComputable()), 
+     and prune back the dependencies to just those that participate in the computation.
+     反向评估每个Cindex是否可计算computable
+
+     3, Check that all requested outputs were computable.
+     检查是否requested-output都是computable
+
+     4, Prune away all cindex_ids that are not actually necessary to compute the outputs.
+     剪枝掉实际不必要的Cindex.
+
 **** Motivate for the algorithm we use
      类似循环神经网络这样的结果, 当一个node 依赖于 时延的 t-1 node 时
      而基本算法中, 是在back添加一个dependence是否可计算时候, 才去查看是否能够计算
@@ -266,30 +284,34 @@
       
      
 ** Organizing the computation into *steps*
+   经过上面的builder ComputationGraph, 我们已经具有了执行计算所需要的所有信息
+   按照ComputationGraph的topo结构排序Cindexes, 独立根据对应依赖计算每个Cindex, 这样就可以进行流图计算了.
+   !! 
+   但是这样做很低效, 矩阵运算在越大时计算效率越高,如果都是小计算会影响效率, GPU时尤其如此
+   
+   将computation组织为step的过程就是, 安排所有cindex_ids 为一系列steps的过程.
   
 *** Introduction to *steps*
     因为逐个进行Matrix计算, 十分低效, 当使用GPU时尤其是, 所以希望能够将Cindexes分为batch
-    以便同batch的Cindexes可以同时进行计算, 这样一个batch 叫做一个 step.
-    并且这样的一个step 粗略上就对应为是NnetComputation中的一个Command.
+    *以便同batch的Cindexes可以同时进行计算, 这样一个batch 叫做一个 step.*
+    *并且这样的一个step 粗略上就对应为是NnetComputation中的一个Command.*
 
     所以最重要的是 怎么整理 cindex_ids 为一系列的steps, 且需要满足一些条件属性.
-    1 一个step中的所有cindex_ids 都必须映射到 graph图中的同一个节点
+    1 一个step中的所有cindex_ids 都对应为graph中的一个node
     2 一个cindex_ids的所有依赖 必须在之前的steps 中计算完成
 
-    
 *** Creating the sequence of steps (basic algorithm)
     
     A, 将对应为Input Output的Cindexes 分开, 按照在ComputationRequest中的顺序进行排序.先放在一边
     B, 处理哪些非input output的Cindexes
-          1 将这些剩下的Cindexes 组织为 phases 的多个集合. 其中第一个phases中的Cindexes都只依赖自己
-          2 其他的n个phases 中的Cindexes都依赖与 之前的n-1中的Cindexes
-          
-    C, 从phases中remove所有非kComponent 类型的 Cindexes  (非kComponent 就是 kDimRange 和 Component-Input nodes)
-    D, 将steps排序
-    E, component-input node 创建steps
-    F, dim-range node 创建steps
-    
-    G, 重新排序所有steps
+          1 将这些剩下的Cindexes 组织为 phases 的多个集合. 
+          其中第一个phases中的Cindexes都只依赖自己
+          其他的n个phases中 保存所有依赖之前n-1 phases中的Cindexes的Cindexes.
+          2 从每个phase中去掉所有 不是kComponent的Cindexes (非kComponent 就是 kDimRange 和 Component-Input nodes) .
+          3 按照Index 的排序规则排序steps.
+          4 对component-input node 创建steps
+          5 对dim-range node 创建steps
+    C, 排序所有steps, input最先, 然后接下来的steps ,output steps 最后.
     
     基本算法的问题是 
     最终将产生很多steps
@@ -314,7 +336,8 @@
     
     void Compiler::CreateComputation(const CompilerOptions &opts,
                               NnetComputation *computation) {
-      #  使用Builder 构建 ComputationGraph
+
+      # 使用Builder 构建 ComputationGraph
       ComputationGraphBuilder builder(nnet_, request_, &graph_);
       builder.Compute();
       builder.Prune();
@@ -327,8 +350,9 @@
       ComputeComputationSteps(nnet_, request_, phases, &graph_, &steps);
       phases.clear();
 
-      CreateLocationInfo(steps);
 
+      # Compiation process
+      CreateLocationInfo(steps);
       std::vector<bool> deriv_needed;
       ComputeDerivNeeded(steps, &deriv_needed);
       CreateStepInfo(deriv_needed, &steps, computation);
@@ -337,3 +361,273 @@
       if (opts.output_debug_info)
          OutputDebugInfo(computation);
     }
+
+
+
+*** Setting up the location information
+    CreateLocationInfo() set a mapping cindex_id_to_location_, 映射每个cindex_id to localtion. 
+    location 是一个 pair<step-index, matrix-row-index>. 
+    matrix-row-index 对应为 对应step在cindex_ids的cindex_id.
+    
+    先前提到理论上 cindex_ids 可以对应为一个表示component输入的 kDescriptor的网络节点.???
+    
+    我们会考虑 location information 位置信息的很多种不同的位置信息.
+    cindex_id_to_location_ 保存了 location pair<step-index, matrix-row-index>
+    还有其他的有:
+    submat-locations    pair<submatrix-index, row-index>
+        submatrix-index 是Computation中submatrices向量中的索引.
+
+    Once we have decided where the values and derivatives for each of the steps live, 
+    we will be able to compute the "submat-locations".
+    确定 每个step的 值和导数的存在性. 就可以计算submat-locations.
+    
+*** Checking whether derivatives are needed
+    每个steps 都需要判断是否需要derivatives.
+    有一个根据依赖关系 来判断是否需要 derivatives的rules
+    具体见 kaldi
+
+*** Computing the StepInfo
+    每个steps都具有一些关联的信息 info
+    Compiler保存一个 steps_  --- std::vector<StepInfo> 保存所有信息.
+
+class Compiler {
+   ...
+  struct StepInfo {
+    int32 node_index;  // network-node index
+    bool is_input;  // true if step corresponds to an input to the computation.
+    int32 value;  // sub-matrix index of value that this step outputs.
+    int32 deriv;  // sub-matrix index of derivative at the output of this step (or zero).
+    int32 precomputed_indexes_index;  // ignore; only relevant for non-simple Components
+    std::vector<Index> output_indexes;      // Indexes that this step outputs.
+    std::vector<int32> output_cindex_ids;   // cindex_ids corresponding to the above.
+
+    // If this component is of type kDescriptor (and note that the top-level
+    // Descriptor is a concatenation over >= 1 parts), then we set value_parts
+    // to a list of submatrix-indexes, each for the corresponding part of the
+    // value.  If there is only one part, it will have one element which will be
+    // the same as "value".
+    std::vector<int32> value_parts;
+    // deriv_parts is as "value_parts", but for parts of the derivative (only
+    // set up if deriv != 0.
+    std::vector<int32> deriv_parts;
+
+    // for nodes corresponding to descriptors, input_locations_list will contain
+    // information about the inputs to this descriptor, telling us for each row
+    // of the matrix what other matrix rows it is a summation over.  this is a
+    // quantity indexed[part-index][row-index], then a list of pairs (step,
+    // row-index), that we store here to avoid computing it twice in forward and
+    // backprop.
+    std::vector<std::vector<std::vector<std::pair<int32,int32> > > > input_locations_list;
+  };
+  std::vector<StepInfo> steps_;
+  ...
+};
+
+    node_index is_input 变量都可以通过ComputationGraph 和 ComputationRequest直接计算出来.
+    output_cindex_ids 只是此step 包含的cindex_ids 的copy
+    output_indexes 可以通过 output_cindex_ids 和 ComputationGraph计算.
+    value deriv 都是我们需要为step申请空间的sum-matrix ids 
+    
+    
+**** Allocate the matrices and submatrices (background)
+    Matrix and SubMatrix indexes, 以及如何申请他们
+    matrix index 是 NnetComputer中 matrices_的索引index, 也是NnetComputation中matrices的索引(这里只保存了大小)
+    summatrix index 是NnetComputation中 submatrices的索引,表示一个特定matrix的 特定row column范围的submatrix
+    无论什么时候尽可能的使用submatrix-index 代替使用matrix-index. 这样尽可能的避免两种index的使用.
+    
+    struct NnetComputation {
+  ...
+  int32 NewMatrix(int32 num_rows, int32 num_cols);
+  int32 NewSubMatrix(int32 base_matrix, int32 dim_offset, int32 dim);
+  ...
+};
+    NewMatrix 申请一个新的matrix和一个sub-matrix指代整个matrix,并返回sub-matrix
+    NewSubMatrix 申请一个sub-matrix 对应一个存在的matrix的column范围 sub-matrix
+
+**** Allocating matrices and submatrices for StepInfo
+     所有的steps 除了KDimRange 都需要value Matrix
+     kDescriptor类型的steps 对value 和 derivative 会具有不同parts submatrix .
+     每个part 对应一个submatrix.
+**** The input locations list
+     对Descriptor的每个part. 调用ComputeInputLocationsList().
+     this_info.input_locations_list[p] (p is the part index), is of type std::vector<std::vector<std::pair<int32, int32> > >
+     告诉我们 从哪里获得 用来计算Descriptor该part的数据.
+     首先通过matrix的row-index索引(和step对应cindex_ids的索引一样)
+     然后是一列 locations <step-index, row-index> 
+     因为一个Descriptor只能表示一个 不加权的 matrix rows累和, input_locations_list实际包含了我们需要的所有信息.
+
+     ComputeInputLocationsList(), you'll see the following lines:
+
+     std::vector<Cindex> input_cindexes;
+     CindexSet cindex_set(graph_);
+     bool ans = descriptor.IsComputable(index, cindex_set, &input_cindexes);
+     KALDI_ASSERT(ans);
+     
+     回忆到 IsComputable() 会返回输出 在计算中需要的Cindexes. 会感到惊讶为什么要调用这个函数, 
+     完全可以直接依赖于在ComputationGraph中list的dependences, 但是因为ComputationGraph 会list
+     一个Cindex的所有dependences,但是我们有时候只需要 a part of Cindex 一部分的计算. 
+     graph 没有按part分割依赖.
+
+*** Computing the input_output_info
+    AddCommands(deriv_needed, computation)
+    -----
+    SetInputOutputInfo(computation);
+    负责建立NnetComputation 的 input_output_info 结构
+    unordered_map<int32, std::pair<int32, int32> > input_output_info;
+    包含了 input output的存在位置信息,以及对应导数存在位置
+    
+    input_output_info 是从 node-index 对应 pair<value-matrix-index, derivative-matrix-index>的映射.
+
+*** Allocating the matrice
+    AddCommands(deriv_needed, computation)
+    -----
+    AllocateMatrices(computation);
+    向computation中增加command, 为了申请和归零所有Computation的matrices成员, 会使用kAllocateMatriZeroed command
+    参数为 对应matrix的index.
+
+*** The forward computatio Command!!
+    前向计算命令的建立
+    AddCommands(deriv_needed, computation)
+    -----
+    int32 num_steps = steps_.size();
+    for (int32 step = 0; step < num_steps; step++)
+        DoForwardComputation(step, computation);
+
+    为computation的前向部分增加command.
+
+void Compiler::DoForwardComputation(int32 step,
+                                    NnetComputation *computation) const {
+  const StepInfo &step_info = steps_[step];
+  const NetworkNode &node = nnet_.GetNode(step_info.node_index);
+  switch (node.node_type) {
+    case kInput: case kDimRange: break;  // Nothing to do.
+    case kComponent:
+      AddPropagateStep(step, computation);
+      break;
+    case kDescriptor:
+      DoForwardComputationDescriptor(step, computation);
+      break;
+  }
+}
+
+**** Forward computation for componnents
+     如果step是Component, 
+     AddPropagateStep()
+     增加一个kPropagate类型的 command
+     
+     并且AddPropogate也负责增加保存每个Component统计量的command.
+     Component统计量是用来检测过饱和的非线性层???
+
+     NnetComputation::Command c(NnetComputation::kPropagate,
+                             node.u.component_index,
+                             step_info.precomputed_indexes_index,
+                             input_submatrix_index,
+                             output_submatrix_index);
+    computation->commands.push_back(c);
+    if (request_.store_component_stats) {
+    const Component *c = nnet_.GetComponent(node.u.component_index);
+      if (c->Properties() & kStoresStats) {
+        NnetComputation::Command c(NnetComputation::kStoreStats,
+                                 node.u.component_index,
+                                 output_submatrix_index);
+        computation->commands.push_back(c);
+      }
+    }
+
+    
+**** Forward computation for Descriptor(top-level)
+     Descriptor的建立过程比Component的复杂
+
+void Compiler::DoForwardComputationDescriptor(
+  int32 step, NnetComputation *computation) const {
+  int32 num_parts = steps_[step].value_parts.size();
+  for (int32 part = 0; part < num_parts; part++)
+    DoForwardComputationSumDescriptor(step, part, computation);
+}
+
+void Compiler::DoForwardComputationSumDescriptor(
+  int32 step, int32 part_index, NnetComputation *computation) const {
+  const StepInfo &step_info = steps_[step];
+  std::vector<std::vector<std::pair<int32, int32> > > submat_locations_list;
+  ComputeValueSubmatLocationsList(step_info.input_locations_list[part_index],
+                                  &submat_locations_list);
+  int32 value_submatrix_index = step_info.value_parts[part_index];
+  DoForwardComputationFromSubmatLocationsList(
+      value_submatrix_index,
+      submat_locations_list,
+      computation);
+}
+
+**** Forward computation for Descriptor (SplitLocations)
+     SplitLocation 十分重要, 输入为 submat_list , 通过matrix-row索引, 是一系列将要被累和起来的输入locations.
+     SplitLocatios 为所有lists增加(-1,-1)?? 保证都具有相同长度.
+     然后将 Vector of lists 转化为 list of vector.
+     例如,我们有一个1000rows的matrix,SplitLocations()的输入是 submat_lists 都是不长于2的
+     SplitLocations会输出一个长度为2的向量, 每个元素都是长度为1000的元素. 如果原本某个list的长度小于2,对应输出中会包含增加的 (-1,-1)
+     
+     SplitLocations 希望确保从相同submatrix中的输入 尽可能都和输出的vector相同大小??.
+     这样能够保证我们使用更有效的命令.
+     这样SplitLocation为了更有效就有可能输出比较多的vectors
+     
+     
+**** Forward computation with DoForwardComputationFromSubmatLocations
+     ..................
+
+**** Marking the end of the forward computation
+   
+     当建立了所有前向计算的命令之后, 需要增加一个 Mark command
+     computation->commands.push_back(
+         NnetComputation::Command(NnetComputation::kNoOperationMarker));
+     执行代码 会检测 这个marker, 以便知道何时computation的前向计算完成, 准备开始反向传播部分.
+
+*** The backward computation
+    ......... kaldi
+
+    
+    
+    
+
+   
+
+   
+   
+   
+   
+   
+
+
+   
+   
+   
+   
+
+
+
+
+
+* Classes
+
+** NetWorkNode
+   
+*** introduce
+    NetworkNode 用来表示四种东西
+
+    input            
+      主要信息就是 输入数据维度
+    Component        
+      放射变换 sigmoid函数等
+    Descriptor
+      一个基本的表达式 - 将多个Component或者input的输出连接起来
+      shifting 时间index
+
+    Component必须以Descriptor作为输入. 而且必须输出到一个Descriptor.
+    
+    实际应用中 
+    kInput kComponent 都可以作为输入提交.
+    那么这时候 node 的 node_type 是怎么个定义呢?
+    
+    
+    
+    
+   
+  
