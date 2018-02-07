@@ -1,0 +1,496 @@
+shell 脚本和shell 编程基础
+http://www.runoob.com/linux/linux-shell-echo.html
+https://wenku.baidu.com/view/a41f837acaaedd3383c4d3b4.html
+
+linux 命令大全
+http://man.linuxde.net/sed  sed 详解
+
+
+* path.sh & cmd.sh
+  设置kaldi 工具环境 export KALDI_ROOT=/home/nan/local/kaldi-masterd
+  cmd.sh 配置运行环境, 是否使用集群GPU等进行训练.
+  
+
+
+* data_prepare
+  $H=`pwd`
+  $thchs=data-path
+  
+  local/thchs-30_data_prep.sh $H $thchs/data_thchs30 || exit 1;  
+  将train dev test 中的数据 取出
+ 
+
+** thchs30/data 原始数据集
+   ``data``
+      ``*.wav``
+      audio data
+
+      ``*.wav.trn``  
+       transcriptions
+       1p 中文标注 
+       2p 拼音音素标注
+       3p 音素标注
+
+   ``{train,dev,test}``
+     contain symlinks into the ``data`` directory for both audio and transcription files. 
+     Contents of these directories define the train/dev/test split of the data.
+     说是符号链接 可是并不是, 而是直接的wav数据, 好像data中的wav是没有用到的
+     是不是说只是一个备份呢?
+     {train,dev,test} 定义了 对data的分割。
+
+   ``{lm_word}``
+        ``word.3gram.lm``
+          trigram LM model  based on word
+
+		 ``lexicon.txt``
+          lexicon           based on word
+
+          head lexicon.txt ===  sil是个音素 <s> </s> SIL等都是个词.
+          SIL sil              
+          ;# sil 
+          <s> sil                                                                                                                                           
+          </s> sil                                                                                                                                          
+          一 ii i1                                                                                                                                          
+          一一 ii i1 ii i1                                                                                                                                  
+          一丁点 ii i4 d ing1 d ian3                                                                                                                        
+          一万 ii i2 uu uan4                                                                                                                                
+          一下子 ii i2 x ia4 z iy5                                                                                                                          
+          一专多能 ii i4 zh uan1 d uo1 n eng2
+
+          基于word为单元词的 发音词典
+          每个词(一个 一些等词) 认为是一个unit gram
+
+    ``{lm_phone}``
+        ``phone.3gram.lm``
+          trigram LM based on phone
+         ``lexicon.txt``
+          lexicon based on phone
+          发音词典基于phone 的 3-gram语法模型？？？ 这是个什么意思
+
+          主要就是三个数据目录 两个语言模型目录(其中应该有语言模型 那个phone)
+      
+
+      data 是原始数据, 其中train、dev、test都是从data中拷贝出来的数据
+          26776 ~= 20000 + 1768 + 4996 = 26764
+
+
+  *use-data*
+      train 训练
+          20000 
+          include A B C
+
+      dev   交叉验证
+          1768
+          include A B C 
+
+      test  测试
+          4996
+          include only D
+         
+      train dev test 三者之间没有交集
+       
+    
+** thchs30-data-prepare.sh 准备数据索引 >> data/$x/word.txt utt2spk wav.scp
+*** 代码过程
+    for x in train dev test; do
+      for nn in `find  $corpus_dir/$x/*.wav | sort -u | xargs -i basename {} .wav`; do
+        train dev test 中 find 所有.wav文件 排序 取basename得到每个文件名 .wav(表示去掉.wav后缀)
+
+        find path/*.wav find .wav 文件
+        sort -u 排序
+        xargs 取前面的输出结果做输入 -i + {} 将输出结果作为输入传给后面接的命令 basename.
+             其中{} 指代该传入参数.
+        加-i 参数直接用 {}就能代替管道之前的标准输出的内容
+        加-I 参数 需要事先指定替换字符
+        
+        nn = A11_101
+        spk  说话人
+        spkid=`echo $nn | awk -F"_" '{print "" $1}'`
+            awk -F"_" 按"_"分隔字符串, 然后执行' '中的语句
+            spkid = A11
+
+        spk_char=`echo $spkid | sed 's/\([A-Z]\).*/\1/'`
+            sed 流编辑工具  s 是替换操作
+            spk_char = A
+        spk_num=`echo $spkid | sed 's/[A-Z]\([0-9]\)/\1/'`
+            spk_num = 11
+                
+        spkid=$(printf '%s%.2d' "$spk_char" "$spk_num")
+            ??? spkid = A11
+
+        utt 语音段
+        utt_num=`echo $nn | awk -F"_" '{print $2}'`
+            utt_num = 101
+
+        uttid=$(printf '%s%.2d_%.3d' "$spk_char" "$spk_num" "$utt_num")
+            uttid = A11_101
+
+
+        echo $uttid $corpus_dir/$x/$nn.wav >> wav.scp
+        # 通过wav.scp 所以索引描述符,索引实际数据.
+            >> 追加append
+            A11_101 path/train/A11_101.wav >> wav.scp
+        echo $uttid $spkid >> utt2spk
+            A11_101 A11 >> utt2spk
+
+        echo $uttid `sed -n 1p $corpus_dir/data/$nn.wav.trn` >> word.txt
+        # word.txt 内部包含了对应的utt的中文标注.
+        # 1p 第一行 中文标注 >> word.txt!
+            1p 文件的取第一行  中文标注
+            A11_101  中文标注 >> word.txt
+        echo $uttid `sed -n 3p $corpus_dir/data/$nn.wav.trn` >> phone.txt
+            3p 取文件第三行    音素标注
+            A11_101  音素标注 >> phone.txt
+
+
+        train dev test 下所有文件进行记录 得到 wav.scp utt2spk word.txt       phone.txt
+  cp word.txt text
+  sort wav.scp -o wav.scp
+  sort utt2spk -o utt2spk
+  sort text -o text
+  sort phone.txt -o phone.txt
+  排序.
+
+spk --- A11
+
+# test_phone, 和 test实际上是一样的数据, 都是测试集合, 不过不同的是 test_phone是测试集合, 测试音素正确性.
+echo "creating test_phone for phone decoding"
+(
+  rm -rf data/test_phone && cp -R data/test data/test_phone  || exit 1
+  cd data/test_phone && rm text &&  cp phone.txt text || exit 1
+)
+
+
+*** data_prepare result
+data/train    data/dev     data/test(测试的是正常的word正确性)  data/test_phone(测试的是phone正确性)
+
+data/train
+wav.scp            utt2spk spk2utt    word.txt          phone.txt     text
+utt wav索引描述符                     utt word标注      utt 因素标注  utt word标注
+
+data/test
+wav.scp            utt2spk spk2utt    word.txt          phone.txt     text
+utt wav索引描述符                     utt word标注      utt 因素标注  utt word标注
+
+data/test_phone
+wav.scp            utt2spk spk2utt    word.txt          phone.txt     text
+utt wav索引描述符                     utt word标注      utt phone标注  utt phone标注----
+
+data/dev
+wav.scp            utt2spk spk2utt    word.txt          phone.txt     text
+utt wav索引描述符                     utt word标注      utt 因素标注  utt word标注
+
+
+
+  
+        
+      
+    
+    
+   
+    
+
+
+    
+** produce MFCC features 生成特征 索引 >> data/mfcc/$x/feats.scp cmvn.scp
+
+   # rm -rf data/mfcc && mkdir -p data/mfcc &&  cp -R data/{train,dev,test,test_phone} data/mfcc || exit 1;
+   #                                            将数据 wav.scp word.txt text 等cp一下, 实际工作目录 是在data/mfcc下
+   # for x in train dev test; do
+
+   #    #make  mfcc
+   #    steps/make_mfcc.sh --nj $n --cmd "$train_cmd" data/mfcc/$x exp/make_mfcc/$x mfcc/$x || exit 1;
+
+   #    #compute cmvn
+   #    steps/compute_cmvn_stats.sh data/mfcc/$x exp/mfcc_cmvn/$x mfcc/$x || exit 1;
+   # done
+
+   # #copy feats and cmvn to test.ph, avoid duplicated mfcc & cmvn
+   # cp data/mfcc/test/feats.scp data/mfcc/test_phone && cp data/mfcc/test/cmvn.scp data/mfcc/test_phone || exit 1;
+
+   in:
+   内部会使用　data/目录下的数据进行生成mfcc
+   out:
+   生成mfcc/$x 
+   １scp文件, 保存ark中各个utt的索引. 
+   2 ark文件保存实际的mfcc特征. 
+   3 生成的log信息 --> exp/make_mfcc/log...
+   
+   steps/make_mfcc.sh --nj $n --cmd "$train_cmd" data/mfcc/$x exp/make_mfcc/$x mfcc/$x || exit 1;   
+                                                 data         logdir           mfccdir
+
+
+生成结果:
+    data/mfcc/train、test、dev， mfcc/raw_mfcc.ark  cmvn.ark  mfcc.scp cmvn.scp
+
+    data/mfcc/train、test、dev
+    # 实际会使用用来引用 mfcc/$x/下的mfcc数据.
+    feats.scp      每段utt语音对应在ark 文件中的字节位置.(汇总了一下mfcc/下的scp文件) 
+    cmvn.scp       每个人的到普均值什么的 与mfcc 下的cmvnscp 一样
+    生成的scp文件 包含mfcc/train、test、dev的内raw_mfcc_$x.n.ark 位置索引信息.
+    
+    exp/make_mfcc/$x log信息
+    计算mfcc时的log信息
+    
+    mfcc/$x 
+    # 实际保存 mfcc数据的地方. 但是程序中使用 data/mfcc/train 下的 feats.scp cmvn.scp 来进行引用实际数据就可以了.
+    raw_mfcc_$x.n.ark  将train数据的mfcc特征整合到raw_mfcc_$x.n.ark  archives文件中
+    raw_mfcc_$x.n.scp  每段utt语音对应在ark 文件中的字节位置 script 文件 用于结合archives文件获取实际数据
+    cmvn_$x.ark        表示倒谱均值和方差归一化
+    cmvn_$x.scp
+
+    
+      
+           
+    
+
+** prepare language stuff
+
+   # # prepare language stuff
+   # # build a large lexicon that invovles words in both the training and decoding.
+   # (
+   #   echo "make word graph ..."
+   #   cd $H; mkdir -p data/{dict,lang,graph} && \
+   #   cp $thchs/resource/dict/{extra_questions.txt,nonsilence_phones.txt,optional_silence.txt,silence_phones.txt} data/dict && \
+
+   #   cat $thchs/resource/dict/lexicon.txt $thchs/data_thchs30/lm_word/lexicon.txt | \
+   #   grep -v '<s>' | grep -v '</s>' | sort -u > data/dict/lexicon.txt || exit 1;
+
+   # 准备语言模型、发音词典等数据
+   data/dict/ 
+   1 
+   extra_questions.txt  聚类结果簇之后 加入的额外的音素集合
+   nonsilence_phones.txt 非sil音素, 但是只有a ai 
+   optional_silence.txt  只有sil
+   silence_phones.txt    只有sil
+   2 
+   结合了resource/dict/ + /data/lm_word/lexicon.txt 发音词典信息, 
+   包含了 SIL <SPOKEN_NOISE> 等word 对应与 -- sil phone.
+
+
+   #   utils/prepare_lang.sh --position_dependent_phones false data/dict "<SPOKEN_NOISE>" data/local/lang data/lang || exit 1;
+
+   #   gzip -c $thchs/data_thchs30/lm_word/word.3gram.lm > data/graph/word.3gram.lm.gz || exit 1;
+   #   utils/format_lm.sh data/lang data/graph/word.3gram.lm.gz $thchs/data_thchs30/lm_word/lexicon.txt data/graph/lang || exit 1;
+   # )
+
+   # 1 准备resource/dict中对发音词典的一些额外数据
+   # 2 准备 lexicon.txt 从resource/dict/lexicon.txt + data_thchs30/lm_word/lexicon.txt中组合得到的lexicon.txt
+   # 3 生成 L.fst
+   # 4 生成 G.fst
+
+    mkdir -p data/{dict,lang,graph}
+        dict lang  graph
+
+
+    cp $thchs/resource/dict/{extra_questions.txt,nonsilence_phones.txt,optional_silence.txt,silence_phones.txt} data/dict && \
+        1 拷贝 音素数据库
+
+    cat $thchs/resource/dict/lexicon.txt $thchs/data_thchs30/lm_word/lexicon.txt | grep -v '<s>' | grep -v '</s>' |
+    sort -u > data/dict/lexicon.txt || exit 1;
+        2 cat resource/dict/lexicon.txt data_thchs30/lm_word/lexicon.txt 两个 词-音素 发音字典 grep -v <s> </s> 然后排序
+        输出到 data/dict/lexicon.txt， 得到词-音素发音词典
+    
+    # 输出结果 --->  data/dict  :extra_question.txt nonsilence_phones.txt optional_silence.txt
+      
+    utils/prepare_lang.sh --position_dependent_phones false data/dict "<SPOKEN_NOISE>" data/local/lang data/lang || exit 1;
+        准备语言模型相关 --> data/lang
+        *生成 L.fst*
+    
+    gzip -c $thchs/data_thchs30/lm_word/word.3gram.lm > data/graph/word.3gram.lm.gz || exit 1;
+    utils/format_lm.sh data/lang data/graph/word.3gram.lm.gz $thchs/data_thchs30/lm_word/lexicon.txt data/graph/lang || exit 1;
+        *根据 data/lang、data/graph/word.3gram.lm.gz、data_thchs30/lm_word/lexicon.txt 生成语言模型 G.fst*
+
+        
+** graph 文件内容
+   result: 
+       graph/
+       ├── lang
+       │   ├── G.fst
+       │   ├── L_disambig.fst
+       │   ├── L.fst
+       │   ├── oov.int
+       │   ├── oov.txt
+       │   ├── phones
+       │   │   ├── align_lexicon.int
+       │   │   ├── align_lexicon.txt
+       │   │   ├── context_indep.csl
+       │   │   ├── context_indep.int
+       │   │   ├── context_indep.txt
+       │   │   ├── disambig.csl
+       │   │   ├── disambig.int
+       │   │   ├── disambig.txt
+       │   │   ├── extra_questions.int
+       │   │   ├── extra_questions.txt
+       │   │   ├── nonsilence.csl
+       │   │   ├── nonsilence.int
+       │   │   ├── nonsilence.txt
+       │   │   ├── optional_silence.csl
+       │   │   ├── optional_silence.int
+       │   │   ├── optional_silence.txt
+       │   │   ├── roots.int
+       │   │   ├── roots.txt
+       │   │   ├── sets.int
+       │   │   ├── sets.txt
+       │   │   ├── silence.csl
+       │   │   ├── silence.int
+       │   │   ├── silence.txt
+       │   │   ├── wdisambig_phones.int
+       │   │   ├── wdisambig.txt
+       │   │   └── wdisambig_words.int
+       │   ├── phones.txt
+       │   ├── topo
+       │   └── words.txt
+       └── word.3gram.lm.gz
+       
+       
+   
+   
+       
+  问题?
+      各个文件内容怎么解读, 怎么理解的.
+
+
+**** make_phone_graph
+     echo "make phone graph ..."
+     cd $H; mkdir -p data/{dict_phone,graph_phone,lang_phone} && \
+     cp $thchs/resource/dict/{extra_questions.txt,nonsilence_phones.txt,optional_silence.txt,silence_phones.txt} data/dict_phone  && \
+     cat $thchs/data_thchs30/lm_phone/lexicon.txt | grep -v '<eps>' | sort -u > data/dict_phone/lexicon.txt  && \
+     echo "<SPOKEN_NOISE> sil " >> data/dict_phone/lexicon.txt  || exit 1;
+     
+     utils/prepare_lang.sh --position_dependent_phones false data/dict_phone "<SPOKEN_NOISE>" data/local/lang_phone data/lang_phone || exit 1;
+     
+     gzip -c $thchs/data_thchs30/lm_phone/phone.3gram.lm > data/graph_phone/phone.3gram.lm.gz  || exit 1;
+     utils/format_lm.sh data/lang_phone data/graph_phone/phone.3gram.lm.gz $thchs/data_thchs30/lm_phone/lexicon.txt \
+     data/graph_phone/lang  || exit 1;
+
+result:
+     这个和prepare language stuff的一样, 不过使用的lexicon.txt 和 lm 不一样
+     language_stuff 
+     lm_word/lexicon.txt + dict/lexicon.txt + word.3gram.lm     >    L.fst  G.fst
+     
+     data/dict、lang、graph
+
+     phone_graph
+     lm_phone/lexicon.txt phone.3gram.lm     >   L.fst  G.fst
+     
+     data/dict_phone、lang_phone、graph_phone
+
+
+
+
+
+
+
+
+** training
+
+*** monophone
+    
+    单音素训练
+    #monophone
+    steps/train_mono.sh --boost-silence 1.25 --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/mono || exit 1;
+    #test monophone model
+    local/thchs-30_decode.sh --mono true --nj $n "steps/decode.sh" exp/mono data/mfcc &
+    
+    #monophone_ali
+    steps/align_si.sh --boost-silence 1.25 --nj $n --cmd "$train_cmd" data/mfcc/train data/lang exp/mono exp/mono_ali || exit 1;
+    
+**** steps/train_mono.sh
+
+     整体框架以及框架描述
+     Kaldi三音素GMM学习笔记 作者：许开拓 
+     http://blog.csdn.net/u010731824/article/details/70161677
+     kaldi学习笔记 steps/train_mono.sh 作者: DuishengChen
+     http://blog.csdn.net/DuishengChen/article/details/52575926
+
+***** part0  others
+      data=data/mfcc/train
+      lang=data/lang
+      dir=exp/mono
+
+      oov=`cat $lang/oov.int` || exit 1
+      oov 未出现词
+      
+      test -d $sdata && $data/feats.scp -ot $sdata  || split_data.sh $data $nj || exit 1;
+      split_data.sh data/mfcc/train 4  并行计算时进行分割数据
+      
+      *split_data.sh 并行计算需要进行数据分割*
+           判断是否需要进行split 因为比较耗时间, 所以如果已经做过了并且没有修改就不进行重新split
+       
+           echo 打印的所有数据都放入了变量中.
+           utt2spks=$(for n in `seq $numsplit`; do echo $data/split${numsplit}${utt}/$n/utt2spk; done)
+           directories=$(for n in `seq $numsplit`; do echo $data/split${numsplit}${utt}/$n; done)
+
+           # if this mkdir fails due to argument-list being too long, iterate.
+           if ! mkdir -p $directories >&/dev/null; then
+               for n in `seq $numsplit`; do
+                   mkdir -p $data/split${numsplit}${utt}/$n
+               done
+           fi
+       
+       
+
+      *ark scp 等标示符号的作用*
+           feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp \
+                  scp:$sdata/JOB/feats.scp ark:- | add-deltas ark:- ark:- |"
+           1 apply-cmvn 程序需要三个输入, 一个输出
+           三个输入
+             --utt2spk=ark:$sdata/JOB/utt2spk 
+                 --utt2spk 代表输入文件是一个utt2spk
+                 ark代表输入输出文件是一个archieve文件(数据table文件)
+             scp:$sdata/JOB/cmvn.scp
+                 scp代表输入输出文件是一个script文件 内部也是table 但是可能包含了可执行脚本可以进行索引
+             scp:$sdata/JOB/feats.scp
+
+           一个输出
+             ark:-|
+                 - 代表标准输入输出； | 代表管道, 将标准输出 通过管道>下一个程序作为输入.
+           2 add-deltas ark:- ark:- |
+           一个输入 
+             ark:- 
+                 ark:-  ark 表示是个archives文件, - 表示标准输入输出
+                 一个输出
+             ark: -
+
+       _结果 feats 最后实际上是个 *ark,s,cs:archives* 的字符串 给别的程序做输入_
+               
+       example_feats="`echo $feats | sed s/JOB/1/g`";
+       example_feats 表示字符串 执行之后替换JOB -> 1得到一个archives做输入
+
+
+
+       
+       
+***** part1  gmm-init-mono
+
+      $cmd JOB=1 $dir/log/init.log \
+          gmm-init-mono $shared_phones_opt "--train-feats=$feats subset-feats --n=10 ark:- ark:-|" $lang/topo $feat_dim \
+          $dir/0.mdl $dir/tree || exit 1;
+
+      输入:
+      $lang/topo(data/lang/topo) 中定义了每个音素（phone）所对应的 HMM 模型状态数以及初始时的转移概率
+      --shared-phones=$lang/phones/sets.int 选项指向的文件，即$lang/phones/sets.int
+          (该文件生成roots.txt中开头为share split的部分，表示同一行元素共享pdf，允许进行决策树分裂),
+          文件中同一行的音素（phone）共享 GMM 概率分布。tree文件由sets.int产生。
+      --train-feats=$feats subset-feats --n=10 ark:- ark:-| 选项指定用来初始化训练用的特征，
+          一般采用少量数据，程序内部会计算这批数据的means和variance，作为初始高斯模型。sets.int中所有行的初始pdf都用这个计算出来的means和variance进行初始化。    
+      
+      作用:
+      Flat-start（快速启动），作用是利用少量的数据快速得到一个初始化的 HMM-GMM 模型和决策树
+      初始化单音素GMM。
+      
+      Usage: gmm-init-mono <topology-in> <dim> <model-out> <tree-out>
+      e.g.: gmm-init-mono topo 39 mono.mdl mono.tree
+      
+      计算所有特征数据每一维特征的全局均值、方差
+      读取topo文件，创建共享音素列表（根据$lang/phones/sets.int)，根据共享音素列表创建ctx_dep（相当于tree)
+      每一组共享音素的一个状态对应一个Pdf。对每一个状态，创建只有一个分量的GMM，
+          该GMM的均值初始化为全局均值、方差初始化为全局方差。
+          (实际上，此时表示GMM的类是DiagGmm，该对象根据多维高斯分布的公式和对角协方差矩阵的特殊性，
+          为了方便计算，直接保存的参数并不是均值、方差，而是方差的逆（实际就是方差矩阵每个元素求倒数）、均值×方差的逆，
+          还提前计算并保存了公式中的常数部分（.mdl文件GMM部分的<GCONSTS>）)
+      根据ctx_dep和topo创建转移模型。将转移模型、GMM声学模型写到0.mdl
+      将ctx_dep写到tree.
+
+  
