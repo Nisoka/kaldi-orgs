@@ -2,7 +2,7 @@
 # steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 
 
-# xconfig-file
+* xconfig-file
   # input dim=100 name=ivector
   # input dim=43 name=input
 
@@ -20,7 +20,7 @@
   # relu-batchnorm-layer name=tdnn6 dim=850
   # output-layer name=output input=tdnn6 dim=$num_targets max-change=1.5
 
-def xconfig_to_configs():
+* def xconfig_to_configs():
     args = get_args()
     # 备份
     backup_xconfig_file(args.xconfig_file, args.config_dir)
@@ -32,8 +32,8 @@ def xconfig_to_configs():
     # 通过read_xconfig_file() 生成对应的xlayers
     all_layers = xparser.read_xconfig_file(args.xconfig_file, existing_layers)
 
+
     write_expanded_xconfig_files(args.config_dir, all_layers)
-    
     write_config_files(args.config_dir, all_layers)
     check_model_contexts(args.config_dir, args.nnet_edits,
                          existing_model=args.existing_model)
@@ -42,17 +42,18 @@ def xconfig_to_configs():
 
 
 
-
-
-def read_xconfig_file(xconfig_filename, existing_layers=[]):
+** def read_xconfig_file(xconfig_filename, existing_layers=[]):
     f = open(xconfig_filename, 'r')
     all_layers = []
+
     while True:
         line = f.readline()
         if line == '':
             break
+
         # 通过解析每行, 得到 xlayer对象.
         this_layer = xconfig_line_to_object(line, existing_layers)
+
         if this_layer is None:
             continue  # line was blank after removing comments.
         all_layers.append(this_layer)
@@ -63,7 +64,9 @@ def read_xconfig_file(xconfig_filename, existing_layers=[]):
 
 
 
-config_to_layer = {
+
+
+** config_to_layer = {
         'input' : xlayers.XconfigInputLayer,
         'output' : xlayers.XconfigTrivialOutputLayer,
         'output-layer' : xlayers.XconfigOutputLayer,
@@ -117,7 +120,10 @@ config_to_layer = {
 
 
 # /nwork/svn/ai/sr/kaldi/egs/aishell/s5/steps/libs/nnet3/xconfig/parser.py
-def xconfig_line_to_object(config_line, prev_layers = None):
+
+
+** def xconfig_line_to_object(config_line, prev_layers = None):
+   
     x  = xutils.parse_config_line(config_line)
     if x is None:
         return None
@@ -126,6 +132,105 @@ def xconfig_line_to_object(config_line, prev_layers = None):
     return config_to_layer[first_token](first_token, key_to_value, prev_layers)
 
 
+*** def parse_config_line(orig_config_line):
+# fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=nan-test/configs/lda.mat
+# ('fixed-affine-layer', {'affine-transform-file': 'nan-test/configs/lda.mat', 'input': 'Append(-2,-1,0,1,2,ReplaceIndex(ivector,t,0 )', 'name': 'lda'})
+
+    # Remove comments.
+    # note: splitting on '#' will always give at least one field...  python
+    # treats splitting on space as a special case that may give zero fields.
+    config_line = orig_config_line.split('#')[0]
+
+    # Note: this set of allowed characters may have to be expanded in future.
+    # 在未来必须能够扩展使用. 如下都是禁用 char
+    x = re.search('[^a-zA-Z0-9\.\-\(\)@_=,/+:\s"]', config_line)
+    if x is not None:
+        bad_char = x.group(0)
+        if bad_char == "'":
+            raise RuntimeError("Xconfig line has disallowed character ' (use "
+                               "double quotes for strings containing = signs)")
+        else:
+            raise RuntimeError("Xconfig line has disallowed character: {0}"
+                               .format(bad_char))
+
+
+    # relu-batchnorm-layer name=tdnn2 dim=850 input=Append(-1,0,2)
+    # first_token          key-value  key-value key-value
+    # now split on space; later we may splice things back together.
+    fields=config_line.split()
+    if len(fields) == 0:
+        return None   # Line was only whitespace after removing comments.
+
+    # 获得first_token
+    first_token = fields[0]
+
+    # 获得剩下的 key-values
+    # get rid of the first field which we put in 'first_token'.
+    fields = fields[1:]
+
+    # "key-value key-value key-value"
+    rest_of_line = ' '.join(fields)
+
+
+    # 找到所有key-value '"' 的 postions
+    # 但是正常不会是 'a=1 b=3 " x=1 y=2 " c=Append( i1, i2)' 这样的格式, 应该是 以空格分割的如下形式
+    # name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=nan-test/configs/lda.mat
+
+    # rest of the line can be of the form 'a=1 b=3 " x=1 y=2 " c=Append( i1, i2)'
+    positions = map(lambda x: x.start(), re.finditer('"', rest_of_line))
+    if not len(positions) % 2 == 0:
+        raise RuntimeError("Double-quotes should occur in pairs")
+
+    # 去掉所有key-value中的'='
+    # Replace all the equals signs inside the "-enclosed strings
+    # with question marks ('?') [this is just an arbitrary character
+    # that won't otherwise be present, search above for 'banned'],
+    # and replace the quotation marks themselves with spaces.
+    # Then later on we'll convert all the question marks to
+    # equals signs in the values in the dicts.
+    num_strings = len(positions) / 2
+
+    fields = []
+    # foreach key-value
+    for i in range(num_strings):
+        start = positions[i * 2]
+        end = positions[i * 2 + 1]
+
+        # 用空格分割 key-value. 并将=用?替换
+        line_before_start = rest_of_line[:start]
+        inside_quotes=rest_of_line[start+1:end].replace('=', '?')
+        line_after_end = rest_of_line[end + 1:]
+
+        # the reason why we include the spaces here, is to keep the length of
+        # rest_of_line the same, and the positions in 'positions' valid.
+        new_rest_of_line = line_before_start + ' ' + inside_quotes + ' ' + line_after_end
+        assert len(new_rest_of_line) == len(rest_of_line)
+        rest_of_line = new_rest_of_line
+
+    # 结果 如下:
+    # suppose rest_of_line is: 'input=Append(foo, bar) foo=bar'
+    # then after the below we'll get
+    # fields = ['', 'input', 'Append(foo, bar)', 'foo', 'bar']
+
+    ans_dict = dict()
+    other_fields = re.split(r'\s*([-a-zA-Z0-9_]*)=', rest_of_line)
+
+    fields += other_fields[1:]
+    num_variables = len(fields) / 2
+    for i in range(num_variables):
+        var_name = fields[i * 2]
+        var_value = fields[i * 2 + 1]
+
+        # Teplace any '?' characters that we inserted above, with the original
+        # '=' characters.
+        # The 'strip()' is to remove initial and final spaces that we might
+        # have inserted while processing double-quotes above (search above
+        # for the string 'inside_quotes' to see what is meant by this).
+        ans_dict[var_name] = var_value.replace('?', '=').strip()
+
+    # 最终返回 (Affine-layer, {key:value, key2:value2, key3:value3})
+    # ('fixed-affine-layer', {'affine-transform-file': 'nan-test/configs/lda.mat', 'input': 'Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0))', 'name': 'lda'})
+    return (first_token, ans_dict)
 
 
 
@@ -133,17 +238,8 @@ def xconfig_line_to_object(config_line, prev_layers = None):
 
 
 
-# /nwork/svn/ai/sr/kaldi/egs/aishell/s5/steps/libs/nnet3/xconfig/basic_layers.py
 
-# first_token: first token on the xconfig line, e.g. 'affine-layer'.
-# key_to_value: dictionary with parameter values
-#     { 'name':'affine1',
-#       'input':'Append(0, 1, 2, ReplaceIndex(ivector, t, 0))',
-#       'dim=1024' }.
-
-class XconfigLayerBase(object):
-    """ A base-class for classes representing layers of xconfig files.
-    """
+** class XconfigLayerBase(object):
 
     def __init__(self, first_token, key_to_value, all_layers):
         """
@@ -177,14 +273,6 @@ class XconfigLayerBase(object):
         # and 'output-node' of type 'output-layer' with the same name 'output' in
         # 'all_layers'.
 
-        # check "layer-name"
-        for prev_layer in all_layers:
-            if (self.name == prev_layer.name and
-                prev_layer.layer_type is not 'existing'):
-                raise RuntimeError("Name '{0}' is used for more than one "
-                                   "layer.".format(self.name))
-
-
 
         # config 是一个 dict
         self.config = {}
@@ -214,11 +302,6 @@ class XconfigLayerBase(object):
 
 
     def set_configs(self, key_to_value, all_layers):
-        """ Sets the config variables.
-            We broke this code out of __init__ for clarity.
-            the child-class constructor will deal with the configuration values
-            in a more specific way.
-        """
 
         # check 是否一个key 在 this classs 被允许使用的.
         # First check that there are no keys that don't correspond to any config
@@ -235,7 +318,8 @@ class XconfigLayerBase(object):
                                        "configs with their defaults: {3}"
                                        "" .format(key, value, self.layer_type, configs))
 
-        # foreach key-value in config
+        # 设置------------------ self.config[key]
+        # foreach key-value 然后设置 config[key]
         for key, value in key_to_value.items():
             if key != 'name':
                 # config dict 保存对应的 key的value值 (type 获得对应类型)
@@ -246,18 +330,14 @@ class XconfigLayerBase(object):
         self.descriptors = dict()
         self.descriptor_dims = dict()
 
+        # -------------------------- 根据不同type layer 对可能的descriptor生成对应的Descriptor对象.
         # 处理Descriptor  final string form??
+        # get_input_descriptor_names() 会被重写, 对不同的type layer 具有不同可能的descriptors.
         # Parse Descriptors and get their dims and their 'final' string form.
         # in self.descriptors[key]
         for key in self.get_input_descriptor_names():
-            if key not in self.config:
-                raise RuntimeError("{0}: object of type {1} needs to override"
-                                   " get_input_descriptor_names()."
-                                   "".format(sys.argv[0], str(type(self))))
-
             descriptor_string = self.config[key]  # input string.
-            assert isinstance(descriptor_string, str)
-            
+           
             # 转化为 descriptor. 获得对应的 dim
             desc = self.convert_to_descriptor(descriptor_string, all_layers)
             desc_dim = self.get_dim_for_descriptor(desc, all_layers)
@@ -274,41 +354,14 @@ class XconfigLayerBase(object):
             # That's up to the designer of the layer type.
             desc_output_str = self.get_string_for_descriptor(desc, all_layers)
 
-            # 构建 descriptor 并加入 self.Descriptor - dict()
+            # 构建 descriptor 并加入 self.descriptors 是一个dict 对不同可能的key 具有不同的Descriptor_list.
+            # eg input 具有 Append(Offset, Offset, Offset) + ReplaceIndex(Offset, Offset)
+            # 很可能不止input 还有很多其他的key.
             self.descriptors[key] = {'string': desc,
                                      'normalized-string': desc_norm_str,
                                      'final-string': desc_output_str,
                                      'dim': desc_dim}
 
-
-    # 反向 生成会string??? 但是 会有扩展
-    def str(self):
-        """Converts 'this' to a string which could be printed to
-        an xconfig file; in xconfig_to_configs.py we actually expand all the
-        lines to strings and write it as xconfig.expanded as a reference
-        (so users can see any defaults).
-        """
-        # affine-layer name=affine1
-        list_of_entries = ['{0} name={1}'.format(self.layer_type, self.name)]
-        # all configs.
-        for key, value in sorted(self.config.items()):
-            if isinstance(value, str) and re.search('=', value):
-                # the value is a string that contains an '=' sign, so we need to
-                # enclose it in double-quotes, otherwise we woudldn't be able to
-                # parse from that output.
-                if re.search('"', value):
-                    print("Warning: config '{0}={1}' contains both double-quotes "
-                          "and equals sign; it will not be possible to parse it "
-                          "from the file.".format(key, value), file=sys.stderr)
-                list_of_entries.append('{0}="{1}"'.format(key, value))
-            else:
-                # add the key=value
-                list_of_entries.append('{0}={1}'.format(key, value))
-
-        return ' '.join(list_of_entries)
-
-    def __str__(self):
-        return self.str()
 
     # 正则化 descriptor 
     def normalize_descriptors(self):
@@ -326,10 +379,9 @@ class XconfigLayerBase(object):
         for key, desc_str_dict in self.descriptors.items():
             self.config[key] = desc_str_dict['normalized-string']
             
-
+    # ================== important ===============
     def convert_to_descriptor(self, descriptor_string, all_layers):
         # 应该从child class调用, 将对应为一个descriptor的string 转化为一个 Descriptor对象
-        # 
         """Convenience function intended to be called from child classes,
         converts a string representing a descriptor ('descriptor_string')
         into an object of type Descriptor, and returns it. 
@@ -344,22 +396,22 @@ class XconfigLayerBase(object):
         layers, and get dimensions from them.
         """
         
-        # 先前layer的name
+        # 先前layer的name []
         prev_names = xutils.get_prev_names(all_layers, self)
+        # tokenize_descriptor--, 并将其中 -1 -2 等用 last1 last2 的 layer-name替换.
+# 82| >>> utils.tokenize_descriptor("Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0))")                                                    
+# 83| ['Append', '(', '-2', ',', '-1', ',', '0', ',', '1', ',', '2', ',', 'ReplaceIndex', '(', 'ivector', ',', 't', ',', '0', ')', ')', ' 
+# 84| end of string'] 
         tokens = xutils.tokenize_descriptor(descriptor_string, prev_names)
+        # 从0 开始处理每个descriptor.
         pos = 0
         (descriptor, pos) = xutils.parse_new_descriptor(tokens, pos, prev_names)
-        # note: 'pos' should point to the 'end of string' marker
-        # that terminates 'tokens'.
-        if pos != len(tokens) - 1:
-            raise RuntimeError("Parsing Descriptor, saw junk at end: {0}"
-                               "".format(' '.join(tokens[pos:-1])))
+
         return descriptor
 
+
+
     def get_dim_for_descriptor(self, descriptor, all_layers):
-        """Returns the dimension of a Descriptor object. This is a convenience
-        function used in set_configs.
-        """
 
         layer_to_dim_func = \
                 lambda name: xutils.get_dim_from_layer_name(all_layers, self,
@@ -377,21 +429,7 @@ class XconfigLayerBase(object):
                                                                self, name)
         return descriptor.config_string(layer_to_string_func)
 
-    def get_name(self):
-        """Returns the name of this layer, e.g. 'affine1'.  It does not
-        necessarily correspond to a component name.
-        """
-
-        return self.name
-
-    ######  Functions that might be overridden by the child class: #####
-
-    def set_default_configs(self):
-        """Child classes should override this.
-        """
-
-        raise Exception("Child classes must override set_default_configs().")
-
+**** other
     def set_derived_configs(self):
         """This is expected to be called after set_configs and before
         check_configs().
@@ -466,3 +504,206 @@ class XconfigLayerBase(object):
 
         raise Exception("Child classes must override get_full_config()")
 
+    # 反向 生成会string??? 但是 会有扩展
+    def str(self):
+        """Converts 'this' to a string which could be printed to
+        an xconfig file; in xconfig_to_configs.py we actually expand all the
+        lines to strings and write it as xconfig.expanded as a reference
+        (so users can see any defaults).
+        """
+        # affine-layer name=affine1
+        list_of_entries = ['{0} name={1}'.format(self.layer_type, self.name)]
+        # all configs.
+        for key, value in sorted(self.config.items()):
+            if isinstance(value, str) and re.search('=', value):
+                # the value is a string that contains an '=' sign, so we need to
+                # enclose it in double-quotes, otherwise we woudldn't be able to
+                # parse from that output.
+                if re.search('"', value):
+                    print("Warning: config '{0}={1}' contains both double-quotes "
+                          "and equals sign; it will not be possible to parse it "
+                          "from the file.".format(key, value), file=sys.stderr)
+                list_of_entries.append('{0}="{1}"'.format(key, value))
+            else:
+                # add the key=value
+                list_of_entries.append('{0}={1}'.format(key, value))
+
+        return ' '.join(list_of_entries)
+
+    def __str__(self):
+        return self.str()
+        
+
+** class XconfigInputLayer(XconfigLayerBase):
+   # /nwork/svn/ai/sr/kaldi/egs/aishell/s5/steps/libs/nnet3/xconfig/basic_layers.py
+    def __init__(self, first_token, key_to_value, prev_names=None):
+        assert first_token == 'input'
+        XconfigLayerBase.__init__(self, first_token, key_to_value, prev_names
+    
+    def set_default_configs(self):
+        self.config = {'dim': -1}
+
+
+
+
+
+
+
+# first_token: first token on the xconfig line, e.g. 'affine-layer'.
+# key_to_value: dictionary with parameter values
+#     { 'name':'affine1',
+#       'input':'Append(0, 1, 2, ReplaceIndex(ivector, t, 0))',
+#       'dim=1024' }.
+
+** class XconfigFixedAffineLayer(XconfigLayerBase):
+
+   # 构造时, 在构建config 中构建Descriptor时, 会get_input_descriptor_names(),会默认是用baselayer的返回值
+   # 只具有input= 这个Descriptor.
+   # 具体构建Descriptor的过程在 BaseLayer中
+    """
+    This class is for lines like
+     'fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=foo/bar/lda.mat'
+
+    The output dimension of the layer may be specified via 'dim=xxx', but if not specified,
+    the dimension defaults to the same as the input.  
+    ????
+    Note: we don't attempt to read that
+    file at the time the config is created, because in the recipes, that file is created
+    after the config files.
+
+    See other configuration values below.
+
+    Parameters of the class, and their defaults:
+      input='[-1]'             [Descriptor giving the input of the layer.]
+      dim=None                   [Output dimension of layer; defaults to the same as the input dim.]
+      affine-transform-file='' [Must be specified.]
+      delay=0                  [Optional delay for the output-node in init.config]
+    """
+
+
+    def __init__(self, first_token, key_to_value, prev_names=None):
+        assert first_token == 'fixed-affine-layer'
+        XconfigLayerBase.__init__(self, first_token, key_to_value, prev_names)
+
+    def set_default_configs(self):
+        # note: self.config['input'] is a descriptor, '[-1]' means output
+        # the most recent layer.
+        self.config = {'input': '[-1]',
+                       'dim': -1,
+                       'affine-transform-file': '',
+                       'delay': 0,
+                       'write-init-config': True}
+
+
+
+
+
+** others
+*** def parse_new_descriptor(tokens, pos, prev_names):
+     # Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0))
+     # [ 'Append', '(',  '-1', ',', '0', ',', '1','ReplaceINdex','(','ivector','t','0',')', ')']
+     # Des -- operator -----  Append
+     #        items -append-  Des  ----  operator - Offset
+     #                                   items   - Des --- operator - None       +  -1.
+     #                                                     items   - preLayer
+     #        items -append-  Des  ----  operator - Offset
+     #                                   items   - Des --- operator - None       +  0.
+     #                                                     items   - preLayer
+     #        items -append-  Des  ----  operator - Offset
+     #                                   items   - Des --- operator - None       + 1.
+     #                                                     items   - preLayer
+     #        items -append-  Des  ----  operator - ReplaceIndex
+     #                                   items   -append- 
+     size = len(tokens)
+     first_token = tokens[pos]
+
+     pos += 1
+     # 申请Descriptor 对象
+     d = Descriptor()
+
+     # 这个if判断是否是个正常的descriptor, 
+     if first_token in [ 'Offset', 'Round', 'ReplaceIndex', 'Append', 'Sum', 'Switch', 'Failover', 'IfDefined' ]:
+         # check
+         expect_token('(', tokens[pos], first_token + '()')
+         pos += 1
+
+         d.operator = first_token
+         (desc, pos) = parse_new_descriptor(tokens, pos, prev_names)
+         d.items = [desc]
+
+         # ------------------------
+         # if-else 根据不同的descriptor-str进行不同的Descriptor生成
+         if first_token == 'Offset':
+
+         elif first_token in [ 'Append', 'Sum', 'Switch', 'Failover', 'IfDefined' ]:
+             # 循环处理
+             while True:
+                 if tokens[pos] == ')':
+                     # check num-items is correct for some special cases.
+                     if first_token == 'Failover' and len(d.items) != 2:
+                         raise RuntimeError("Parsing Failover(), expected 2 items but got {0}".format(len(d.items)))
+                     if first_token == 'IfDefined' and len(d.items) != 1:
+                         raise RuntimeError("Parsing IfDefined(), expected 1 item but got {0}".format(len(d.items)))
+                     pos += 1
+                     break
+                 elif tokens[pos] == ',':
+                     pos += 1  # consume the comma.
+                 else:
+                     raise RuntimeError("Parsing Append(), expected ')' or ',', got " + tokens[pos])
+
+                  # ==================================
+                  # 循环构建内部的 offset-Descriptor.
+                 (desc, pos) = parse_new_descriptor(tokens, pos, prev_names)
+                 d.items.append(desc)
+
+         elif first_token == 'Round':
+
+         elif first_token == 'ReplaceIndex':
+             # 类似Assert .
+             expect_token(',', tokens[pos], 'ReplaceIndex()')
+             pos += 1
+
+             if tokens[pos] in [ 'x', 't' ]:
+                 d.items.append(tokens[pos])
+                 pos += 1
+             else:
+                 raise RuntimeError("Parsing ReplaceIndex(), expected 'x' or 't', got " +
+                                 tokens[pos])
+             expect_token(',', tokens[pos], 'ReplaceIndex()')
+             pos += 1
+             try:
+                 new_value = int(tokens[pos])
+                 pos += 1
+                 d.items.append(new_value)
+             except:
+                 raise RuntimeError("Parsing Offset(), expected integer, got " + tokens[pos])
+                 
+             expect_token(')', tokens[pos], 'ReplaceIndex()')
+             pos += 1
+
+         else:
+             raise RuntimeError("code error")
+
+     # 非正常的Descriptor, 需要 生成对应的别的Descriptor对象.
+     else:
+         # the last possible case is that 'first_token' is just an integer i,
+         # which can appear in things like Append(-3, 0, 3).
+         # See if the token is an integer.
+         # In this case, it's interpreted as the name of previous layer
+         # (with that time offset applied).
+         offset_t = int(first_token)
+
+         assert isinstance(prev_names, list)
+
+         d.operator = None
+         # the layer name is the name of the most recent layer.
+         d.items = [prev_names[-1]]
+         
+         if offset_t != 0:
+             inner_d = d
+             d = Descriptor()
+             d.operator = 'Offset'
+             d.items = [ inner_d, offset_t ]
+
+     return (d, pos)
+     
