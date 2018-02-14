@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python
 
 # Copyright 2016    Vijayaditya Peddinti.
@@ -197,14 +198,18 @@ def train(args, run_opts):
                     {dir}/init.raw""".format(command=run_opts.command,
                                              dir=args.dir))
 
+    # ================== 生成egs 的过程
     # egs 目录为 目标目录下的 exp/nnet3/tdnn_sp/egs/
     default_egs_dir = '{0}/egs'.format(args.dir)
     if (args.stage <= -4) and args.egs_dir is None:
         logger.info("Generating egs")
 
         train_lib.acoustic_model.generate_egs(
-            data=args.feat_dir, alidir=args.ali_dir, egs_dir=default_egs_dir,
-            left_context=left_context, right_context=right_context,
+            data=args.feat_dir,
+            alidir=args.ali_dir,
+            egs_dir=default_egs_dir,
+            left_context=left_context,
+            right_context=right_context,
             run_opts=run_opts,
             frames_per_eg_str=str(args.frames_per_eg),
             srand=args.srand,
@@ -215,6 +220,7 @@ def train(args, run_opts):
             transform_dir=args.transform_dir,
             stage=args.egs_stage)
 
+        
         egs_dir = default_egs_dir
 
     [egs_left_context, egs_right_context,

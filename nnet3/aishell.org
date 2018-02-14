@@ -999,11 +999,14 @@ Checking data/test_hires_nopitch/text ...
 utils/validate_data_dir.sh: Successfully validated data-directory data/test_hires_nopitch
 steps/compute_cmvn_stats.sh data/test_hires_nopitch exp/make_hires/test mfcc_perturbed_hires
 Succeeded creating CMVN stats for test_hires_nopitch
+
 local/nnet3/run_ivector_common.sh: computing a subset of data to train the diagonal UBM.
 utils/data/subset_data_dir.sh: reducing #utt from 360294 to 90073
+
 local/nnet3/run_ivector_common.sh: computing a PCA transform from the hires data.
 steps/online/nnet2/get_pca_transform.sh --cmd run.pl --splice-opts --left-context=3 --right-context=3 --max-utts 10000 --subsample 2 exp/nnet3/diag_ubm/train_sp_hires_nopitch_subset exp/nnet3/pca_transform
 Done estimating PCA transform in exp/nnet3/pca_transform
+
 local/nnet3/run_ivector_common.sh: training the diagonal UBM.
 steps/online/nnet2/train_diag_ubm.sh --cmd run.pl --nj 30 --num-frames 700000 --num-threads 8 exp/nnet3/diag_ubm/train_sp_hires_nopitch_subset 512 exp/nnet3/pca_transform exp/nnet3/diag_ubm
 steps/online/nnet2/train_diag_ubm.sh: Directory exp/nnet3/diag_ubm already exists. Backing up diagonal UBM in exp/nnet3/diag_ubm/backup.NYK
@@ -1017,6 +1020,7 @@ steps/online/nnet2/train_diag_ubm.sh: Training pass 0
 steps/online/nnet2/train_diag_ubm.sh: Training pass 1
 steps/online/nnet2/train_diag_ubm.sh: Training pass 2
 steps/online/nnet2/train_diag_ubm.sh: Training pass 3
+
 local/nnet3/run_ivector_common.sh: training the iVector extractor
 steps/online/nnet2/train_ivector_extractor.sh --cmd run.pl --nj 10 data/train_sp_hires_nopitch exp/nnet3/diag_ubm exp/nnet3/extractor
 steps/online/nnet2/train_ivector_extractor.sh: doing Gaussian selection and posterior computation
@@ -1080,9 +1084,15 @@ nnet3-info exp/nnet3/tdnn_sp/configs//ref.raw
 nnet3-init exp/nnet3/tdnn_sp/configs//ref.config exp/nnet3/tdnn_sp/configs//ref.raw 
 LOG (nnet3-init[5.3]:main():nnet3-init.cc:80) Initialized raw neural net and wrote it to exp/nnet3/tdnn_sp/configs//ref.raw
 nnet3-info exp/nnet3/tdnn_sp/configs//ref.raw 
+
+
+
+
+
 2018-02-08 11:39:38,392 [steps/nnet3/train_dnn.py:35 - <module> - INFO ] Starting DNN trainer (train_dnn.py)
 steps/nnet3/train_dnn.py --stage=-10 --cmd=run.pl --feat.online-ivector-dir exp/nnet3/ivectors_train_sp --feat.cmvn-opts=--norm-means=false --norm-vars=false --trainer.num-epochs 4 --trainer.optimization.num-jobs-initial 2 --trainer.optimization.num-jobs-final 12 --trainer.optimization.initial-effective-lrate 0.0015 --trainer.optimization.final-effective-lrate 0.00015 --egs.dir  --cleanup.remove-egs true --cleanup.preserve-model-interval 500 --use-gpu true --feat-dir=data/train_sp_hires --ali-dir exp/tri5a_sp_ali --lang data/lang --reporting.email= --dir=exp/nnet3/tdnn_sp
 ['steps/nnet3/train_dnn.py', '--stage=-10', '--cmd=run.pl', '--feat.online-ivector-dir', 'exp/nnet3/ivectors_train_sp', '--feat.cmvn-opts=--norm-means=false --norm-vars=false', '--trainer.num-epochs', '4', '--trainer.optimization.num-jobs-initial', '2', '--trainer.optimization.num-jobs-final', '12', '--trainer.optimization.initial-effective-lrate', '0.0015', '--trainer.optimization.final-effective-lrate', '0.00015', '--egs.dir', '', '--cleanup.remove-egs', 'true', '--cleanup.preserve-model-interval', '500', '--use-gpu', 'true', '--feat-dir=data/train_sp_hires', '--ali-dir', 'exp/tri5a_sp_ali', '--lang', 'data/lang', '--reporting.email=', '--dir=exp/nnet3/tdnn_sp']
+
 2018-02-08 11:39:38,404 [steps/nnet3/train_dnn.py:163 - train - INFO ] Arguments for the experiment
 {'ali_dir': 'exp/tri5a_sp_ali',
  'backstitch_training_interval': 1,

@@ -1,4 +1,5 @@
-
+daniel povey 
+phd thesis 
 
 声学模型学习笔记（五） SDT(MMI/BMMI/MPE/sMBR)
 http://blog.csdn.net/xmdxcsj/article/details/52760111
