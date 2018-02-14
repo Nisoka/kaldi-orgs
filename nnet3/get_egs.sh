@@ -86,6 +86,13 @@ if [ $# != 3 ]; then
   exit 1;
 fi
 
+
+
+
+# data=args.feat_dir,                          # data/train_sp_hires 
+# alidir=args.ali_dir,                         # exp/tri5a_sp_ali
+# egs_dir=default_egs_dir,                     # exp/nnet3/tdnn_sp/egs
+
 data=$1
 alidir=$2
 dir=$3
@@ -107,6 +114,7 @@ cp $alidir/tree $dir
 num_ali_jobs=$(cat $alidir/num_jobs) || exit 1;
 
 
+# 数量不能低于 num_utts_subset*4, 否则认为数量不够训练一个 nnet
 num_utts=$(cat $data/utt2spk | wc -l)
 if ! [ $num_utts -gt $[$num_utts_subset*4] ]; then
   echo "$0: number of utterances $num_utts in your training data is too small versus --num-utts-subset=$num_utts_subset"
@@ -114,9 +122,10 @@ if ! [ $num_utts -gt $[$num_utts_subset*4] ]; then
   exit 1
 fi
 
-# Get list of validation utterances.
+# 在train数据中 取出 300个作为验证集
 awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
     > $dir/valid_uttlist || exit 1;
+
 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
   echo "File $data/utt2uniq exists, so augmenting valid_uttlist to"

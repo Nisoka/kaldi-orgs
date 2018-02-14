@@ -9,6 +9,45 @@
 
 
 
+
+
+# stage=0
+# train_stage=-10
+# affix=
+# common_egs_dir=
+
+# # training options
+# initial_effective_lrate=0.0015
+# final_effective_lrate=0.00015
+# num_epochs=4
+# num_jobs_initial=2
+# num_jobs_final=12
+# remove_egs=true
+
+# # feature options
+# use_ivectors=true
+
+# # End configuration section.
+
+# dir=exp/nnet3/tdnn_sp${affix:+_$affix}
+
+# # exp/tri5a 最新模型结果
+# gmm_dir=exp/tri5a
+
+# train_set=train_sp
+
+# # 目标对齐输出目录
+# ali_dir=${gmm_dir}_sp_ali
+
+# # exp/tri5a/graph 最新模型构建的图 HCLG.fst
+# graph_dir=$gmm_dir/graph
+
+# # 增加ivector 100维 特征?
+# local/nnet3/run_ivector_common.sh --stage $stage || exit ;1
+
+
+
+
 # steps/nnet3/train_dnn.py
 #   --stage=$train_stage \
 #   --cmd="$decode_cmd" \
@@ -19,15 +58,20 @@
 #   --trainer.optimization.num-jobs-final $num_jobs_final \
 #   --trainer.optimization.initial-effective-lrate $initial_effective_lrate \
 #   --trainer.optimization.final-effective-lrate $final_effective_lrate \
-#   --egs.dir "$common_egs_dir" \
-#   --cleanup.remove-egs $remove_egs \
+
+#   --egs.dir "$common_egs_dir" \                          # ""
+#   --cleanup.remove-egs $remove_egs \                     # true
 #   --cleanup.preserve-model-interval 500 \
 #   --use-gpu true \
-#   --feat-dir=data/${train_set}_hires \
-#   --ali-dir $ali_dir \
+
+#     =============== feat-dir ali-dir dir =========== 
+#   --feat-dir=data/${train_set}_hires \                    # data/train_sp_hires
+#   --ali-dir $ali_dir \                                    # exp/tri5a_sp_ali
+#   --dir=$dir \                                            # dir=exp/nnet3/tdnn_sp
+
 #   --lang data/lang \
-#   --reporting.email="$reporting_email" \
-#   --dir=$dir  || exit 1;
+#   --reporting.email="$reporting_email" || exit 1;
+
 
 
 """ This script is based on steps/nnet3/tdnn/train.sh
@@ -47,96 +91,6 @@ import libs.nnet3.train.common as common_train_lib
 import libs.common as common_lib
 import libs.nnet3.train.frame_level_objf as train_lib
 import libs.nnet3.report.log_parse as nnet3_log_parse
-
-
-logger = logging.getLogger('libs')
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s [%(pathname)s:%(lineno)s - "
-                              "%(funcName)s - %(levelname)s ] %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.info('Starting DNN trainer (train_dnn.py)')
-
-
-def get_args():
-    """ Get args from stdin.
-
-    We add compulsory arguments as named arguments for readability
-
-    The common options are defined in the object
-    libs.nnet3.train.common.CommonParser.parser.
-    See steps/libs/nnet3/train/common.py
-    """
-    
-    # https://www.cnblogs.com/zknublx/p/6106343.html
-    parser = argparse.ArgumentParser(
-        description="""Trains a feed forward DNN acoustic model using the
-        cross-entropy objective.  DNNs include simple DNNs, TDNNs and CNNs.""",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        conflict_handler='resolve',
-        parents=[common_train_lib.CommonParser(include_chunk_context=False).parser])
-
-    # egs extraction options
-    parser.add_argument("--egs.frames-per-eg", type=int, dest='frames_per_eg',
-                        default=8,
-                        help="Number of output labels per example")
-
-    # trainer options
-    parser.add_argument("--trainer.prior-subset-size", type=int,
-                        dest='prior_subset_size', default=20000,
-                        help="Number of samples for computing priors")
-    parser.add_argument("--trainer.num-jobs-compute-prior", type=int,
-                        dest='num_jobs_compute_prior', default=10,
-                        help="The prior computation jobs are single "
-                        "threaded and run on the CPU")
-
-    # Parameters for the optimization
-    parser.add_argument("--trainer.optimization.minibatch-size",
-                        type=str, dest='minibatch_size', default='512',
-                        help="""Size of the minibatch used in SGD training
-                        (argument to nnet3-merge-egs); may be a more general
-                        rule as accepted by the --minibatch-size option of
-                        nnet3-merge-egs; run that program without args to see
-                        the format.""")
-
-    # General options
-    parser.add_argument("--feat-dir", type=str, required=False,
-                        help="Directory with features used for training "
-                        "the neural network.")
-    parser.add_argument("--lang", type=str, required=False,
-                        help="Language directory")
-    parser.add_argument("--ali-dir", type=str, required=True,
-                        help="Directory with alignments used for training "
-                        "the neural network.")
-    parser.add_argument("--dir", type=str, required=True,
-                        help="Directory to store the models and "
-                        "all other files.")
-
-    print(' '.join(sys.argv), file=sys.stderr)
-    print(sys.argv, file=sys.stderr)
-
-    args = parser.parse_args()
-
-    [args, run_opts] = process_args(args)
-
-    return [args, run_opts]
-
-
-def process_args(args):
-    """ Process the options got from get_args()
-    """
-    if args.transform_dir is None:
-        args.transform_dir = args.ali_dir
-
-    run_opts.command = args.command
-    
-    run_opts.egs_command = (args.egs_command  if args.egs_command is not None else args.command)
-    run_opts.num_jobs_compute_prior = args.num_jobs_compute_prior
-
-    return [args, run_opts]
-
 
 def train(args, run_opts):
     """ The main function for training.
@@ -205,20 +159,26 @@ def train(args, run_opts):
         logger.info("Generating egs")
 
         train_lib.acoustic_model.generate_egs(
-            data=args.feat_dir,
-            alidir=args.ali_dir,
-            egs_dir=default_egs_dir,
+            data=args.feat_dir,                          # data/train_sp_hires 
+            alidir=args.ali_dir,                         # exp/tri5a_sp_ali
+            egs_dir=default_egs_dir,                     # exp/nnet3/tdnn_sp/egs
+            
             left_context=left_context,
             right_context=right_context,
+            
             run_opts=run_opts,
-            frames_per_eg_str=str(args.frames_per_eg),
-            srand=args.srand,
-            egs_opts=args.egs_opts,
-            cmvn_opts=args.cmvn_opts,
+            stage=args.egs_stage,
+            
             online_ivector_dir=args.online_ivector_dir,          # exp/nnet3/ivectors_train_sp
             samples_per_iter=args.samples_per_iter,
-            transform_dir=args.transform_dir,
-            stage=args.egs_stage)
+            frames_per_eg_str=str(args.frames_per_eg),
+            
+            srand=args.srand,
+            
+            egs_opts=args.egs_opts,
+            cmvn_opts=args.cmvn_opts,
+
+            transform_dir=args.transform_dir)
 
         
         egs_dir = default_egs_dir
