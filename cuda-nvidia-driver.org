@@ -6,7 +6,8 @@ cuda9.0 支持384, 一般可以支持
 但是 当尝试使用kaldi时 发现, 使用cuda9.0 运行kaldi的程序不成功
 切换为cuda8.0 kaldi测试脚本运行成功!
 http://blog.csdn.net/cosmoshua/article/details/76644029
-
+有时候出现循环登录, 很多时候是因为用户nan被污染了, 删除一些/home/nan/.X文件会能够挽救
+但是这时候很多配置会失败.
 
 
 

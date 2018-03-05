@@ -254,8 +254,11 @@ fi
 
 
 
-# frames_per_eg_principal * sample_per_iter * num_archives = num_frames.
-# num_archives
+
+# sample -- eg???
+
+# frames = num_archives * sample_per_iter * frames_per_eg_principal 
+# a archives is a batch.
 
 # the first field in frames_per_eg (which is a comma-separated list of numbers)
 # is the 'principal' frames-per-eg, and for purposes of working out the number
@@ -285,7 +288,7 @@ max_open_filehandles=$(ulimit -n) || exit 1
 [ $max_open_filehandles -gt 512 ] && max_open_filehandles=512
 
 # 修改archives_multiple 档案乘子
-# 至少满足 num_archives_intermediate 数量间隔 不要靠近 max_opend_filehandles.
+# 至少满足 num_archives_intermediate 数量间隔 不能近似为 max_opend_filehandles.
 num_archives_intermediate=$num_archives
 archives_multiple=1
 while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
@@ -294,12 +297,17 @@ while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
 done
 
 
+# num_archives = archives_multiple * num_archives_intermediate(archives_per_iter??)
 # now make sure num_archives is an exact multiple of archives_multiple.
 num_archives=$[$archives_multiple*$num_archives_intermediate]
 
 echo $num_archives >$dir/info/num_archives
 echo $frames_per_eg >$dir/info/frames_per_eg
 
+
+
+# frames = num_archives * sample_per_iter * frames_per_eg_principal 
+# frames = num_archives * egs_per_archive * frames_per_eg_principal
 # Work out the number of egs per archive
 egs_per_archive=$[$num_frames/($frames_per_eg_principal*$num_archives)]
 ! [ $egs_per_archive -le $samples_per_iter ] && \
@@ -308,6 +316,14 @@ egs_per_archive=$[$num_frames/($frames_per_eg_principal*$num_archives)]
 
 echo $egs_per_archive > $dir/info/egs_per_archive
 
+
+
+
+
+
+# num_archives of archives,
+#         egs_per_archives of egs,
+#            frames_per_eg of [labels, (l, r) context]
 echo "$0: creating $num_archives archives, each with $egs_per_archive egs, with"
 echo "$0:   $frames_per_eg labels per example, and (left,right) context = ($left_context,$right_context)"
 if [ $left_context_initial -ge 0 ] || [ $right_context_final -ge 0 ]; then
@@ -316,11 +332,13 @@ fi
 
 
 
+
+# 
 if [ -e $dir/storage ]; then
-  # Make soft links to storage directories, if distributing this way..  See
-  # utils/create_split_dir.pl.
+  # Make soft links to storage directories, if distributing this way..  See utils/create_split_dir.pl.
   echo "$0: creating data links"
   utils/create_data_link.pl $(for x in $(seq $num_archives); do echo $dir/egs.$x.ark; done)
+  
   for x in $(seq $num_archives_intermediate); do
     utils/create_data_link.pl $(for y in $(seq $nj); do echo $dir/egs_orig.$y.$x.ark; done)
   done
@@ -332,6 +350,8 @@ if [ $stage -le 2 ]; then
     copy-int-vector ark:- ark,scp:$dir/ali.ark,$dir/ali.scp || exit 1;
 fi
 
+
+
 egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress --num-frames=$frames_per_eg"
 [ $left_context_initial -ge 0 ] && egs_opts="$egs_opts --left-context-initial=$left_context_initial"
 [ $right_context_final -ge 0 ] && egs_opts="$egs_opts --right-context-final=$right_context_final"
@@ -342,12 +362,16 @@ echo $left_context_initial > $dir/info/left_context_initial
 echo $right_context_final > $dir/info/right_context_final
 
 
+# get num_pdfs from the tree-info.
 num_pdfs=$(tree-info --print-args=false $alidir/tree | grep num-pdfs | awk '{print $2}')
+
+
+
 if [ $stage -le 3 ]; then
   echo "$0: Getting validation and training subset examples."
   rm $dir/.error 2>/dev/null
-  echo "$0: ... extracting validation and training-subset alignments."
 
+  echo "$0: ... extracting validation and training-subset alignments."
 
   # do the filtering just once, as ali.scp may be long.
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
@@ -360,6 +384,8 @@ if [ $stage -le 3 ]; then
     nnet3-get-egs --num-pdfs=$num_pdfs --frame-subsampling-factor=$frame_subsampling_factor \
       $ivector_opts $egs_opts "$valid_feats" \
       ark,s,cs:- "ark:$dir/valid_all.egs" || touch $dir/.error &
+
+  
   $cmd $dir/log/create_train_subset.log \
     utils/filter_scp.pl $dir/train_subset_uttlist $dir/ali_special.scp \| \
     ali-to-pdf $alidir/final.mdl scp:- ark:- \| \
