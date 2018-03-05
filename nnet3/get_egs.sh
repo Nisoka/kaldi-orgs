@@ -45,6 +45,7 @@ nj=6         # This should be set to the maximum number of jobs you are
              # comfortable to run in parallel; you can increase it if your disk
              # speed is greater and you have more machines.
 srand=0     # rand seed for nnet3-copy-egs and nnet3-shuffle-egs
+
 online_ivector_dir=  # can be used if we are including speaker information as iVectors.
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
@@ -89,9 +90,9 @@ fi
 
 
 
-# data=args.feat_dir,                          # data/train_sp_hires 
-# alidir=args.ali_dir,                         # exp/tri5a_sp_ali
-# egs_dir=default_egs_dir,                     # exp/nnet3/tdnn_sp/egs
+# data=args.feat_dir,                          # data/train_sp_hires    ---- high soluation feats.
+# alidir=args.ali_dir,                         # exp/tri5a_sp_ali       ---- the hires-sp-features alignment.
+# egs_dir=default_egs_dir,                     # exp/nnet3/tdnn_sp/egs  ???? output.
 
 data=$1
 alidir=$2
@@ -105,6 +106,7 @@ for f in $data/feats.scp $alidir/ali.1.gz $alidir/final.mdl $alidir/tree $extra_
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
+# nj=30  split data ==> data/train_sp_hires/split30
 sdata=$data/split$nj
 utils/split_data.sh $data $nj
 
@@ -122,27 +124,69 @@ if ! [ $num_utts -gt $[$num_utts_subset*4] ]; then
   exit 1
 fi
 
-# 在train数据中 取出 300个作为验证集
+
+
+
+
+# utils/filter_scp.pl -f 1 $dir/utt.list $aishell_text > $dir/transcripts.txt
+# 从 aishell_text 中过滤 得到 transcripts.txt 过滤规则是 第-f n个filed 在 utt.list中存在.
+
+# utils/shuffle_list.pl  input.file   > output.file
+# 随机化input.file 内line的顺序.
+
+# utils/apply_map.pl map.txt  <input.file   >output.file
+# 将input.file 中逐行 向map.txt中定义的map进行映射,
+# eg
+# map.txt
+# A   a
+# B   b
+# C   c
+# input.file
+# A
+# C
+# output.file
+# a
+# c
+
+
+# 在train的utt中, 随机化,  取 300个 作为 有效utt
 awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
     > $dir/valid_uttlist || exit 1;
 
-
+# 有效utt 经过 apply_map.pl sort uniq 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
   echo "File $data/utt2uniq exists, so augmenting valid_uttlist to"
   echo "include all perturbed versions of the same 'real' utterances."
+  
   mv $dir/valid_uttlist $dir/valid_uttlist.tmp
+  
   utils/utt2spk_to_spk2utt.pl $data/utt2uniq > $dir/uniq2utt
+
+  # 1 有效utt 经过apply_map utt2uniq 得到 n 个 spker
+  # 2 apply_map map=uniq2utt 获得n个spker 的所有utt
+  # 3 这些utt 最终得到 有效uttlist.
   cat $dir/valid_uttlist.tmp | utils/apply_map.pl $data/utt2uniq | \
     sort | uniq | utils/apply_map.pl $dir/uniq2utt | \
     awk '{for(n=1;n<=NF;n++) print $n;}' | sort  > $dir/valid_uttlist
+  
   rm $dir/uniq2utt $dir/valid_uttlist.tmp
 fi
 
+
+# filter_scp  filter=utt2spk 将所有的valid_uttlist 去掉, 剩余的shuffle 乱序
+# 取300 作为 训练子集uttlist.
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
    utils/shuffle_list.pl | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
 
+
+
+
+
+# alidir 
 [ -z "$transform_dir" ] && transform_dir=$alidir
 
+
+# false ============ no need
 # because we'll need the features with a different number of jobs than $alidir,
 # copy to ark,scp.
 if [ -f $transform_dir/raw_trans.1 ]; then
@@ -156,17 +200,23 @@ fi
 ## Set up features.
 echo "$0: feature type is raw"
 
-feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
-valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+# filter 过滤掉valid_uttlist中存在的utt 剩余的 作为feats
+feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp      | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
+# filter 过滤获得valid_uttlist 作为valid_feats
+valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp               | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+# filter 过滤获得train_subset_uttlist 作为train_subset_feats.
 train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+
 echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
 
+# nil
 if [ -f $dir/trans.scp ]; then
   feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk scp:$dir/trans.scp ark:- ark:- |"
   valid_feats="$valid_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
   train_subset_feats="$train_subset_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
 fi
 
+# t
 if [ ! -z "$online_ivector_dir" ]; then
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir/ivector_online.scp -) || exit 1;
   echo $ivector_dim > $dir/info/ivector_dim
@@ -178,11 +228,18 @@ else
   echo 0 >$dir/info/ivector_dim
 fi
 
+
+# exp/nnet3/tdnn_sp/info/num_frames  frames_cnt
+# feats_one
+# feat_dim
+
 if [ $stage -le 1 ]; then
   echo "$0: working out number of frames of training data"
   num_frames=$(steps/nnet2/get_num_frames.sh $data)
   echo $num_frames > $dir/info/num_frames
   echo "$0: working out feature dim"
+
+  # sed s/target/result/g  查找target替换为result.
   feats_one="$(echo $feats | sed s/JOB/1/g)"
   if feat_dim=$(feat-to-dim "$feats_one" - 2>/dev/null); then
     echo $feat_dim > $dir/info/feat_dim
@@ -195,6 +252,11 @@ else
 fi
 
 
+
+
+# frames_per_eg_principal * sample_per_iter * num_archives = num_frames.
+# num_archives
+
 # the first field in frames_per_eg (which is a comma-separated list of numbers)
 # is the 'principal' frames-per-eg, and for purposes of working out the number
 # of archives we assume that this will be the average number of frames per eg.
@@ -202,11 +264,17 @@ frames_per_eg_principal=$(echo $frames_per_eg | cut -d, -f1)
 
 # the + 1 is to round up, not down... we assume it doesn't divide exactly.
 num_archives=$[$num_frames/($frames_per_eg_principal*$samples_per_iter)+1]
+
 if [ $num_archives -eq 1 ]; then
   echo "*** $0: warning: the --frames-per-eg is too large to generate one archive with"
   echo "*** as many as --samples-per-iter egs in it.  Consider reducing --frames-per-eg."
   sleep 4
 fi
+
+
+
+
+
 
 # We may have to first create a smaller number of larger archives, with number
 # $num_archives_intermediate, if $num_archives is more than the maximum number
@@ -215,17 +283,23 @@ fi
 # somehow, so we limit it to 512.
 max_open_filehandles=$(ulimit -n) || exit 1
 [ $max_open_filehandles -gt 512 ] && max_open_filehandles=512
+
+# 修改archives_multiple 档案乘子
+# 至少满足 num_archives_intermediate 数量间隔 不要靠近 max_opend_filehandles.
 num_archives_intermediate=$num_archives
 archives_multiple=1
 while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
   archives_multiple=$[$archives_multiple+1]
   num_archives_intermediate=$[$num_archives/$archives_multiple+1];
 done
+
+
 # now make sure num_archives is an exact multiple of archives_multiple.
 num_archives=$[$archives_multiple*$num_archives_intermediate]
 
 echo $num_archives >$dir/info/num_archives
 echo $frames_per_eg >$dir/info/frames_per_eg
+
 # Work out the number of egs per archive
 egs_per_archive=$[$num_frames/($frames_per_eg_principal*$num_archives)]
 ! [ $egs_per_archive -le $samples_per_iter ] && \

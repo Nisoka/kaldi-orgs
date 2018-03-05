@@ -29,6 +29,7 @@
 
 # # End configuration section.
 
+
 # dir=exp/nnet3/tdnn_sp${affix:+_$affix}
 
 # # exp/tri5a 最新模型结果
@@ -42,7 +43,23 @@
 # # exp/tri5a/graph 最新模型构建的图 HCLG.fst
 # graph_dir=$gmm_dir/graph
 
-# # 增加ivector 100维 特征?
+
+# usefor:
+# and 
+#   提取ivector 特征 == >  ivectordir=exp/nnet3/ivectors_train_sp (copy-feats ark:feats.ark ark,t:-|head)
+#   generate sp data
+#   generate sp and hires feature
+#   generate some ali results.
+# out:
+#   data/train_sp           speed perturbed data's feats.scp
+#   mfcc_perturbed          sp data's mfcc-perturbed-feature.ark (mfcc_perturbed_features cmvn.)
+#   exp/tri5a_sp_ali        use the final.mdl in tri5a to generate the ali-result of data/train_sp.
+
+#   data/train_sp_hires    
+#   mfcc_perturbed_hires    high soluation mfcc-features extra from the data has been perturbed.
+
+#   exp/nnet3/ivectors_train_sp ivectors-features dim =100.
+
 # local/nnet3/run_ivector_common.sh --stage $stage || exit ;1
 
 
@@ -51,7 +68,7 @@
 # steps/nnet3/train_dnn.py
 #   --stage=$train_stage \
 #   --cmd="$decode_cmd" \
-#   --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
+#   --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \    (dim = 100)
 #   --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
 #   --trainer.num-epochs $num_epochs \
 #   --trainer.optimization.num-jobs-initial $num_jobs_initial \
@@ -65,7 +82,7 @@
 #   --use-gpu true \
 
 #     =============== feat-dir ali-dir dir =========== 
-#   --feat-dir=data/${train_set}_hires \                    # data/train_sp_hires
+#   --feat-dir=data/${train_set}_hires \                    # data/train_sp_hires (dim = 40)
 #   --ali-dir $ali_dir \                                    # exp/tri5a_sp_ali
 #   --dir=$dir \                                            # dir=exp/nnet3/tdnn_sp
 
@@ -131,6 +148,11 @@ def train(args, run_opts):
     var_file = '{0}/vars'.format(config_dir)
 
     variables = common_train_lib.parse_generic_config_vars_file(var_file)
+    # liujunnan@innovem:configs$ cat vars 
+    # model_left_context=16
+    # model_right_context=12
+    # liujunnan@innovem:configs$
+    
 
     # Set some variables.
     model_left_context = variables['model_left_context']
@@ -140,7 +162,7 @@ def train(args, run_opts):
     right_context = model_right_context
 
 
-    # 初始化为 原始 nnet结果, 在训练 LDA预处理矩阵之前
+    # 初始化 原始nnet结构, 在训练 LDA预处理矩阵之前
     # 第一个配置 只做了哪些初始化拼接操作
     # 这样做,是因为这样很方变能够获得LDA变换矩阵的统计信息.
     if (args.stage <= -5) and os.path.exists(args.dir+"/configs/init.config"):
@@ -189,6 +211,12 @@ def train(args, run_opts):
                                          ivector_dim, ivector_id,
                                          left_context, right_context))
     assert str(args.frames_per_eg) == frames_per_eg_str
+
+
+
+
+
+    
 
     if args.num_jobs_final > num_archives:
         raise Exception('num_jobs_final cannot exceed the number of archives '
@@ -363,9 +391,15 @@ def train(args, run_opts):
                                "{0}".format(args.dir))
 
 
+
+
+    
 def main():
     [args, run_opts] = get_args()
+
+   
     try:
+        # 开始训练.
         train(args, run_opts)
         common_lib.wait_for_background_commands()
     except BaseException as e:
