@@ -93,6 +93,7 @@ fi
 # data=args.feat_dir,                          # data/train_sp_hires    ---- high soluation feats.
 # alidir=args.ali_dir,                         # exp/tri5a_sp_ali       ---- the hires-sp-features alignment.
 # egs_dir=default_egs_dir,                     # exp/nnet3/tdnn_sp/egs  ???? output.
+# frames_per_eg                                # 8  in train_tdnn.py's 
 
 data=$1
 alidir=$2
@@ -344,6 +345,9 @@ if [ -e $dir/storage ]; then
   done
 fi
 
+
+# copy the alidir/ali.n.gz => dir(exp/nnet3/tdnn_sp/egs)ali.ark & ali.scp
+# but, why the dir has no ali.ark & ali.scp?? maybe deleted below.
 if [ $stage -le 2 ]; then
   echo "$0: copying data alignments"
   for id in $(seq $num_ali_jobs); do gunzip -c $alidir/ali.$id.gz; done | \
@@ -368,15 +372,25 @@ num_pdfs=$(tree-info --print-args=false $alidir/tree | grep num-pdfs | awk '{pri
 
 
 if [ $stage -le 3 ]; then
+
+
+  # 1:
+  # get validation and training subset examples .
   echo "$0: Getting validation and training subset examples."
   rm $dir/.error 2>/dev/null
 
+  # 2:
+  # extracting the validation and training-subset alignments.
   echo "$0: ... extracting validation and training-subset alignments."
-
   # do the filtering just once, as ali.scp may be long.
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
     <$dir/ali.scp >$dir/ali_special.scp
 
+  # 3:
+  # and
+  #     filter get the validation alignments. (trans-id)
+  #     ali-to-pdf  ali-to-post  translate the tid to post
+  #     nnet3-get-egs
   $cmd $dir/log/create_valid_subset.log \
     utils/filter_scp.pl $dir/valid_uttlist $dir/ali_special.scp \| \
     ali-to-pdf $alidir/final.mdl scp:- ark:- \| \
@@ -394,6 +408,10 @@ if [ $stage -le 3 ]; then
       $ivector_opts $egs_opts "$train_subset_feats" \
       ark,s,cs:- "ark:$dir/train_subset_all.egs" || touch $dir/.error &
   wait;
+
+
+
+  
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
   echo "... Getting subsets of validation examples for diagnostics and combination."
   if $generate_egs_scp; then

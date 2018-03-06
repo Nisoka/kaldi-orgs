@@ -13,3 +13,6 @@ aa
 nan@nan:/nwork/svn/ai/sr/kaldi$ 
 https://www.cnblogs.com/barrychiao/archive/2012/10/22/2733210.html
 
+[ -z "string"]
+if string is null
+    return true.

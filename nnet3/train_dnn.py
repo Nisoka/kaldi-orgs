@@ -184,16 +184,17 @@ def train(args, run_opts):
             data=args.feat_dir,                          # data/train_sp_hires 
             alidir=args.ali_dir,                         # exp/tri5a_sp_ali
             egs_dir=default_egs_dir,                     # exp/nnet3/tdnn_sp/egs
-            
+            online_ivector_dir=args.online_ivector_dir,          # exp/nnet3/ivectors_train_sp
+
+            samples_per_iter=args.samples_per_iter,
+            frames_per_eg_str=str(args.frames_per_eg), 
+
             left_context=left_context,
             right_context=right_context,
             
             run_opts=run_opts,
             stage=args.egs_stage,
-            
-            online_ivector_dir=args.online_ivector_dir,          # exp/nnet3/ivectors_train_sp
-            samples_per_iter=args.samples_per_iter,
-            frames_per_eg_str=str(args.frames_per_eg),
+
             
             srand=args.srand,
             
@@ -205,6 +206,7 @@ def train(args, run_opts):
         
         egs_dir = default_egs_dir
 
+        
     [egs_left_context, egs_right_context,
      frames_per_eg_str, num_archives] = (
          common_train_lib.verify_egs_dir(egs_dir, feat_dim,
@@ -414,5 +416,125 @@ def main():
         sys.exit(1)
 
 
+def get_args():
+    """ Get args from stdin.
+
+    We add compulsory arguments as named arguments for readability
+
+    The common options are defined in the object
+    libs.nnet3.train.common.CommonParser.parser.
+    See steps/libs/nnet3/train/common.py
+    """
+    parser = argparse.ArgumentParser(
+        description="""Trains a feed forward DNN acoustic model using the
+        cross-entropy objective.  DNNs include simple DNNs, TDNNs and CNNs.""",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        conflict_handler='resolve',
+        parents=[common_train_lib.CommonParser(include_chunk_context=False).parser])
+
+    # egs extraction options
+    # ============================ 这里设置 frames_per_eg is 8 ======================
+    parser.add_argument("--egs.frames-per-eg", type=int, dest='frames_per_eg',
+                        default=8,
+                        help="Number of output labels per example")
+
+    # trainer options
+    parser.add_argument("--trainer.prior-subset-size", type=int,
+                        dest='prior_subset_size', default=20000,
+                        help="Number of samples for computing priors")
+    
+    parser.add_argument("--trainer.num-jobs-compute-prior", type=int,
+                        dest='num_jobs_compute_prior', default=10,
+                        help="The prior computation jobs are single "
+                        "threaded and run on the CPU")
+
+    # Parameters for the optimization
+    parser.add_argument("--trainer.optimization.minibatch-size",
+                        type=str, dest='minibatch_size', default='512',
+                        help="""Size of the minibatch used in SGD training
+                        (argument to nnet3-merge-egs); may be a more general
+                        rule as accepted by the --minibatch-size option of
+                        nnet3-merge-egs; run that program without args to see
+                        the format.""")
+
+    # General options
+    parser.add_argument("--feat-dir", type=str, required=False,
+                        help="Directory with features used for training "
+                        "the neural network.")
+    parser.add_argument("--lang", type=str, required=False,
+                        help="Language directory")
+
+    parser.add_argument("--ali-dir", type=str, required=True,
+                        help="Directory with alignments used for training "
+                        "the neural network.")
+    parser.add_argument("--dir", type=str, required=True,
+                        help="Directory to store the models and "
+                        "all other files.")
+
+    print(' '.join(sys.argv), file=sys.stderr)
+    print(sys.argv, file=sys.stderr)
+
+    args = parser.parse_args()
+
+    [args, run_opts] = process_args(args)
+
+    return [args, run_opts]
+
+
+def process_args(args):
+    """ Process the options got from get_args()
+    """
+
+    if args.frames_per_eg < 1:
+        raise Exception("--egs.frames-per-eg should have a minimum value of 1")
+
+    if not common_train_lib.validate_minibatch_size_str(args.minibatch_size):
+        raise Exception("--trainer.rnn.num-chunk-per-minibatch has an invalid value")
+
+    if (not os.path.exists(args.dir)
+            or not os.path.exists(args.dir+"/configs")):
+        raise Exception("This scripts expects {0} to exist and have a configs "
+                        "directory which is the output of "
+                        "make_configs.py script")
+
+    if args.transform_dir is None:
+        args.transform_dir = args.ali_dir
+
+    # set the options corresponding to args.use_gpu
+    run_opts = common_train_lib.RunOpts()
+    if args.use_gpu:
+        if not common_lib.check_if_cuda_compiled():
+            logger.warning(
+                """You are running with one thread but you have not compiled
+                   for CUDA.  You may be running a setup optimized for GPUs.
+                   If you have GPUs and have nvcc installed, go to src/ and do
+                   ./configure; make""")
+
+        run_opts.train_queue_opt = "--gpu 1"
+        run_opts.parallel_train_opts = ""
+        run_opts.combine_queue_opt = "--gpu 1"
+        run_opts.prior_gpu_opt = "--use-gpu=yes"
+        run_opts.prior_queue_opt = "--gpu 1"
+    else:
+        logger.warning("Without using a GPU this will be very slow. "
+                       "nnet3 does not yet support multiple threads.")
+
+        run_opts.train_queue_opt = ""
+        run_opts.parallel_train_opts = "--use-gpu=no"
+        run_opts.combine_queue_opt = ""
+        run_opts.prior_gpu_opt = "--use-gpu=no"
+        run_opts.prior_queue_opt = ""
+
+    run_opts.command = args.command
+    run_opts.egs_command = (args.egs_command
+                            if args.egs_command is not None else
+                            args.command)
+    run_opts.num_jobs_compute_prior = args.num_jobs_compute_prior
+
+    return [args, run_opts]
+
+
+
+        
 if __name__ == "__main__":
     main()
