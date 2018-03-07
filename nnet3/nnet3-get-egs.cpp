@@ -1,6 +1,5 @@
 
 
-
 void nnet3_get_egs()
 {
   // egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress --num-frames=$frames_per_eg"
