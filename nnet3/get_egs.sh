@@ -289,7 +289,7 @@ max_open_filehandles=$(ulimit -n) || exit 1
 [ $max_open_filehandles -gt 512 ] && max_open_filehandles=512
 
 # 修改archives_multiple 档案乘子
-# 至少满足 num_archives_intermediate 数量间隔 不能近似为 max_opend_filehandles.
+# 至少满足 num_archives_intermediate 内部数量 应该小于而不能近似为 max_opend_filehandles.
 num_archives_intermediate=$num_archives
 archives_multiple=1
 while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
@@ -298,7 +298,6 @@ while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
 done
 
 
-# num_archives = archives_multiple * num_archives_intermediate(archives_per_iter??)
 # now make sure num_archives is an exact multiple of archives_multiple.
 num_archives=$[$archives_multiple*$num_archives_intermediate]
 
@@ -386,6 +385,9 @@ if [ $stage -le 3 ]; then
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
     <$dir/ali.scp >$dir/ali_special.scp
 
+  # ================= 获得TDNN训练样本 egs(input output) ===================
+  #                Train  ---- train_subset_all.egs
+  #                Validation -- valid_all.egs
   # 3:
   # and
   #     filter get the validation alignments. (trans-id)
@@ -413,7 +415,21 @@ if [ $stage -le 3 ]; then
 
   
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
+
+
+
+
+
+
+
+  # =================== nnet3-subset-egs  获取n个 样本 egs ===========
+  # 1 valid_combine.egs
+  # 2 valid_diagnostic.egs
+  # 3 train_combine.egs
+  # 4 train_diagnostic.egs
+  
   echo "... Getting subsets of validation examples for diagnostics and combination."
+  # false..
   if $generate_egs_scp; then
     valid_diagnostic_output="ark,scp:$dir/valid_diagnostic.egs,$dir/valid_diagnostic.scp"
     train_diagnostic_output="ark,scp:$dir/train_diagnostic.egs,$dir/train_diagnostic.scp"
@@ -421,22 +437,33 @@ if [ $stage -le 3 ]; then
     valid_diagnostic_output="ark:$dir/valid_diagnostic.egs"
     train_diagnostic_output="ark:$dir/train_diagnostic.egs"
   fi
+
+  
   $cmd $dir/log/create_valid_subset_combine.log \
     nnet3-subset-egs --n=$[$num_valid_frames_combine/$frames_per_eg_principal] ark:$dir/valid_all.egs \
-      ark:$dir/valid_combine.egs || touch $dir/.error &
+    ark:$dir/valid_combine.egs || touch $dir/.error &
+
+  
   $cmd $dir/log/create_valid_subset_diagnostic.log \
     nnet3-subset-egs --n=$[$num_frames_diagnostic/$frames_per_eg_principal] ark:$dir/valid_all.egs \
     $valid_diagnostic_output || touch $dir/.error &
 
   $cmd $dir/log/create_train_subset_combine.log \
     nnet3-subset-egs --n=$[$num_train_frames_combine/$frames_per_eg_principal] ark:$dir/train_subset_all.egs \
-      ark:$dir/train_combine.egs || touch $dir/.error &
+    ark:$dir/train_combine.egs || touch $dir/.error &
+  
+
   $cmd $dir/log/create_train_subset_diagnostic.log \
     nnet3-subset-egs --n=$[$num_frames_diagnostic/$frames_per_eg_principal] ark:$dir/train_subset_all.egs \
     $train_diagnostic_output || touch $dir/.error &
   wait
+
+
+  
   sleep 5  # wait for file system to sync.
+  
   cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
+
   if $generate_egs_scp; then
     cat $dir/valid_combine.egs $dir/train_combine.egs  | \
     nnet3-copy-egs ark:- ark,scp:$dir/combine.egs,$dir/combine.scp
@@ -444,22 +471,44 @@ if [ $stage -le 3 ]; then
   else
     cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
   fi
+
+  
   for f in $dir/{combine,train_diagnostic,valid_diagnostic}.egs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done
+
+  # 移除tmp文件
   rm $dir/valid_all.egs $dir/train_subset_all.egs $dir/{train,valid}_combine.egs
 fi
 
+
+
+
+
+
+
+
+
+
+
+# ==================== 划分训练样本, 将egs 分给不同的并行任务job ==================
 if [ $stage -le 4 ]; then
   # create egs_orig.*.*.ark; the first index goes to $nj,
   # the second to $num_archives_intermediate.
 
+  # 生成 num_archives_intermediate 那么多的 egs.JOB.$n(1:52).ark
   egs_list=
   for n in $(seq $num_archives_intermediate); do
     egs_list="$egs_list ark:$dir/egs_orig.JOB.$n.ark"
   done
+
+  # =====================  !!!! 使用全部数据, 生成 egs
+  # 
+  # nnet3-copy-egs 没具体看, 应该是拷贝 按照 egs_list 生成 egs.JOB_index.archives_index.ark.
+
   echo "$0: Generating training examples on disk"
-  # The examples will go round-robin to egs_list.
+  # -------- 从全部数据中 获得egs > 生成 egs_orig.JOB.$n.ark  JOB: 1:16
+  # -------- 并行JOB数量抽取数据. 得到 egs_orig.JOB(1:16).$n(1:52).ark
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
     nnet3-get-egs --num-pdfs=$num_pdfs --frame-subsampling-factor=$frame_subsampling_factor \
     $ivector_opts $egs_opts "$feats" \
@@ -467,7 +516,37 @@ if [ $stage -le 4 ]; then
     nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
 
+
+
+
+
+
+# num_archives  表示压缩文件数量
+# egs_per_archives 表示一个压缩文件内 egs样本数量
+# frames_per_eg    表示一个样本内 frame数量
+
+# ==============> num_frames = num_archives * egs_per_archives * frames_per_eg
+# liujunnan@innovem:/data/home/liujunnan/aishell/s5/exp/nnet3/tdnn_sp/egs/info$ cat num_frames 
+# 164017282
+# liujunnan@innovem:/data/home/liujunnan/aishell/s5/exp/nnet3/tdnn_sp/egs/info$ cat num_archives 
+# 52
+# liujunnan@innovem:/data/home/liujunnan/aishell/s5/exp/nnet3/tdnn_sp/egs/info$ cat egs_per_archive 
+# 394272
+# liujunnan@innovem:/data/home/liujunnan/aishell/s5/exp/nnet3/tdnn_sp/egs/info$ cat frames_per_eg 
+# 8
+
+# >>> 394272 * 52 * 8 - 164017282
+# -130 (这个误差是 chunk 之间有重叠)
+# >>> 
+
+
+
+# =================== 将 egs_orig.(1:16).(1:52).ark 归档到 egs.JOB(1:52).ark中.
+# ------------------- 1:52 是目标并行进行TDNN训练的并行数
+# ------------------- 1:16 是原本抽取特征时并行抽取的进程数.
+# ------------------- 因此和上面看着好像有不同 实际上是对应的.
 if [ $stage -le 5 ]; then
+  # 重新组合 并乱序 这些egs的压缩文件
   echo "$0: recombining and shuffling order of archives on disk"
   # combine all the "egs_orig.*.JOB.scp" (over the $nj splits of the data) and
   # shuffle the order, writing to the egs.JOB.ark
@@ -478,15 +557,19 @@ if [ $stage -le 5 ]; then
     egs_list="$egs_list $dir/egs_orig.$n.JOB.ark"
   done
 
+  # true
   if [ $archives_multiple == 1 ]; then # normal case.
     if $generate_egs_scp; then
       output_archive="ark,scp:$dir/egs.JOB.ark,$dir/egs.JOB.scp"
     else
       output_archive="ark:$dir/egs.JOB.ark"
     fi
+
+    #  JOB 1: 52, 将egs_list exp/nnet3/tdnn_sp/egs/egs_orig.$n.JOB.ark 归档 > egs.JOB.ark中.
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
       nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" $output_archive  || exit 1;
 
+    # false
     if $generate_egs_scp; then
       #concatenate egs.JOB.scp in single egs.scp
       rm $dir/egs.scp 2> /dev/null || true
@@ -501,40 +584,21 @@ if [ $stage -le 5 ]; then
     # otherwise managing the output names is quite difficult (and we don't want
     # to submit separate queue jobs for each intermediate archive, because then
     # the --max-jobs-run option is hard to enforce).
-    if $generate_egs_scp; then
-      output_archives="$(for y in $(seq $archives_multiple); do echo ark,scp:$dir/egs.JOB.$y.ark,$dir/egs.JOB.$y.scp; done)"
-    else
-      output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/egs.JOB.$y.ark; done)"
-    fi
-    for x in $(seq $num_archives_intermediate); do
-      for y in $(seq $archives_multiple); do
-        archive_index=$[($x-1)*$archives_multiple+$y]
-        # egs.intermediate_archive.{1,2,...}.ark will point to egs.archive.ark
-        ln -sf egs.$archive_index.ark $dir/egs.$x.$y.ark || exit 1
-      done
-    done
-    $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" ark:- \| \
-      nnet3-copy-egs ark:- $output_archives || exit 1;
-
-    if $generate_egs_scp; then
-      #concatenate egs.JOB.scp in single egs.scp
-      rm $dir/egs.scp 2> /dev/null || true
-      for j in $(seq $num_archives_intermediate); do
-        for y in $(seq $num_archives_intermediate); do
-          cat $dir/egs.$j.$y.scp || exit 1;
-        done
-      done > $dir/egs.scp || exit 1;
-      for f in $dir/egs.*.*.scp; do rm $f; done
-    fi
+      
+    # 太长没用的 删掉了 具体看源码中的代码.......
   fi
 fi
 
+
+
+# =====================  后期删除一些 tmp文件 ==============
 if [ $frame_subsampling_factor -ne 1 ]; then
   echo $frame_subsampling_factor > $dir/info/frame_subsampling_factor
 fi
 
+
 if [ $stage -le 6 ]; then
+    
   echo "$0: removing temporary archives"
   for x in $(seq $nj); do
     for y in $(seq $num_archives_intermediate); do
@@ -543,10 +607,13 @@ if [ $stage -le 6 ]; then
       rm $file
     done
   done
+
+  # false
   if [ $archives_multiple -gt 1 ]; then
     # there are some extra soft links that we should delete.
     for f in $dir/egs.*.*.ark; do rm $f; done
   fi
+  
   echo "$0: removing temporary alignments and transforms"
   # Ignore errors below because trans.* might not exist.
   rm $dir/{ali,trans}.{ark,scp} 2>/dev/null

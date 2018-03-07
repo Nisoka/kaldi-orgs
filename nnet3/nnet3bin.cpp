@@ -1,10 +1,8 @@
 
 
 
-void nnet3-get-egs()
+void nnet3_get_egs()
 {
-
-
   // egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress --num-frames=$frames_per_eg"
   //                                                                                                     8
   // ivector_opts="--online-ivectors=scp:$online_ivector_dir/ivector_online.scp --online-ivector-period=$ivector_period"
@@ -31,7 +29,7 @@ void nnet3-get-egs()
 
 
 
-  int main(int argc, char *argv[]) {
+  int nnet3_get_egs_______(int argc, char *argv[]) {
 
     bool compress = true;
     int32 num_pdfs = -1,
@@ -67,8 +65,12 @@ void nnet3-get-egs()
     if (num_pdfs <= 0)
       KALDI_ERR << "--num-pdfs options is required.";
 
+
+    // ==================== 获得UtteranceSpliter的配置文件 =========
+    // ------------- 在这里 num_frames_str = 8
+    // ------------- 结果 num_frames 就是一个元素的数组 8
+    // ------------------------------ 并且后面 获得对utterance 的划分**最主要**的数字就是 primary_length = 8---
     eg_config.ComputeDerived();
-    
     void ExampleGenerationConfig::ComputeDerived() {
       // split the num_frames_str to array.
       if (!SplitStringToIntegers(num_frames_str, ",", false, &num_frames) ||
@@ -96,6 +98,7 @@ void nnet3-get-egs()
         }
         num_frames[i] = value;
       }
+      
       if (changed) {
         std::ostringstream rounded_num_frames_str;
         for (size_t i = 0; i < num_frames.size(); i++) {
@@ -109,6 +112,8 @@ void nnet3-get-egs()
       }
     }
 
+    // ============================ 划分工具 UtteranceSplitter ================
+    // 利用这个对utterance 进行划分.
     UtteranceSplitter utt_splitter(eg_config);
 
     std::string
@@ -165,8 +170,15 @@ void nnet3-get-egs()
           continue;
         }
 
-        // prcocess frames in current utt.
 
+        
+        // prcocess frames of current utt.
+        // 1 ================== utt_splitter(内部初始化等操作得到Split_for_length), 
+        // 2 ================== 利用utt_splitter 对utterance进行划分得到 vector<chunk> 对utterance的划分,
+        //    ----------------- 每个chunk就代表一个TDNN的输入样本eg
+        // (vector<chunk> 是对utterance 按照<primary, primary, ... primary, other> 的划分,内部可能还会包含 gap空白 overlap重叠)
+        // 3 ================== 每个chunk 本身对应的是utterance的MFCC特征, 内部利用了Index描述数据信息
+        //                       并且还加入ivector特征.(注意 ivector特征 并不是每帧不同的,因为一句话实际上是一个人)
         if (!ProcessFile(feats,
                          online_ivector_feats,    online_ivector_period,
                          pdf_post,
@@ -210,16 +222,23 @@ void nnet3-get-egs()
   
   std::vector<ChunkTimeInfo> chunks;
 
+
+  // =======================  划分一个utterence 为多个 chunk ========================
+  // 每个chunk 是一个n frames的数据块.
+  // main
+  // and
+  //    1 primary chunksize x n
+  //    2 possibal_split_size  --- split_for_length_  (在 UtteranceSpliter 构造时候创建计算的)
+  //    3 gaps 插入到各个chunk 之间.
   utt_splitter->GetChunksForUtterance(num_input_frames, &chunks);
-
-
   void UtteranceSplitter::GetChunksForUtterance(
       int32 utterance_length,
       std::vector<ChunkTimeInfo> *chunk_info) {
     
     std::vector<int32> chunk_sizes;
 
-    // 生成一个 对utterance_length 的可能划分, chunk_sizes 是划分结果(primary, primary, ... primary, other)
+    // ======================= 生成对utterance_length 的划分 --- chunk_size ==============
+    // chunk_sizes 是划分结果(primary, primary, ... primary, possiable-split-size)
     GetChunkSizesForUtterance(utterance_length, &chunk_sizes);
     void UtteranceSplitter::GetChunkSizesForUtterance(int32 utterance_length,
                                                       std::vector<int32> *chunk_sizes) const {
@@ -237,8 +256,11 @@ void nnet3-get-egs()
       KALDI_ASSERT(primary_length - num_frames_overlap > 0);
       KALDI_ASSERT(utterance_length >= 0);
 
-      // 循环切分utterance_length, 以 primary_length repeat,
-      // 直到 最后剩余utterance_length < splits_for_length_.size() 长度.
+      // ---------------------  primary 划分  -----------------------
+      // 先将utterence尽可能的按照 primary 长度. 留下剩余 utterance_length
+      // main
+      //     循环切分utterance_length, 以 primary_length repeat,
+      //     直到 最后剩余utterance_length < splits_for_length_.size() 长度.
       while (utterance_length > max_tabulated_length) {
         utterance_length -= (primary_length - num_frames_overlap);
         num_primary_length_repeats++;
@@ -246,22 +268,26 @@ void nnet3-get-egs()
       
       KALDI_ASSERT(utterance_length >= 0);
 
-      // 可能的划分可能.
+      // ---------------------- 剩余 utterance_length 按照上面获得的 splits_for_length_ 进行一个划分 --------------
+      // 可能的 剩余长度划分可能.
       const std::vector<std::vector<int32> > &possible_splits = splits_for_length_[utterance_length];
+
       // 如果可能划分isempty().
       if (possible_splits.empty()) {
         chunk_sizes->clear();
         return;
       }
-
-      
+     
       int32
           //
           num_possible_splits = possible_splits.size(),
           // 随机选择一个可能划分.
           randomly_chosen_split = RandInt(0, num_possible_splits - 1);
 
-      // <8>, <8,8>
+      // --------------------- 随机获得一个可能的划分 chunk_sizes  作为 剩余utterance 的划分
+      // --------------------- 将N 个 primary 划分 加入到 chunk_sizes, 完成对 utterance的划分.
+      // ???????????????????  但是这里chunk_size换分结果 并不和 utterance长度相等?
+      // ??????  因为split_for_length 的求解 并不能覆盖所有长度可能. .... 
       *chunk_sizes = possible_splits[randomly_chosen_split];
       for (int32 i = 0; i < num_primary_length_repeats; i++)
         chunk_sizes->push_back(primary_length);
@@ -274,6 +300,8 @@ void nnet3-get-egs()
 
     // gaps 空白. 将空白 按照chunk内比例 分配给 gaps
     std::vector<int32> gaps(chunk_sizes.size());
+
+    
     GetGapSizes(utterance_length, true, chunk_sizes, &gaps);
     void UtteranceSplitter::GetGapSizes(int32 utterance_length,
                                         bool enforce_subsampling_factor,
@@ -283,7 +311,8 @@ void nnet3-get-egs()
         gap_sizes->clear();
         return;
       }
-      
+
+      // 忽略这个 if
       if (enforce_subsampling_factor && config_.frame_subsampling_factor > 1) {
         int32 sf = config_.frame_subsampling_factor, size = chunk_sizes.size();
         int32 utterance_length_reduced = (utterance_length + (sf - 1)) / sf;
@@ -292,21 +321,28 @@ void nnet3-get-egs()
           KALDI_ASSERT(chunk_sizes[i] % config_.frame_subsampling_factor == 0);
           chunk_sizes_reduced[i] /= config_.frame_subsampling_factor;
         }
+
         GetGapSizes(utterance_length_reduced, false,
                     chunk_sizes_reduced, gap_sizes);
+        
         KALDI_ASSERT(gap_sizes->size() == static_cast<size_t>(size));
         for (int32 i = 0; i < size; i++)
           (*gap_sizes)[i] *= config_.frame_subsampling_factor;
         return;
       }
-      
-      int32 num_chunks = chunk_sizes.size(),
+
+
+      // 计算剩余空白或重叠 total_gap = utterance_length - total_of_chunk_sizes
+      int32
+          num_chunks = chunk_sizes.size(),
           total_of_chunk_sizes = std::accumulate(chunk_sizes.begin(),
                                                  chunk_sizes.end(),
                                                  int32(0)),
           total_gap = utterance_length - total_of_chunk_sizes;
       gap_sizes->resize(num_chunks);
 
+      // ------------------- total_gap < 0 说明会产生重叠,
+      // ------------------- utterance_length 不足以填充分化chunk_sizes. 所以会重叠chunk_sizes
       if (total_gap < 0) {
         // there is an overlap.  Overlaps can only go between chunks, not at the
         // beginning or end of the utterance.  Also, we try to make the length of
@@ -321,8 +357,11 @@ void nnet3-get-egs()
         }
 
         // note the elements of 'overlaps' will be <= 0.
-        std::vector<int32> magnitudes(num_chunks - 1),
+        std::vector<int32>
+            magnitudes(num_chunks - 1),
             overlaps(num_chunks - 1);
+        // magnitude向量 会保存相邻两个chunk之间较小的那个,
+        // 因为两者之间可能会存在重叠, magnitude会用来作为 overlap的分配比例依据.
         // the 'magnitudes' vector will contain the minimum of the lengths of the
         // two adjacent chunks between which are are going to consider having an
         // overlap.  These will be used to assign the overlap proportional to that
@@ -332,21 +371,26 @@ void nnet3-get-egs()
         }
 
 
-        
-        DistributeRandomly(total_gap, magnitudes, &overlaps);
 
+        // -----------------------  分化空白或者重叠 ------------------------
         // 将空白部分, 按照magnitudes向量各元素比例 分化空白 ==> overlaps.
+        DistributeRandomly(total_gap, magnitudes, &overlaps);
         void UtteranceSplitter::DistributeRandomly(int32 n,
                                                    const std::vector<int32> &magnitudes,
                                                    std::vector<int32> *vec) {
           KALDI_ASSERT(!vec->empty() && vec->size() == magnitudes.size());
           int32 size = vec->size();
+
+          // ---------------------- 空白情况 -------------------
+          // 
           if (n < 0) {
             DistributeRandomly(-n, magnitudes, vec);
             for (int32 i = 0; i < size; i++)
               (*vec)[i] *= -1;
             return;
           }
+
+          // --------------------- 重叠情况 ---------------------
           float total_magnitude = std::accumulate(magnitudes.begin(), magnitudes.end(),
                                                   int32(0));
           KALDI_ASSERT(total_magnitude > 0);
@@ -355,7 +399,7 @@ void nnet3-get-egs()
           std::vector<std::pair<float, int32> > partial_counts;
           int32 total_count = 0;
 
-          // 按照 magnitude分化 空白, 每个chunk 会有 vec[i] 的空白.
+          // 按照 magnitude比例分化 重叠, 每个chunk 会有 vec[i] 的空白.
           // 总共空白最后不会等于 n, 后面继续处理, 最终让整体空白total_count==n.
           for (int32 i = 0; i < size; i++) {
             float this_count = n * float(magnitudes[i]) / total_magnitude;
@@ -370,7 +414,7 @@ void nnet3-get-egs()
           std::sort(partial_counts.begin(), partial_counts.end());
           int32 i = 0;
 
-          // 向排好序的vec中逐个增加1个空白, 知道 total_count = n.
+          // 向排好序的vec中逐个增加1个空白, 直到 total_count = n.
           // 并且 total_count 都按比例的分布在了 vec[] 中.
           // Increment by one the elements of the vector that has the largest partial
           // count, then the next largest partial count, and so on... until we reach the
@@ -396,7 +440,11 @@ void nnet3-get-egs()
         (*gap_sizes)[0] = 0;  // no gap before 1st chunk.
         for (int32 i = 1; i < num_chunks; i++)
           (*gap_sizes)[i] = overlaps[i-1];
-      } else {
+        
+      }
+
+      // ------------------- total_gap > 0 说明会产生空白, utterance_length 太长??????????????
+      else {
         // There may be a gap.  Gaps can go at the start or end of the utterance, or
         // between segments.  We try to distribute the gaps evenly.
         std::vector<int32> gaps(num_chunks + 1);
@@ -414,8 +462,15 @@ void nnet3-get-egs()
     int32 num_chunks = chunk_sizes.size();
     chunk_info->resize(num_chunks);
 
+    // ===========================   按照chunk_sizes 划分utterence 获得chunk 时间  =============================
+
     // 规划 chunk 时间
     // chunk_info Vector<ChunkTimeInfo, ChunkTimeInfo ... >
+    // chunk
+    //     first_frames: 起始帧id
+    //     num_frames:   chunk 帧总数
+    //     left_context: 当前chunk的 L上下文帧数(是之前几帧frames特征数据,可能在前几个chunk里面)
+    //     right_context: 当前chunk的 R上下文帧数.
     int32 t = 0;
     for (int32 i = 0; i < num_chunks; i++) {
       t += gaps[i];
@@ -431,9 +486,81 @@ void nnet3-get-egs()
 
 
 
-    
+    // ======================= 为chunk_info 内对应frame 设置frame权重, 重叠情况权重降低为1/2
     SetOutputWeights(utterance_length, chunk_info);
+    void UtteranceSplitter::SetOutputWeights(int32 utterance_length,
+                                             std::vector<ChunkTimeInfo> *chunk_info) const {
+      int32 sf = config_.frame_subsampling_factor;
+      int32 num_output_frames = (utterance_length + sf - 1) / sf;
+      // num_output_frames is the number of frames of supervision.
+
+
+
+
+      // 'count[t]' will be the number of chunks that this output-frame t appears in.
+      // Note: the
+      // 'first_frame' and 'num_frames' members of ChunkTimeInfo will always be
+      // multiples of frame_subsampling_factor.
+      // ----------------- count: 每frame 出现在多少个chunk中 (每frame的重叠情况)
+      std::vector<int32> count(num_output_frames, 0);
+      int32 num_chunks = chunk_info->size();
+      for (int32 i = 0; i < num_chunks; i++) {
+        ChunkTimeInfo &chunk = (*chunk_info)[i];
+        for (int32 t = chunk.first_frame / sf;
+             t < (chunk.first_frame + chunk.num_frames) / sf;
+             t++)
+          count[t]++;
+      }
+
+      // -----------------chunk.output_weights: 对应为内部frame 的权重
+      // --------- frame权重一般为1, 有重叠 权重为1/2
+      for (int32 i = 0; i < num_chunks; i++) {
+        ChunkTimeInfo &chunk = (*chunk_info)[i];
+        chunk.output_weights.resize(chunk.num_frames / sf);
+        int32 t_start = chunk.first_frame / sf;
+        for (int32 t = t_start;
+             t < (chunk.first_frame + chunk.num_frames) / sf;
+             t++)
+          chunk.output_weights[t - t_start] = 1.0 / count[t];
+      }
+    }
+
+
+    // =============== 计算一些统计计数
+    // --------- total_num_utterances_, total_input_frames_, total_frames_overlap_, chunk_size_to_count_(某个size的chunk的总数)
     AccStatsForUtterance(utterance_length, *chunk_info);
+    void UtteranceSplitter::AccStatsForUtterance(
+        int32 utterance_length,
+        const std::vector<ChunkTimeInfo> &chunk_info) {
+      
+      total_num_utterances_ += 1;
+      total_input_frames_ += utterance_length;
+
+      for (size_t c = 0; c < chunk_info.size(); c++) {
+        int32 chunk_size = chunk_info[c].num_frames;
+
+        if (c > 0) {
+          int32 last_chunk_end = chunk_info[c-1].first_frame +
+              chunk_info[c-1].num_frames;
+          // --------- 有重叠情况 total_frames_overlap 总体重叠数量统计.
+          if (last_chunk_end > chunk_info[c].first_frame)
+            total_frames_overlap_ += last_chunk_end - chunk_info[c].first_frame;
+        }
+        
+        std::map<int32, int32>::iterator iter = chunk_size_to_count_.find(chunk_size);
+
+        // ----- 增加 chunks_size_to_count_<chunk_size, count> 的统计计数
+        if (iter == chunk_size_to_count_.end())
+          chunk_size_to_count_[chunk_size] = 1;
+        else
+          iter->second++;
+
+        // 增加统计计数
+        total_num_chunks_ += 1;
+        total_frames_in_chunks_ += chunk_size;
+      }
+    }
+
     
     // check that the end of the last chunk doesn't go more than
     // 'config_.frame_subsampling_factor - 1' frames past the end
@@ -441,77 +568,149 @@ void nnet3-get-egs()
     KALDI_ASSERT(t - utterance_length < config_.frame_subsampling_factor);
   }
 
-  
+
+  // ------------ check: 是否一个utterance 没有分配成功一个chunk划分,
+  // ------------ 对一个utterance的 chunk 划分结果 就是 egs.
   if (chunks.empty()) {
     KALDI_WARN << "Not producing egs for utterance " << utt_id
                << " because it is too short: "
                << num_input_frames << " frames.";
   }
 
+
+  
+
+  // ---------- comment: frame_subsampling_factor 当前没有作用, 是为了支持使用chain 方法的一些用处保留的.
   // 'frame_subsampling_factor' is not used in any recipes at the time of
   // writing, this is being supported to unify the code with the 'chain' recipes
   // and in case we need it for some reason in future.
   int32 frame_subsampling_factor =
       utt_splitter->Config().frame_subsampling_factor;
 
+
+  // ===================== 一个chunk(+ C L R context) 作为TDNN的输入样本 =================
+  // ----------------------   这个chunk 本身是 MFCC, 还会可能附加 ivector.联合做TDNN的输入样本
+  // 将utterance 划分为chunk后, chunk就代表一个训练用的输入样本
   for (size_t c = 0; c < chunks.size(); c++) {
     const ChunkTimeInfo &chunk = chunks[c];
 
-    int32 tot_input_frames = chunk.left_context + chunk.num_frames +
-        chunk.right_context;
-
+    // TDNN输入样本 == 当前chunk的frames + L context frames + R context frames
+    int32 tot_input_frames = chunk.left_context + chunk.num_frames + chunk.right_context;
+    // TDNN输入起始帧(但是并不是实际代表当前代表的数据, 而是以L 上下文开始, 共同描述当前代表的音素状态)
     int32 start_frame = chunk.first_frame - chunk.left_context;
 
+
+    // input_frames 抽取 原始特征中 对应当前chunk eg 的L C R 的行.
     GeneralMatrix input_frames;
     ExtractRowRangeWithPadding(feats, start_frame, tot_input_frames,
                                &input_frames);
 
     // 'input_frames' now stores the relevant rows (maybe with padding) from the
-    // original Matrix or (more likely) CompressedMatrix.  If a CompressedMatrix,
-    // it does this without un-compressing and re-compressing, so there is no loss
+    // original Matrix or (more likely) CompressedMatrix.
+    // If a CompressedMatrix, it does this without un-compressing and re-compressing, so there is no loss
     // of accuracy.
 
+
+
+    
+    // ================ 构造eg NNet 训练用输入样本 ======================
+    // ================ 构造eg NNet 训练用输入样本 ======================
+    // ================ 构造eg NNet 训练用输入样本 ======================
+    
+    // 通过NnetIo 表示一个NNet的输入, 使用的还是上面的MFCC 特征 ==============
+    // ------------- 内部使用 Index 索引描述数据.
     NnetExample eg;
     // call the regular input "input".
     eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
 
+    NnetIo::NnetIo(const std::string &name,
+                   int32 t_begin, const GeneralMatrix &feats,
+                   int32 t_stride = 1):
+        name(name), features(feats) {
+      
+      int32 num_rows = feats.NumRows();
+
+      // indexes 代表所有帧, indexes[i], 代表某一帧.
+      // indexes vector<Index> ------- 前面提到的 index 描述一个输入帧的索引.
+      // struct Index {
+      //     int32 n;  // member-index of minibatch, or zero.      ------------------??? minibatch 批次索引, 没用上.
+      //     int32 t;  // time-frame.                              ------------------代表当前帧的时间.
+      //     int32 x;  // this may come in useful in convoluational approaches.
+      // ..........
+      // }
+      indexes.resize(num_rows);  // sets all n,t,x to zeros.
+      for (int32 i = 0; i < num_rows; i++)
+        indexes[i].t = t_begin + i * t_stride;
+    }
+    
+
+
+    // ================ 上面都是MFCC特征, 这里将 ivector特征 加入作为eg的一部分输入  =================
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
       // choose iVector from a random frame in the chunk
       int32 ivector_frame = RandInt(start_frame,
                                     start_frame + num_input_frames - 1),
           ivector_frame_subsampled = ivector_frame / ivector_period;
+
+      // check:
       if (ivector_frame_subsampled < 0)
         ivector_frame_subsampled = 0;
       if (ivector_frame_subsampled >= ivector_feats->NumRows())
         ivector_frame_subsampled = ivector_feats->NumRows() - 1;
+      
       Matrix<BaseFloat> ivector(1, ivector_feats->NumCols());
       ivector.Row(0).CopyFromVec(ivector_feats->Row(ivector_frame_subsampled));
       eg.io.push_back(NnetIo("ivector", 0, ivector));
     }
 
+    // --------- Notice:  这里一直都考虑 frame_subsampling_factor,
+    // ------ 但是这里实际用到的还是将frame_subsampling_factor = 1. 所以为了简单 先不考虑其作用能力.
     // Note: chunk.first_frame and chunk.num_frames will both be
     // multiples of frame_subsampling_factor.
     int32 start_frame_subsampled = chunk.first_frame / frame_subsampling_factor,
         num_frames_subsampled = chunk.num_frames / frame_subsampling_factor;
 
-    Posterior labels(num_frames_subsampled);
 
+    // ==================  构建对应的chunk(eg)的样本标签
+    Posterior labels(num_frames_subsampled);
     // TODO: it may be that using these weights is not actually helpful (with
     // chain training, it was not), and that setting them all to 1 is better.
     // We could add a boolean option to this program to control that; but I
     // don't want to add such an option if experiments show that it is not
     // helpful.
+    // 
     for (int32 i = 0; i < num_frames_subsampled; i++) {
       int32 t = i + start_frame_subsampled;
       if (t < pdf_post.size())
         labels[i] = pdf_post[t];
+      // foreach: 每个pdf的可能概率, 都 乘以 当前chunk的 chunk.output_weights[i] 权重( -帧重叠权重-).
       for (std::vector<std::pair<int32, BaseFloat> >::iterator
                iter = labels[i].begin(); iter != labels[i].end(); ++iter)
         iter->second *= chunk.output_weights[i];
     }
 
+    // ================  完善一个 chunk-eg-NNet训练样本, 加上对应的 labels ==============
+    // ----------   注意一个 chunk 是多帧(一般为8) 所以 labels 都是8帧 X num_pdfs.
+    // ----------   所以 labels是  8 x num_pdfs.
     eg.io.push_back(NnetIo("output", num_pdfs, 0, labels));
+    NnetIo::NnetIo(const std::string &name,
+                   int32 dim,
+                   int32 t_begin,
+                   const Posterior &labels,
+                   int32 t_stride=1):
+        name(name) {
+      int32 num_rows = labels.size();
+      KALDI_ASSERT(num_rows > 0);
+      SparseMatrix<BaseFloat> sparse_feats(dim, labels);
+      
+      features = sparse_feats;
+      // ----------- indexes[i] 代表每一帧,
+      // ----------- indexes[i].t 代表当前帧的实际time.
+      indexes.resize(num_rows);  // sets all n,t,x to zeros.
+      for (int32 i = 0; i < num_rows; i++)
+        indexes[i].t = t_begin + i * t_stride;
+    }
 
     if (compress)
       eg.Compress();

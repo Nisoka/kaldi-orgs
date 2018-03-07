@@ -174,8 +174,10 @@ def train(args, run_opts):
                     {dir}/init.raw""".format(command=run_opts.command,
                                              dir=args.dir))
 
-    # ================== 生成egs 的过程
-    # egs 目录为 目标目录下的 exp/nnet3/tdnn_sp/egs/
+    # ================== 生成TDNN训练样本 egs 的过程 ==============
+    # ------------ 每个egs 是一段frames, 是一个 chunk, 具有上下文frames,
+    # ------------ 并可以加上 ivector特征.
+    # egs dir=exp/nnet3/tdnn_sp/egs/
     default_egs_dir = '{0}/egs'.format(args.dir)
     if (args.stage <= -4) and args.egs_dir is None:
         logger.info("Generating egs")
@@ -206,12 +208,13 @@ def train(args, run_opts):
         
         egs_dir = default_egs_dir
 
-        
-    [egs_left_context, egs_right_context,
-     frames_per_eg_str, num_archives] = (
-         common_train_lib.verify_egs_dir(egs_dir, feat_dim,
-                                         ivector_dim, ivector_id,
-                                         left_context, right_context))
+
+    # =============== 上面生成了 egs 这里 对egs 进行验证Verify
+    [egs_left_context, egs_right_context, frames_per_eg_str, num_archives]
+             = ( common_train_lib.verify_egs_dir(egs_dir, feat_dim,
+                                                 ivector_dim, ivector_id,
+                                                 left_context, right_context))
+             
     assert str(args.frames_per_eg) == frames_per_eg_str
 
 
