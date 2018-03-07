@@ -1,0 +1,21 @@
+
+
+* xconfig generate
+
+
+* nnet3-init
+
+
+* get_egs
+
+** nnet3_get_egs.cc
+
+   We aim for each archive to have, by default, around 200,000 samples in it;
+   If you look in (for example) exp/nnet5d/egs/ you will see a lot of files called egs.1.1.ark, egs.1.2.ark, and so on. 
+   These are archives containing many instances of a class called NnetTrainingExample~
+   
+   chunk -- eg --  一个数据块,    是训练 解码时候我们需要评价的一个输入.
+   ??? 代表一个确定frame并带有其对应的 left right context.???
+
+   chunk_size --- frames_per_eg.
+* 
