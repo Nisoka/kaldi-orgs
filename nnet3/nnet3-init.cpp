@@ -10,10 +10,9 @@
 
 
 //  ====================== nnet3 构建了 nnet3 结构
-//  ====================== 包括了
 // componet , componet_names_
-// nodes_ nodes_names_
-//        对应kDescritptor中descriptor的构建, kComponent 的 Component-index
+// nodes_   , nodes_names_
+// 对应kDescritptor中descriptor的构建, kComponent 的 Component-index
 //            
 //  但是至今没有什么计算图的使用生成.
 int main(int argc, char *argv[]) {
@@ -56,12 +55,7 @@ int main(int argc, char *argv[]) {
         raw_nnet_wxfilename = po.GetArg(po.NumArgs() == 3 ? 3 : 2);
 
     Nnet nnet;
-    if (po.NumArgs() == 3) {
-      ReadKaldiObject(raw_nnet_rxfilename, &nnet);
-      KALDI_LOG << "Read raw neural net from "
-                << raw_nnet_rxfilename;
-    }
-
+    
     {
       bool binary;
       Input ki(config_rxfilename, &binary);
@@ -146,7 +140,7 @@ void Nnet::ReadConfig(std::istream &config_is) {
   std::vector<ConfigLine> config_lines(lines.size());
   ParseConfigLines(lines, &config_lines);
 
-  // add comment, 至此, config 中的每行(component-node, key=value, key=value, ...)
+  // 至此, config 中的每行(component-node, key=value, key=value, ...)
   // 转化为ConfigLine, 其中Component-node 为first_token_,    data_ 保存所有的pair<key, value>
   // std::map<std::string, std::pair<std::string, bool> > data_;
   {
@@ -338,8 +332,11 @@ void Nnet::ReadConfig(std::istream &config_is) {
   }
 
 
+
+  
   // 读取nnet3 已经存在的 Component 
   int32 initial_num_components = components_.size();
+ 
   // 两次遍历
   // ========================= 构建核心成员 =========================
   // ========================component_ component_names_  node_ node_names_的过程.
@@ -356,7 +353,6 @@ void Nnet::ReadConfig(std::istream &config_is) {
         if (pass == 0)
           ProcessComponentConfigLine(initial_num_components, &(config_lines[i]));
         
-
         // called only on pass 0 of ReadConfig.
         void Nnet::ProcessComponentConfigLine(
             int32 initial_num_components,
@@ -440,12 +436,16 @@ void Nnet::ReadConfig(std::istream &config_is) {
                       << " in config line: " << config->WholeLine();
         }
       }
-      // ====================== 构建 nodes_ nodes_names_ 成员, 注意 其中,会为一个component-node 生成两个node
-      // ==================== 注意 这里为所有Component-node 都增加了 两个不同类型的Node
-      // ==================== kDescriptor, 并产生一个新的名字, 名字为 name_input
-      // ==================== kComponent, name就是对应的Component名字  name
-      // 其中 input_node_index input_name 都是对应该component的 kDescriptor 的node, 并且Descriptor都保存在这个node中
-      // 其中 node_index       name           对应该component的 kComponent 的node,  并且保存了 对应的component_对象.
+      
+      // ===== 构建 nodes_ nodes_names_ 成员, 
+      // ===== 这里为所有Component-node 都增加了 两个不同类型的Node
+      // ===== kDescriptor, 并产生一个新的名字, 名字为 name_input
+      // ===== kComponent, name就是对应的Component名字  name
+      // 其中 node_index_input name_input
+      // 对应component的 kDescriptor 的node, 并且Descriptor都保存在这个node中
+      // 其中 node_index       name
+      // 对应component的 kComponent 的node,  并且保存了 对应的component_对象.
+      
       else if (first_token == "component-node") {
         ProcessComponentNodeConfigLine(pass,  &(config_lines[i]));
 
@@ -502,7 +502,7 @@ void Nnet::ReadConfig(std::istream &config_is) {
               KALDI_ERR << "Expected input=<input-descriptor>, in config line: "
                         << config->WholeLine();
 
-            // 处理node 的 input Descriptor String  ==> tokens. 但是构建成tokens的过程有点不太确定是否正确.
+            // 处理node 的 input Descriptor String  ==> tokens. 
             std::vector<std::string> tokens;
             if (!DescriptorTokenize(input_descriptor, &tokens))
               KALDI_ERR << "Error tokenizing descriptor in config line "
@@ -560,7 +560,6 @@ void Nnet::ReadConfig(std::istream &config_is) {
             
 
             // =====================  循环构建 Descriptor的过程 ==================
-
             // =================== 根据 Descriptor String 以及 node-names
             // =================== Parse 构建对应的Descriptor
             std::vector<std::string> node_names_temp;
@@ -582,7 +581,7 @@ void Nnet::ReadConfig(std::istream &config_is) {
               GeneralDescriptor *gen_desc;
 
               // ==================== 递归通过Parse 将Append Offset input 形成GeneralDescriptor.
-              // ==================== 具体过程 见代码, 比较简单
+              // ==================== 具体过程 见代码,
               // 最外层是一个 Append 的GeneralDescriptor.
               // 循环构建GeneralDescriptor的过程, 首先都是构造的GeneralDescriptor.
               gen_desc = GeneralDescriptor::Parse(node_names, next_token);
@@ -885,13 +884,10 @@ void Nnet::ReadConfig(std::istream &config_is) {
           std::vector<int32> node_deps;
           // 获得node descriptor的依赖关系
           node.descriptor.GetNodeDependencies(&node_deps);
-
-
-
-          // --------------------- 获取依赖输入, 将输入依赖 push into node_indexes -----------------
-          // =======================================================================================
+          // ======= 递归的获取依赖输入, 将输入依赖 push into node_indexes
           // eg
-          // 1 原本的Append 下具有多个 part_ -- Offset. Offset 有两层包装 1 SimpleSumDescriptor 2 OffsetForward
+          // 1 原本的Append 下具有多个 part_ -- Offset.
+          // Offset 有两层包装 1 SimpleSumDescriptor 2 OffsetForward
           // 2 Offset 的 SimpleSumDescriptor 的src_ 保存对应的OffsetForwardingDescriptor.
           // 3 Offset --- OffsetForwarding才是实际的Descriptor, 并包含offset_.
           //   OffsetForwarding 将 对应的input -- SimpleForwardingDescriptor 作为 src_,
@@ -950,7 +946,9 @@ void Nnet::ReadConfig(std::istream &config_is) {
           int32 src_dim,
               input_dim = c->InputDim();
               // virtual int32 InputDim() const { return linear_params_.NumCols(); }
-          
+
+          // 计算kComponent 对应输入的kDescriptor 的维度, kDescriptor 如果是Append
+          // 就会将多个更底层的kDescriptor的Dim 获得, 并累加起来构成更大的dim.
           src_dim = src_node.Dim(*this);
 
           // eg 一个 Append 最终构建的Descriptor 

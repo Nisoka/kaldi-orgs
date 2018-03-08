@@ -9,6 +9,7 @@
   # # please note that it is important to have input layer with the name=input
   # # as the layer immediately preceding the fixed-affine-layer to enable
   # # the use of short notation for the descriptor
+  
   # fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # # the first splicing is moved before the lda layer, so no splicing here
@@ -20,7 +21,7 @@
   # relu-batchnorm-layer name=tdnn6 dim=850
   # output-layer name=output input=tdnn6 dim=$num_targets max-change=1.5
 
-* def xconfig_to_configs():
+* xconfig_to_configs.py
   # 根据直接描述, 生成具体的 init.config ref.config final.config C++可读取使用的nnet3配置.
     args = get_args()
     # 备份
@@ -30,8 +31,9 @@
     if args.existing_model is not None:
         existing_layers = xparser.get_model_component_info(args.existing_model)
 
-    # 通过read_xconfig_file() 生成对应的xlayers
+    # 通过read_xconfig_file() 解析xconfig文件, 生成对应的python xlayers 对象.
     all_layers = xparser.read_xconfig_file(args.xconfig_file, existing_layers)
+
 
 
     # 通过 str(layer) 获得layer处理后的string 描述 写入 xconfig.expend.1 xconfig.expend.2(经过Descriptor的normalize)
@@ -44,19 +46,28 @@
     #                'delay': 0,
     #                'write-init-config': True}
 
+
+
+
     # def get_full_config(self): 获得不同config情况的 一些node 写入 init.config, final.config.
     write_config_files(args.config_dir, all_layers)
+
+
+
 
     # 生成了具体的config --init,ref,final, 
     # nnet3-init bin  构建具体的nnet3格式nnet结构-- init,ref,final .raw.
     check_model_contexts(args.config_dir, args.nnet_edits, existing_model=args.existing_model)
+
+
+
 
     # 根据生成的ref.raw, 取其中的 model_left_context=16 保存到 vars 文件中.
     add_nnet_context_info(args.config_dir, args.nnet_edits, existing_model=args.existing_model)
 
 
                           
-** def read_xconfig_file(xconfig_filename, existing_layers=[]):
+** read_xconfig_file(xconfig_filename, existing_layers=[]):
     f = open(xconfig_filename, 'r')
     all_layers = []
 
@@ -83,23 +94,34 @@
 
 
 
-** def xconfig_line_to_object(config_line, prev_layers = None):
-   # get line first_token  ---  key_to_value.
-    x  = xutils.parse_config_line(config_line)
-    if x is None:
-        return None
-    (first_token, key_to_value) = x
+*** xconfig_line_to_object(config_line, prev_layers = None):
 
-    # 数组中找到对应的 xlayer对象 并根据first_token, key_to_value 构造
-    # contruct a xlayer 对象. --- first_token 找到对应的xlayer对象, key_to_value, prev_layers 构建xlayer具体成员数据
-    return config_to_layer[first_token](first_token, key_to_value, prev_layers)
+    xconfig_line_to_object(config_line, prev_layers = None):
+
+    # get line first_token  ---  key_to_value.
+     x  = xutils.parse_config_line(config_line)
+     if x is None:
+         return None
+     (first_token, key_to_value) = x
+
+     # 数组中找到对应的 xlayer对象 并根据first_token, key_to_value 构造
+     # contruct a xlayer 对象. 
+     # --- first_token 找到对应的xlayer对象, key_to_value, prev_layers 构建xlayer具体成员数据
+     return config_to_layer[first_token](first_token, key_to_value, prev_layers)
 
 
 *** def parse_config_line(orig_config_line):
+
     # ------------------------- parse line 获得 一个layer的 dict形式的描述. ----------------
     # get first_token   and  key_to_value.
-    # fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=nan-test/configs/lda.mat
-    # ('fixed-affine-layer', {'affine-transform-file': 'nan-test/configs/lda.mat', 'input': 'Append(-2,-1,0,1,2,ReplaceIndex(ivector,t,0 )', 'name': 'lda'})
+
+    # fixed-affine-layer name=lda 
+    #                    input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) 
+    #                    affine-transform-file=nan-test/configs/lda.mat
+    # >>>>>>
+    # ('fixed-affine-layer', {'affine-transform-file': 'nan-test/configs/lda.mat', 
+    #                         'input': 'Append(-2,-1,0,1,2,ReplaceIndex(ivector,t,0 )', 
+    #                          'name': 'lda'})
 
     # Remove comments.
     config_line = orig_config_line.split('#')[0]
@@ -284,8 +306,8 @@
 
 
 **** def set_configs(self, key_to_value, all_layers):
+
         # ------------------- 生成 Descriptor的过程 ------------------
-        # usage: 
         # 根据key_to_value dict 生成对应的 Descriptors.
 
 
@@ -365,6 +387,8 @@
               self.config[key] = desc_str_dict['normalized-string']
               
       # ================== important ===============
+      # ================== important ===============
+      # ================== important ===============
       def convert_to_descriptor(self, descriptor_string, all_layers):
           # 应该从child class调用, 将对应为一个descriptor的string 转化为一个 Descriptor对象
           """Convenience function intended to be called from child classes,
@@ -380,7 +404,8 @@
           so that it can work out a list of the names of other
           layers, and get dimensions from them.
           """
-          
+
+          # ============================== 真正构建Descriptor 的过程 ===========================
           # 先前layer的name []
           prev_names = xutils.get_prev_names(all_layers, self)
           # tokenize_descriptor--, 并将其中 -1 -2 等用 last1 last2 的 layer-name替换.
@@ -394,6 +419,129 @@
           (descriptor, pos) = xutils.parse_new_descriptor(tokens, pos, prev_names)
 
           return descriptor
+
+          
+**** parse_new_descriptor(tokens, pos, prev_names):
+
+     parse_new_descriptor(tokens, pos, prev_names):
+
+     # Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0))
+     #  >>>>>>>>>>>> 
+
+     # [ 'Append', '(',  '-1', ',', '0', ',', '1','ReplaceINdex','(','ivector','t','0',')', ')']
+     #  >>>>>>>>>>>>
+
+     # Des -- operator -----  Append
+     #        items -append-  Des  ----  operator - Offset
+     #                                   items   - Des --- operator - None       +  -1.
+     #                                                     items   - preLayer
+     #        items -append-  Des  ----  operator - Offset
+     #                                   items   - Des --- operator - None       +  0.
+     #                                                     items   - preLayer
+     #        items -append-  Des  ----  operator - Offset
+     #                                   items   - Des --- operator - None       + 1.
+     #                                                     items   - preLayer
+     #        items -append-  Des  ----  operator - ReplaceIndex
+     #                                   items   -append- 
+     
+
+      size = len(tokens)
+      first_token = tokens[pos]
+
+      pos += 1
+      # 申请Descriptor 对象
+      d = Descriptor()
+
+      # 这个if判断是否是个正常的descriptor, 
+      if first_token in [ 'Offset', 'Round', 'ReplaceIndex', 'Append', 'Sum', 'Switch', 'Failover', 'IfDefined' ]:
+          # check
+          expect_token('(', tokens[pos], first_token + '()')
+          pos += 1
+
+          d.operator = first_token
+          (desc, pos) = parse_new_descriptor(tokens, pos, prev_names)
+          d.items = [desc]
+
+          # ------------------------
+          # if-else 根据不同的descriptor-str进行不同的Descriptor生成
+          if first_token == 'Offset':
+
+          elif first_token in [ 'Append', 'Sum', 'Switch', 'Failover', 'IfDefined' ]:
+              # 循环处理
+              while True:
+                  if tokens[pos] == ')':
+                      # check num-items is correct for some special cases.
+                      if first_token == 'Failover' and len(d.items) != 2:
+                          raise RuntimeError("Parsing Failover(), expected 2 items but got {0}".format(len(d.items)))
+                      if first_token == 'IfDefined' and len(d.items) != 1:
+                          raise RuntimeError("Parsing IfDefined(), expected 1 item but got {0}".format(len(d.items)))
+                      pos += 1
+                      break
+                  elif tokens[pos] == ',':
+                      pos += 1  # consume the comma.
+                  else:
+                      raise RuntimeError("Parsing Append(), expected ')' or ',', got " + tokens[pos])
+
+                   # ==================================
+                   # 循环构建内部的 offset-Descriptor.
+                  (desc, pos) = parse_new_descriptor(tokens, pos, prev_names)
+                  d.items.append(desc)
+
+          elif first_token == 'Round':
+
+          elif first_token == 'ReplaceIndex':
+              # 类似Assert .
+              expect_token(',', tokens[pos], 'ReplaceIndex()')
+              pos += 1
+
+              if tokens[pos] in [ 'x', 't' ]:
+                  d.items.append(tokens[pos])
+                  pos += 1
+              else:
+                  raise RuntimeError("Parsing ReplaceIndex(), expected 'x' or 't', got " +
+                                  tokens[pos])
+              expect_token(',', tokens[pos], 'ReplaceIndex()')
+              pos += 1
+              try:
+                  new_value = int(tokens[pos])
+                  pos += 1
+                  d.items.append(new_value)
+              except:
+                  raise RuntimeError("Parsing Offset(), expected integer, got " + tokens[pos])
+                  
+              expect_token(')', tokens[pos], 'ReplaceIndex()')
+              pos += 1
+
+          else:
+              raise RuntimeError("code error")
+
+      # 非正常的Descriptor, 需要 生成对应的别的Descriptor对象.
+      else:
+          # the last possible case is that 'first_token' is just an integer i,
+          # which can appear in things like Append(-3, 0, 3).
+          # See if the token is an integer.
+          # In this case, it's interpreted as the name of previous layer
+          # (with that time offset applied).
+          offset_t = int(first_token)
+
+          assert isinstance(prev_names, list)
+
+          d.operator = None
+          # the layer name is the name of the most recent layer.
+          d.items = [prev_names[-1]]
+          
+          if offset_t != 0:
+              inner_d = d
+              d = Descriptor()
+              d.operator = 'Offset'
+              d.items = [ inner_d, offset_t ]
+
+      return (d, pos)
+      
+
+
+
+
 
 
 **** other
@@ -500,7 +648,7 @@
     def __str__(self):
         return self.str()
         
-
+        
 **** class XconfigInputLayer(XconfigLayerBase):
      # /nwork/svn/ai/sr/kaldi/egs/aishell/s5/steps/libs/nnet3/xconfig/basic_layers.py
       def __init__(self, first_token, key_to_value, prev_names=None):
@@ -512,8 +660,8 @@
 
           
 **** class XconfigFixedAffineLayer(XconfigLayerBase):
-     # ---------------------- 构造一个FixedAffineLayer 对象 ------------------------
 
+     # ---------------------- 构造一个FixedAffineLayer 对象 ------------------------
      # first_token: first token on the xconfig line, e.g. 'affine-layer'.
      # key_to_value: dictionary with parameter values
      #     { 'name':'affine1',
@@ -559,122 +707,10 @@
 
 
 
-** others
-*** def parse_new_descriptor(tokens, pos, prev_names):
-     # Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0))
-     # [ 'Append', '(',  '-1', ',', '0', ',', '1','ReplaceINdex','(','ivector','t','0',')', ')']
-     # Des -- operator -----  Append
-     #        items -append-  Des  ----  operator - Offset
-     #                                   items   - Des --- operator - None       +  -1.
-     #                                                     items   - preLayer
-     #        items -append-  Des  ----  operator - Offset
-     #                                   items   - Des --- operator - None       +  0.
-     #                                                     items   - preLayer
-     #        items -append-  Des  ----  operator - Offset
-     #                                   items   - Des --- operator - None       + 1.
-     #                                                     items   - preLayer
-     #        items -append-  Des  ----  operator - ReplaceIndex
-     #                                   items   -append- 
-     size = len(tokens)
-     first_token = tokens[pos]
-
-     pos += 1
-     # 申请Descriptor 对象
-     d = Descriptor()
-
-     # 这个if判断是否是个正常的descriptor, 
-     if first_token in [ 'Offset', 'Round', 'ReplaceIndex', 'Append', 'Sum', 'Switch', 'Failover', 'IfDefined' ]:
-         # check
-         expect_token('(', tokens[pos], first_token + '()')
-         pos += 1
-
-         d.operator = first_token
-         (desc, pos) = parse_new_descriptor(tokens, pos, prev_names)
-         d.items = [desc]
-
-         # ------------------------
-         # if-else 根据不同的descriptor-str进行不同的Descriptor生成
-         if first_token == 'Offset':
-
-         elif first_token in [ 'Append', 'Sum', 'Switch', 'Failover', 'IfDefined' ]:
-             # 循环处理
-             while True:
-                 if tokens[pos] == ')':
-                     # check num-items is correct for some special cases.
-                     if first_token == 'Failover' and len(d.items) != 2:
-                         raise RuntimeError("Parsing Failover(), expected 2 items but got {0}".format(len(d.items)))
-                     if first_token == 'IfDefined' and len(d.items) != 1:
-                         raise RuntimeError("Parsing IfDefined(), expected 1 item but got {0}".format(len(d.items)))
-                     pos += 1
-                     break
-                 elif tokens[pos] == ',':
-                     pos += 1  # consume the comma.
-                 else:
-                     raise RuntimeError("Parsing Append(), expected ')' or ',', got " + tokens[pos])
-
-                  # ==================================
-                  # 循环构建内部的 offset-Descriptor.
-                 (desc, pos) = parse_new_descriptor(tokens, pos, prev_names)
-                 d.items.append(desc)
-
-         elif first_token == 'Round':
-
-         elif first_token == 'ReplaceIndex':
-             # 类似Assert .
-             expect_token(',', tokens[pos], 'ReplaceIndex()')
-             pos += 1
-
-             if tokens[pos] in [ 'x', 't' ]:
-                 d.items.append(tokens[pos])
-                 pos += 1
-             else:
-                 raise RuntimeError("Parsing ReplaceIndex(), expected 'x' or 't', got " +
-                                 tokens[pos])
-             expect_token(',', tokens[pos], 'ReplaceIndex()')
-             pos += 1
-             try:
-                 new_value = int(tokens[pos])
-                 pos += 1
-                 d.items.append(new_value)
-             except:
-                 raise RuntimeError("Parsing Offset(), expected integer, got " + tokens[pos])
-                 
-             expect_token(')', tokens[pos], 'ReplaceIndex()')
-             pos += 1
-
-         else:
-             raise RuntimeError("code error")
-
-     # 非正常的Descriptor, 需要 生成对应的别的Descriptor对象.
-     else:
-         # the last possible case is that 'first_token' is just an integer i,
-         # which can appear in things like Append(-3, 0, 3).
-         # See if the token is an integer.
-         # In this case, it's interpreted as the name of previous layer
-         # (with that time offset applied).
-         offset_t = int(first_token)
-
-         assert isinstance(prev_names, list)
-
-         d.operator = None
-         # the layer name is the name of the most recent layer.
-         d.items = [prev_names[-1]]
-         
-         if offset_t != 0:
-             inner_d = d
-             d = Descriptor()
-             d.operator = 'Offset'
-             d.items = [ inner_d, offset_t ]
-
-     return (d, pos)
-     
 
 
-
-
-
-** def write_config_files(config_dir, all_layers):
-   # 生成 真实使用的 conifg 文件 包含 component node 等等.
+** write_config_files(config_dir, all_layers):
+   # 生成 真实使用的 conifg 文件 包含 component node  写入到 init.config final.config等等. 
    # 
    # config_basename_to_lines is map from the basename of the
    # config, as a string (i.e. 'ref', 'all', 'init') to a list of
@@ -684,10 +720,14 @@
     config_basename_to_lines = defaultdict(list)
     config_basename_to_header = get_config_headers()
 
-    # 将所有layer 获取对应的配置config, config 内保存了每层layer的关键信息, 将对应init ref 等的都写入对应的string 中.
-    for layer in all_layers:
-        pairs = layer.get_full_config()
 
+
+    # 将所有layer 获取对应的配置config, config 内保存了每层layer的关键信息,
+    # 将对应init ref 等的都写入对应的string 中.
+    for layer in all_layers:
+        # ============== 获得带写入的文本格式, 以及对应应该存在的文件 init or final =============
+        pairs = layer.get_full_config()
+        
         for config_basename, line in pairs:
             config_basename_to_lines[config_basename].append(line)
 
@@ -773,7 +813,7 @@
         return ans
 
 
-** def check_model_contexts(config_dir, nnet_edits=None, existing_model=None):
+** check_model_contexts(config_dir, nnet_edits=None, existing_model=None):
    # nnet3-init 生成 init.raw.
     contexts = {}
     for file_name in ['init', 'ref']:

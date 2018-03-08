@@ -17,11 +17,8 @@
    1 一系列component, 没有固定顺序
    2 一个graph结构, 描述component的结构
 
-   nnet3 网络 是由 操作components + 一个基于nodes的描述计算流程的 ComputationGraph构成的.
-   Component 是各种函数.
-   ComputationGraph内部是由 节点Cindex - node构成的,node上描述了需要的component.
-   所以nnet网络本体由components + nodes 构成, 但是流程由ComputationGraph描述.
-   
+   Each node in that acyclic graph will be identified by the node in the neural network graph (i.e. the layer of the network) together with a number of additional indexes: time (t), an index (n) that indicates the example within the minibatch (e.g. 0 through 511 for a 512-example minibatch)
+
    graph 通过name 引用components.
    利用config-file 来描述一个 nnet3的 数据流图,
    Components + graph + inputs provided + outpu requested.
@@ -40,9 +37,27 @@
    
 
 *** Indexes (n, t, x)
-    Indexes 对应为 Matrix中的rows sample1 sample2 sample ... samplen
-    内部按 n t x进行排序,并且 t x都可以简略, 表示为如下
+    Indexes 对应为 Matrix中的rows 
+    实际就是对应为 训练样本中的各个sample1 sample2 sample ... samplen
+    eg:
+    1 对于简单 前馈神经网络, 不处理时间概念 Indexes描述一批训练样本就是
+    [ (0, 0, 0)  (1, 0, 0)  (2, 0, 0) ... ]
+    其中 t 保持不变,不具有时间性.
+    
+    2 如果 我们使用相同的 前馈神经网络 解码单独一句 utterance.Indexes就只会
+    在 t slot变化
+    [ (0, 0, 0)  (0, 1, 0)  (0, 2, 0) ... ]
+    这样来对应 Matrix中的rows ??? 没见到实际应用,难道对训练和解码过程Indexes
+    对应Matrix的方法不一样?
+
+    3 如果在一个具有时间上下文相关性的网络中, 对于靠前的layers中在训练中
+    需要 t 值变化, 我们可以会遇到多个 n t 都会变化的Indexes list.
+      [ (0, -1, 0)  (0, 0, 0)  (0, 1, 0) (1, -1, 0) (1, 0, 0) (1, 1, 0) ... ]
+    
+       
+    内部按 n t x进行排序, 并且 t x都可以简略, 当具有 vector<Indexes>, 表示为如下
     [ (0, -1:1) (1, -1:1) ... ]
+
 *** Cindex (node-index, (n, t, x))
     node-index 是nnet网络的node节点index. 
     Cindexes 对应计算图中的一个特定计算.
