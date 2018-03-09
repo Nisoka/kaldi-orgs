@@ -154,7 +154,7 @@ fi
 awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
     > $dir/valid_uttlist || exit 1;
 
-# 有效utt 经过 apply_map.pl sort uniq 
+# 验证用utt 经过 apply_map.pl sort uniq 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
   echo "File $data/utt2uniq exists, so augmenting valid_uttlist to"
   echo "include all perturbed versions of the same 'real' utterances."
@@ -175,7 +175,7 @@ fi
 
 
 # filter_scp  filter=utt2spk 将所有的valid_uttlist 去掉, 剩余的shuffle 乱序
-# 取300 作为 训练子集uttlist.
+# 取300 作为 train_subset_uttlist.
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
    utils/shuffle_list.pl | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
 
@@ -203,8 +203,10 @@ echo "$0: feature type is raw"
 
 # filter 过滤掉valid_uttlist中存在的utt 剩余的 作为feats
 feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp      | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
+
 # filter 过滤获得valid_uttlist 作为valid_feats
 valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp               | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+
 # filter 过滤获得train_subset_uttlist 作为train_subset_feats.
 train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
 
@@ -333,7 +335,7 @@ fi
 
 
 
-# 
+# false
 if [ -e $dir/storage ]; then
   # Make soft links to storage directories, if distributing this way..  See utils/create_split_dir.pl.
   echo "$0: creating data links"
@@ -346,7 +348,6 @@ fi
 
 
 # copy the alidir/ali.n.gz => dir(exp/nnet3/tdnn_sp/egs)ali.ark & ali.scp
-# but, why the dir has no ali.ark & ali.scp?? maybe deleted below.
 if [ $stage -le 2 ]; then
   echo "$0: copying data alignments"
   for id in $(seq $num_ali_jobs); do gunzip -c $alidir/ali.$id.gz; done | \
@@ -371,8 +372,6 @@ num_pdfs=$(tree-info --print-args=false $alidir/tree | grep num-pdfs | awk '{pri
 
 
 if [ $stage -le 3 ]; then
-
-
   # 1:
   # get validation and training subset examples .
   echo "$0: Getting validation and training subset examples."

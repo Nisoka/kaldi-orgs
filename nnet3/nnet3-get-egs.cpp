@@ -1,5 +1,18 @@
 
 
+
+// nnet3-get-egs
+//     --num-pdfs=2943
+//     --frame-subsampling-factor=1
+//     --online-ivectors=scp:exp/nnet3/ivectors_train_sp/ivector_online.scp
+//     --online-ivector-period=10 --left-context=16 --right-context=12 --compress=true --num-frames=8
+
+    
+//     'ark,s,cs:utils/filter_scp.pl exp/nnet3/tdnn_sp/egs/valid_uttlist data/train_sp_hires/feats.scp | apply-cmvn --norm-means=false --norm-vars=false --utt2spk=ark:data/train_sp_hires/utt2spk scp:data/train_sp_hires/cmvn.scp scp:- ark:- |'
+
+//     ark,s,cs:- ark:exp/nnet3/tdnn_sp/egs/valid_all.egs
+
+
 void nnet3_get_egs()
 {
   // egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress --num-frames=$frames_per_eg"
@@ -26,7 +39,7 @@ void nnet3_get_egs()
   //     "\"ark:gunzip -c exp/nnet/ali.1.gz | ali-to-pdf exp/nnet/1.nnet ark:- ark:- | ali-to-post ark:- ark:- |\" \\\n"
   //     "   ark:- \n"
 
-
+  
 
   int nnet3_get_egs_______(int argc, char *argv[]) {
 
@@ -68,7 +81,7 @@ void nnet3_get_egs()
     // ==================== 获得UtteranceSpliter的配置文件 =========
     // ------------- 在这里 num_frames_str = 8
     // ------------- 结果 num_frames 就是一个元素的数组 8
-    // ------------------------------ 并且后面 获得对utterance 的划分**最主要**的数字就是 primary_length = 8---
+    // ------------- 并且后面 获得对utterance 的划分**最主要**的数字就是 primary_length = 8---
     eg_config.ComputeDerived();
     void ExampleGenerationConfig::ComputeDerived() {
       // split the num_frames_str to array.
@@ -114,6 +127,133 @@ void nnet3_get_egs()
     // ============================ 划分工具 UtteranceSplitter ================
     // 利用这个对utterance 进行划分.
     UtteranceSplitter utt_splitter(eg_config);
+    UtteranceSplitter::UtteranceSplitter(const ExampleGenerationConfig &config):
+        config_(config),
+        total_num_utterances_(0), total_input_frames_(0),
+        total_frames_overlap_(0), total_num_chunks_(0),
+        total_frames_in_chunks_(0) {
+      if (config.num_frames.empty()) {
+        KALDI_ERR << "You need to call ComputeDerived() on the "
+            "ExampleGenerationConfig().";
+      }
+      
+      InitSplitForLength();
+      void UtteranceSplitter::InitSplitForLength() {
+        // 计算 得到 24  干嘛用的???
+        int32 max_utterance_length = MaxUtteranceLength();
+
+        // The 'splits' vector is a list of possible splits
+        // (a split being a sorted vector of chunk-sizes).
+        // The vector 'splits' is itself sorted.
+
+        // splits 中的每个split 都是一个排序好的 chunk-size list. 
+        std::vector<std::vector<int32> > splits;
+        
+        InitSplits(&splits);
+
+
+        // Define a split-index 0 <= s < splits.size() as index into the 'splits'
+        // vector, and let a cost c >= 0 represent the mismatch between an
+        // utterance length and the total length of the chunk sizes in a split:
+
+        //  c(default_duration, utt_length) = (default_duration > utt_length ?
+        //                                    default_duration - utt_length :
+        //                                    2.0 * (utt_length - default_duration))
+        // [but as a special case, set c to infinity if the largest chunk size in the
+        //  split is longer than the utterance length; we couldn't, in that case, use
+        //  this split for this utterance].
+
+        // 'costs_for_length[u][s]', indexed by utterance-length u and then split,
+        // contains the cost for utterance-length u and split s.
+
+        std::vector<std::vector<float> > costs_for_length(
+            max_utterance_length + 1);
+        int32 num_splits = splits.size();
+
+        for (int32 u = 0; u <= max_utterance_length; u++)
+          costs_for_length[u].reserve(num_splits);
+
+        for (int32 s = 0; s < num_splits; s++) {
+          const std::vector<int32> &split = splits[s];
+          float default_duration = DefaultDurationOfSplit(split);
+          int32 max_chunk_size = *std::max_element(split.begin(), split.end());
+          for (int32 u = 0; u <= max_utterance_length; u++) {
+            // c is the cost for this utterance length and this split.  We penalize
+            // gaps twice as strongly as overlaps, based on the intuition that
+            // completely throwing out frames of data is worse than counting them
+            // twice.
+            float c = (default_duration > float(u) ? default_duration - float(u) :
+                       2.0 * (u - default_duration));
+            if (u < max_chunk_size)  // can't fit the largest of the chunks in this
+              // utterance
+              c = std::numeric_limits<float>::max();
+            KALDI_ASSERT(c >= 0);
+            costs_for_length[u].push_back(c);
+          }
+        }
+
+
+        splits_for_length_.resize(max_utterance_length + 1);
+
+        for (int32 u = 0; u <= max_utterance_length; u++) {
+          const std::vector<float> &costs = costs_for_length[u];
+          float min_cost = *std::min_element(costs.begin(), costs.end());
+          if (min_cost == std::numeric_limits<float>::max()) {
+            // All costs were infinity, becaues this utterance-length u is shorter
+            // than the smallest chunk-size.  Leave splits_for_length_[u] as empty
+            // for this utterance-length, meaning we will not be able to choose any
+            // split, and such utterances will be discarded.
+            continue;
+          }
+          float cost_threshold = 1.9999; // We will choose pseudo-randomly from splits
+          // that are within this distance from the
+          // best cost.  Make the threshold just
+          // slightly less than 2...  this will
+          // hopefully make the behavior more
+          // deterministic for ties.
+          std::vector<int32> possible_splits;
+          std::vector<float>::const_iterator iter = costs.begin(), end = costs.end();
+          int32 s = 0;
+          for (; iter != end; ++iter,++s)
+            if (*iter < min_cost + cost_threshold)
+              splits_for_length_[u].push_back(splits[s]);
+        }
+
+        if (GetVerboseLevel() >= 3) {
+          std::ostringstream os;
+          for (int32 u = 0; u <= max_utterance_length; u++) {
+            if (!splits_for_length_[u].empty()) {
+              os << u << "=(";
+              std::vector<std::vector<int32 > >::const_iterator
+                  iter1 = splits_for_length_[u].begin(),
+                  end1 = splits_for_length_[u].end();
+
+              while (iter1 != end1) {
+                std::vector<int32>::const_iterator iter2 = iter1->begin(),
+                    end2 = iter1->end();
+                while (iter2 != end2) {
+                  os << *iter2;
+                  ++iter2;
+                  if (iter2 != end2) os << ",";
+                }
+                ++iter1;
+                if (iter1 != end1) os << "/";
+              }
+              os << ")";
+              if (u < max_utterance_length) os << ", ";
+            }
+          }
+          KALDI_VLOG(3) << "Utterance-length-to-splits map is: " << os.str();
+        }
+      }
+
+    }
+
+
+
+    
+
+    
 
     std::string
         feature_rspecifier = po.GetArg(1),              // online-ivectors - exp/nnet3/ivectors_train_sp
