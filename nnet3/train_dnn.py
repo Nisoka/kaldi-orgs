@@ -210,6 +210,7 @@ def train(args, run_opts):
 
 
     # =============== 上面生成了 egs 这里 对egs 进行验证Verify
+    # =============== 读取 exp/nnet3/tdnn_sp/egs/info下的一些参数文件.
     [egs_left_context, egs_right_context, frames_per_eg_str, num_archives]
              = ( common_train_lib.verify_egs_dir(egs_dir, feat_dim,
                                                  ivector_dim, ivector_id,
@@ -277,6 +278,7 @@ def train(args, run_opts):
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
 
+    # ====================== training !!! =====================
     for iter in range(num_iters):
         if (args.exit_stage is not None) and (iter == args.exit_stage):
             logger.info("Exiting early due to --exit-stage {0}".format(iter))
@@ -326,16 +328,6 @@ def train(args, run_opts):
                     args.dir, iter-2, num_iters, models_to_combine,
                     args.preserve_model_interval)
 
-            if args.email is not None:
-                reporting_iter_interval = num_iters * args.reporting_interval
-                if iter % reporting_iter_interval == 0:
-                    # lets do some reporting
-                    [report, times, data] = (
-                        nnet3_log_parse.generate_acc_logprob_report(args.dir))
-                    message = report
-                    subject = ("Update : Expt {dir} : "
-                               "Iter {iter}".format(dir=args.dir, iter=iter))
-                    common_lib.send_mail(message, subject, args.email)
 
         num_archives_processed = num_archives_processed + current_num_jobs
 

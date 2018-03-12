@@ -207,7 +207,8 @@
    Compilation 将Nnet和ComputationRequest作为输入, 输出一个NnetComputation.
 
    NnetComputation 就是一个完整的计算. 是一个过程结构.
-   ComputationRequest 包含 作为目标输出的indexes 和 可用的作为输入的indexes.
+   ComputationRequest 包含 作为目标输出的indexes 和 可用的作为输入的indexes. 
+
 
 
 ** Creating the computation graph
@@ -289,7 +290,7 @@
      2 computable_queue_ 对Cindexes 需要重新评价是否是computable 通过更新他们的ComputableInfo 如果一个Cindex的ComputableInfo更新了
      那么需要递归向上检查依赖他们的Cindex是否需要更新. 就通过将对应的Cindex -> computable_queue_
      
-**** Interface of ComputationGraphBuilder     
+**** Interface of ComputationGraphBuilder
      几个接口函数
 
      void Compute()  执行初始化 计算computation
@@ -333,7 +334,7 @@
     例如假设有一个循环层, 并后面立刻接一个前向层,循环层会被分割为很多steps
     因为这里是有time index, 但是上面的算法会分割全连接层的计算为很多steps 因为
     这些Cindexes????
-
+    
 *** creating the sequence of steps  (actual algorithm)
     为了处理RNN这样的结构 并且不希望产生过多的计算steps..
     ??????
@@ -463,6 +464,7 @@ class Compiler {
      所有的steps 除了KDimRange 都需要value Matrix
      kDescriptor类型的steps 对value 和 derivative 会具有不同parts submatrix .
      每个part 对应一个submatrix.
+
 **** The input locations list
      对Descriptor的每个part. 调用ComputeInputLocationsList().
      this_info.input_locations_list[p] (p is the part index), is of type std::vector<std::vector<std::pair<int32, int32> > >
@@ -499,7 +501,7 @@ class Compiler {
     AllocateMatrices(computation);
     向computation中增加command, 为了申请和归零所有Computation的matrices成员, 会使用kAllocateMatriZeroed command
     参数为 对应matrix的index.
-
+    
 *** The forward computatio Command!!
     前向计算命令的建立
     AddCommands(deriv_needed, computation)
@@ -594,7 +596,7 @@ void Compiler::DoForwardComputationSumDescriptor(
      computation->commands.push_back(
          NnetComputation::Command(NnetComputation::kNoOperationMarker));
      执行代码 会检测 这个marker, 以便知道何时computation的前向计算完成, 准备开始反向传播部分.
-
+     
 *** The backward computation
     ......... kaldi
 
@@ -620,29 +622,3 @@ void Compiler::DoForwardComputationSumDescriptor(
 
 
 
-* Classes
-
-** NetWorkNode
-   
-*** introduce
-    NetworkNode 用来表示四种东西
-
-    input            
-      主要信息就是 输入数据维度
-    Component        
-      放射变换 sigmoid函数等
-    Descriptor
-      一个基本的表达式 - 将多个Component或者input的输出连接起来
-      shifting 时间index
-
-    Component必须以Descriptor作为输入. 而且必须输出到一个Descriptor.
-    
-    实际应用中 
-    kInput kComponent 都可以作为输入提交.
-    那么这时候 node 的 node_type 是怎么个定义呢?
-    
-    
-    
-    
-   
-  

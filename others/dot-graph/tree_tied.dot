@@ -1,5 +1,5 @@
 digraph TreeTied{
-        node[shapre=Mrecord, width=.1, height=.1]
+        node[shape=Mrecord, width=.1, height=.1]
 
         SE0 -> {SE1, SE2}
         SE1 -> {SE3, SE4}
