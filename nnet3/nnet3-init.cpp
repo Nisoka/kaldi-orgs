@@ -24,13 +24,20 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Initialize nnet3 neural network from a config file; -------- > outputs 'raw' nnet\n"
         "without associated information such as transition model and priors.\n"
+
         "Search for examples in scripts in /egs/wsj/s5/steps/nnet3/\n"
+
+        // 也可以用来向已经存在的model模型增加layers.
         "Can also be used to add layers to existing model (provide existing model\n"
         "as 1st arg)\n"
         "\n"
+        
+        // ========================== usage ================================
         "Usage:  nnet3-init [options] [<existing-model-in>] <config-in> <raw-nnet-out>\n"
+
         "e.g.:\n"
         " nnet3-init nnet.config 0.raw\n"
+        
         "or: nnet3-init 1.raw nnet.config 2.raw\n"
         "See also: nnet3-copy, nnet3-info\n";
 

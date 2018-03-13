@@ -1,0 +1,248 @@
+
+# ================ after run_common_ivector
+local/nnet3/run_tdnn.sh: creating neural net configs
+tree-info exp/tri5a_sp_ali/tree 
+steps/nnet3/xconfig_to_configs.py --xconfig-file exp/nnet3/tdnn_sp/configs/network.xconfig --config-dir exp/nnet3/tdnn_sp/configs/
+nnet3-init exp/nnet3/tdnn_sp/configs//init.config exp/nnet3/tdnn_sp/configs//init.raw 
+LOG (nnet3-init[5.3]:main():nnet3-init.cc:80) Initialized raw neural net and wrote it to exp/nnet3/tdnn_sp/configs//init.raw
+nnet3-info exp/nnet3/tdnn_sp/configs//init.raw 
+nnet3-init exp/nnet3/tdnn_sp/configs//ref.config exp/nnet3/tdnn_sp/configs//ref.raw 
+LOG (nnet3-init[5.3]:main():nnet3-init.cc:80) Initialized raw neural net and wrote it to exp/nnet3/tdnn_sp/configs//ref.raw
+nnet3-info exp/nnet3/tdnn_sp/configs//ref.raw 
+nnet3-init exp/nnet3/tdnn_sp/configs//ref.config exp/nnet3/tdnn_sp/configs//ref.raw 
+LOG (nnet3-init[5.3]:main():nnet3-init.cc:80) Initialized raw neural net and wrote it to exp/nnet3/tdnn_sp/configs//ref.raw
+nnet3-info exp/nnet3/tdnn_sp/configs//ref.raw
+# ================ before train_tdnn.py
+
+# ================ in train_tdnn.py  
+2018-03-13 10:39:27,533 [steps/nnet3/train_dnn.py:35 - <module> - INFO ] Starting DNN trainer (train_dnn.py)
+steps/nnet3/train_dnn.py --stage=-10 --cmd=run.pl --feat.online-ivector-dir exp/nnet3/ivectors_train_sp --feat.cmvn-opts=--norm-means=false --norm-vars=false --trainer.num-epochs 4 --trainer.optimization.num-jobs-initial 2 --trainer.optimization.num-jobs-final 12 --trainer.optimization.initial-effective-lrate 0.0015 --trainer.optimization.final-effective-lrate 0.00015 --egs.dir  --cleanup.remove-egs true --cleanup.preserve-model-interval 500 --use-gpu true --feat-dir=data/train_sp_hires --ali-dir exp/tri5a_sp_ali --lang data/lang --reporting.email= --dir=exp/nnet3/tdnn_sp
+['steps/nnet3/train_dnn.py', '--stage=-10', '--cmd=run.pl', '--feat.online-ivector-dir', 'exp/nnet3/ivectors_train_sp', '--feat.cmvn-opts=--norm-means=false --norm-vars=false', '--trainer.num-epochs', '4', '--trainer.optimization.num-jobs-initial', '2', '--trainer.optimization.num-jobs-final', '12', '--trainer.optimization.initial-effective-lrate', '0.0015', '--trainer.optimization.final-effective-lrate', '0.00015', '--egs.dir', '', '--cleanup.remove-egs', 'true', '--cleanup.preserve-model-interval', '500', '--use-gpu', 'true', '--feat-dir=data/train_sp_hires', '--ali-dir', 'exp/tri5a_sp_ali', '--lang', 'data/lang', '--reporting.email=', '--dir=exp/nnet3/tdnn_sp']
+2018-03-13 10:39:27,545 [steps/nnet3/train_dnn.py:163 - train - INFO ] Arguments for the experiment
+{'ali_dir': 'exp/tri5a_sp_ali',
+ 'backstitch_training_interval': 1,
+ 'backstitch_training_scale': 0.0,
+ 'cleanup': True,
+ 'cmvn_opts': '--norm-means=false --norm-vars=false',
+ 'combine_sum_to_one_penalty': 0.0,
+ 'command': 'run.pl',
+ 'compute_per_dim_accuracy': False,
+ 'dir': 'exp/nnet3/tdnn_sp',
+ 'do_final_combination': True,
+ 'dropout_schedule': None,
+ 'egs_command': None,
+ 'egs_dir': None,
+ 'egs_opts': None,
+ 'egs_stage': 0,
+ 'email': None,
+ 'exit_stage': None,
+ 'feat_dir': 'data/train_sp_hires',
+ 'final_effective_lrate': 0.00015,
+ 'frames_per_eg': 8,
+ 'initial_effective_lrate': 0.0015,
+ 'lang': 'data/lang',
+ 'max_lda_jobs': 10,
+ 'max_models_combine': 20,
+ 'max_param_change': 2.0,
+ 'minibatch_size': '512',
+ 'momentum': 0.0,
+ 'num_epochs': 4.0,
+ 'num_jobs_compute_prior': 10,
+ 'num_jobs_final': 12,
+ 'num_jobs_initial': 2,
+ 'online_ivector_dir': 'exp/nnet3/ivectors_train_sp',
+ 'preserve_model_interval': 500,
+ 'presoftmax_prior_scale_power': -0.25,
+ 'prior_subset_size': 20000,
+ 'proportional_shrink': 0.0,
+ 'rand_prune': 4.0,
+ 'remove_egs': True,
+ 'reporting_interval': 0.1,
+ 'samples_per_iter': 400000,
+ 'shuffle_buffer_size': 5000,
+ 'srand': 0,
+ 'stage': -10,
+ 'transform_dir': 'exp/tri5a_sp_ali',
+ 'use_gpu': True}
+2018-03-13 10:39:27,668 [steps/nnet3/train_dnn.py:203 - train - INFO ] Initializing a basic network for estimating preconditioning matrix
+steps/nnet3/decode.sh --nj 40 --cmd run.pl --online-ivector-dir exp/nnet3/ivectors_dev exp/tri5a/graph data/dev_hires exp/nnet3/tdnn_sp/decode_dev
+steps/nnet2/check_ivectors_compatible.sh: WARNING: One of the directories do not contain iVector ID.
+steps/nnet2/check_ivectors_compatible.sh: WARNING: That means it's you who's reponsible for keeping 
+steps/nnet2/check_ivectors_compatible.sh: WARNING: the directories compatible
+steps/nnet3/decode.sh: no such file exp/nnet3/tdnn_sp/final.mdl
+
+# ==================== before generate_egs 
+
+
+2018-03-13 10:45:57,491 [steps/nnet3/train_dnn.py:216 - train - INFO ] Generating egs
+steps/nnet3/get_egs.sh --cmd run.pl --cmvn-opts --norm-means=false --norm-vars=false --transform-dir exp/tri5a_sp_ali --online-ivector-dir exp/nnet3/ivectors_train_sp --left-context 16 --right-context 12 --left-context-initial -1 --right-context-final -1 --stage 0 --samples-per-iter 400000 --frames-per-eg 8 --srand 0 data/train_sp_hires exp/tri5a_sp_ali exp/nnet3/tdnn_sp/egs
+File data/train_sp_hires/utt2uniq exists, so augmenting valid_uttlist to
+include all perturbed versions of the same 'real' utterances.
+steps/nnet3/get_egs.sh: feature type is raw
+feat-to-dim scp:exp/nnet3/ivectors_train_sp/ivector_online.scp - 
+steps/nnet3/get_egs.sh: working out number of frames of training data
+steps/nnet3/get_egs.sh: working out feature dim
+steps/nnet3/get_egs.sh: creating 52 archives, each with 394272 egs, with
+steps/nnet3/get_egs.sh:   8 labels per example, and (left,right) context = (16,12)
+steps/nnet3/get_egs.sh: copying data alignments
+copy-int-vector ark:- ark,scp:exp/nnet3/tdnn_sp/egs/ali.ark,exp/nnet3/tdnn_sp/egs/ali.scp 
+LOG (copy-int-vector[5.3]:main():copy-int-vector.cc:83) Copied 360292 vectors of int32.
+steps/nnet3/get_egs.sh: Getting validation and training subset examples.
+steps/nnet3/get_egs.sh: ... extracting validation and training-subset alignments.
+... Getting subsets of validation examples for diagnostics and combination.
+steps/nnet3/get_egs.sh: Generating training examples on disk
+steps/nnet3/get_egs.sh: recombining and shuffling order of archives on disk
+steps/nnet3/get_egs.sh: removing temporary archives
+steps/nnet3/get_egs.sh: removing temporary alignments and transforms
+steps/nnet3/get_egs.sh: Finished preparing training examples
+
+# =============== before  common_train_lib.copy_egs_properties_to_exp_dir
+
+2018-03-13 11:57:08,298 [steps/nnet3/train_dnn.py:262 - train - INFO ] Computing the preconditioning matrix for input features
+2018-03-13 11:58:55,007 [steps/nnet3/train_dnn.py:273 - train - INFO ] Computing initial vector for FixedScaleComponent before softmax, using priors^-0.25 and rescaling to average 1
+2018-03-13 11:59:04,057 [steps/nnet3/train_dnn.py:280 - train - INFO ] Preparing the initial acoustic model.
+2018-03-13 11:59:18,620 [steps/nnet3/train_dnn.py:307 - train - INFO ] Training will run for 4.0 epochs = 237 iterations
+
+# =============== before training ----  for iter in range(num_iters):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+> cd exp/nnet3/tdnn_sp
+> nnet3-info init.raw
+nnet3-info init.raw 
+left-context: 2
+right-context: 2
+num-parameters: 0
+modulus: 1
+input-node name=ivector dim=100
+input-node name=input dim=43
+output-node name=output input=Append(Offset(input, -2), Offset(input, -1), input, Offset(input, 1), Offset(input, 2), ReplaceIndex(ivector, t, 0)) dim=315 objective=linear
+
+> nnet3-info 0.raw
+nnet3-info 0.raw 
+left-context: 16
+right-context: 12
+num-parameters: 12169843
+modulus: 1
+input-node name=ivector dim=100
+input-node name=input dim=43
+component-node name=lda component=lda input=Append(Offset(input, -2), Offset(input, -1), input, Offset(input, 1), Offset(input, 2), ReplaceIndex(ivector, t, 0)) input-dim=315 output-dim=315
+component-node name=tdnn1.affine component=tdnn1.affine input=lda input-dim=315 output-dim=850
+component-node name=tdnn1.relu component=tdnn1.relu input=tdnn1.affine input-dim=850 output-dim=850
+component-node name=tdnn1.batchnorm component=tdnn1.batchnorm input=tdnn1.relu input-dim=850 output-dim=850
+component-node name=tdnn2.affine component=tdnn2.affine input=Append(Offset(tdnn1.batchnorm, -1), tdnn1.batchnorm, Offset(tdnn1.batchnorm, 2)) input-dim=2550 output-dim=850
+component-node name=tdnn2.relu component=tdnn2.relu input=tdnn2.affine input-dim=850 output-dim=850
+component-node name=tdnn2.batchnorm component=tdnn2.batchnorm input=tdnn2.relu input-dim=850 output-dim=850
+component-node name=tdnn3.affine component=tdnn3.affine input=Append(Offset(tdnn2.batchnorm, -3), tdnn2.batchnorm, Offset(tdnn2.batchnorm, 3)) input-dim=2550 output-dim=850
+component-node name=tdnn3.relu component=tdnn3.relu input=tdnn3.affine input-dim=850 output-dim=850
+component-node name=tdnn3.batchnorm component=tdnn3.batchnorm input=tdnn3.relu input-dim=850 output-dim=850
+component-node name=tdnn4.affine component=tdnn4.affine input=Append(Offset(tdnn3.batchnorm, -7), tdnn3.batchnorm, Offset(tdnn3.batchnorm, 2)) input-dim=2550 output-dim=850
+component-node name=tdnn4.relu component=tdnn4.relu input=tdnn4.affine input-dim=850 output-dim=850
+component-node name=tdnn4.batchnorm component=tdnn4.batchnorm input=tdnn4.relu input-dim=850 output-dim=850
+component-node name=tdnn5.affine component=tdnn5.affine input=Append(Offset(tdnn4.batchnorm, -3), tdnn4.batchnorm, Offset(tdnn4.batchnorm, 3)) input-dim=2550 output-dim=850
+component-node name=tdnn5.relu component=tdnn5.relu input=tdnn5.affine input-dim=850 output-dim=850
+component-node name=tdnn5.batchnorm component=tdnn5.batchnorm input=tdnn5.relu input-dim=850 output-dim=850
+component-node name=tdnn6.affine component=tdnn6.affine input=tdnn5.batchnorm input-dim=850 output-dim=850
+component-node name=tdnn6.relu component=tdnn6.relu input=tdnn6.affine input-dim=850 output-dim=850
+component-node name=tdnn6.batchnorm component=tdnn6.batchnorm input=tdnn6.relu input-dim=850 output-dim=850
+component-node name=output.affine component=output.affine input=tdnn6.batchnorm input-dim=850 output-dim=2943
+component-node name=output.log-softmax component=output.log-softmax input=output.affine input-dim=2943 output-dim=2943
+output-node name=output input=output.log-softmax dim=2943 objective=linear
+component name=lda type=FixedAffineComponent, input-dim=315, output-dim=315, linear-params-rms=0.03326, bias-{mean,stddev}=-0.003776,0.5721
+component name=tdnn1.affine type=NaturalGradientAffineComponent, input-dim=315, output-dim=850, learning-rate=0.001, max-change=0.75, linear-params-rms=0.05625, bias-{mean,stddev}=0.03458,1.023, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=tdnn1.relu type=RectifiedLinearComponent, dim=850, self-repair-scale=1e-05
+component name=tdnn1.batchnorm type=BatchNormComponent, dim=850, block-dim=850, epsilon=0.001, target-rms=1, count=0, test-mode=false
+component name=tdnn2.affine type=NaturalGradientAffineComponent, input-dim=2550, output-dim=850, learning-rate=0.001, max-change=0.75, linear-params-rms=0.01979, bias-{mean,stddev}=0.01765,1.043, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=tdnn2.relu type=RectifiedLinearComponent, dim=850, self-repair-scale=1e-05
+component name=tdnn2.batchnorm type=BatchNormComponent, dim=850, block-dim=850, epsilon=0.001, target-rms=1, count=0, test-mode=false
+component name=tdnn3.affine type=NaturalGradientAffineComponent, input-dim=2550, output-dim=850, learning-rate=0.001, max-change=0.75, linear-params-rms=0.0198, bias-{mean,stddev}=0.02912,1.001, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=tdnn3.relu type=RectifiedLinearComponent, dim=850, self-repair-scale=1e-05
+component name=tdnn3.batchnorm type=BatchNormComponent, dim=850, block-dim=850, epsilon=0.001, target-rms=1, count=0, test-mode=false
+component name=tdnn4.affine type=NaturalGradientAffineComponent, input-dim=2550, output-dim=850, learning-rate=0.001, max-change=0.75, linear-params-rms=0.01979, bias-{mean,stddev}=0.01645,1.006, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=tdnn4.relu type=RectifiedLinearComponent, dim=850, self-repair-scale=1e-05
+component name=tdnn4.batchnorm type=BatchNormComponent, dim=850, block-dim=850, epsilon=0.001, target-rms=1, count=0, test-mode=false
+component name=tdnn5.affine type=NaturalGradientAffineComponent, input-dim=2550, output-dim=850, learning-rate=0.001, max-change=0.75, linear-params-rms=0.01979, bias-{mean,stddev}=0.01515,1.008, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=tdnn5.relu type=RectifiedLinearComponent, dim=850, self-repair-scale=1e-05
+component name=tdnn5.batchnorm type=BatchNormComponent, dim=850, block-dim=850, epsilon=0.001, target-rms=1, count=0, test-mode=false
+component name=tdnn6.affine type=NaturalGradientAffineComponent, input-dim=850, output-dim=850, learning-rate=0.001, max-change=0.75, linear-params-rms=0.03428, bias-{mean,stddev}=0.0496,1.004, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=tdnn6.relu type=RectifiedLinearComponent, dim=850, self-repair-scale=1e-05
+component name=tdnn6.batchnorm type=BatchNormComponent, dim=850, block-dim=850, epsilon=0.001, target-rms=1, count=0, test-mode=false
+component name=output.affine type=NaturalGradientAffineComponent, input-dim=850, output-dim=2943, learning-rate=0.001, max-change=1.5, linear-params-rms=0, bias-{mean,stddev}=0,0, rank-in=20, rank-out=80, num-samples-history=2000, update-period=4, alpha=4
+component name=output.log-softmax type=LogSoftmaxComponent, dim=2943
+
+
+
+
+
+=========

@@ -59,11 +59,31 @@ graph_dir=$gmm_dir/graph
 
 
 
-# ====================== 1 在训练样本MFCC上增加扰动 得到 sp 数据 ==> data/train_sp_hires 
-# ====================== 2 在train_sp_hires 进行    decode align ==> exp/tri5a_sp_ali
-# ====================== 3 训练 UBM extractor, 对sp 数据提取ivector特征 ==> exp/nnet3/ivectors_train_sp 
-# 得到是100维的ivector特征 -- exp/nnet3/ivectors_train_sp.
+# ====================== 1 在训练样本MFCC上增加扰动 得到 sp 数据                     ==> data/train_sp_hires 
+# ====================== 2 在train_sp_hires 进行    decode align                     ==> exp/tri5a_sp_ali
+# ====================== 3 训练 UBM extractor, 对sp 数据提取100-dim ivector特征      ==> exp/nnet3/ivectors_train_sp
+
+# data/train_sp   扰动数据(data/train --> data/train_sp)
+# mfcc_perturbed  扰动数据特征(data/train_sp --> mfcc_perturbed   (exp/make_mfcc/train_sp is the log))
+#                 run.sh 相同目录下 
+# exp/tri5a_sp_ali 扰动数据对齐结果 (mfcc_perturbed --> exp/tri5a_sp_ali)
+# data/train_sp_hires   高分辨率数据 (data/train_sp --> data/train_sp_hires)
+# mfcc_perturbed_hires  高分辨率特征 (data/train_sp_hires --> mfcc_perturbed_hires)
+# data/train_sp_hires_nopitch   get the nopitch hires mfcc-perturbed-feature to extra the ivectors
+# exp/nnet3/diag_ubm
+# exp/nnet3/pca_transform
+# exp/nnet3/extractor
+# exp/nnet3/ivectors_train_sp/train_sp_hires_nopitch_max2
+#                                修改spkerinfo, 每个spk 最多两个utterance. ???
+#                                (data/train_sp_hires_nopitch --> exp/nnet3/ivectors_train_sp/train_sp_hires_nopitch_max2)
+# exp/nnet3/ivectors_train  提取ivector特征 (exp/nnet3/ivectors_train_sp/train_sp_hires_nopitch_max2 --> exp/nnet3/ivectors_train)
+# exp/nnet3/ivectors_test dev.
+
 local/nnet3/run_ivector_common.sh --stage $stage || exit 1;
+
+
+
+
 
 if [ $stage -le 7 ]; then
   echo "$0: creating neural net configs";
@@ -98,16 +118,30 @@ if [ $stage -le 7 ]; then
   output-layer name=output input=tdnn6 dim=$num_targets max-change=1.5
 EOF
 
-  
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
-  
 fi
 
+# tdnn_sp/                                                                                                                  
+# └── configs                                                                                                               
+#     ├── final.config                                                                                                      
+#     ├── init.config                                                                                                       
+#     ├── init.raw                                                                                                          
+#     ├── network.xconfig                                                                                                   
+#     ├── ref.config
+#     ├── ref.raw
+#     ├── vars
+#     ├── xconfig
+#     ├── xconfig.expanded.1
+#     └── xconfig.expanded.2
+
+
+
+
 if [ $stage -le 8 ]; then
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
-    utils/create_split_dir.pl \
-     /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aishell-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
-  fi
+  # if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
+  #   utils/create_split_dir.pl \
+  #    /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aishell-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+  # fi
 
   steps/nnet3/train_dnn.py --stage=$train_stage \
     --cmd="$decode_cmd" \
@@ -128,6 +162,29 @@ if [ $stage -le 8 ]; then
     --reporting.email="$reporting_email" \
     --dir=$dir  || exit 1;
 fi
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# debug: liujunnan
+echo "over the training train_tdnn.py"
+exit 0;
+
+
+
+
 
 if [ $stage -le 9 ]; then
   # this version of the decoding treats each utterance separately

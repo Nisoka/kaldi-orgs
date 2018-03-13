@@ -76,7 +76,7 @@
 #   --trainer.optimization.initial-effective-lrate $initial_effective_lrate \
 #   --trainer.optimization.final-effective-lrate $final_effective_lrate \
 
-#   --egs.dir "$common_egs_dir" \                          # ""
+#   --egs.dir "$common_egs_dir" \                          # " "
 #   --cleanup.remove-egs $remove_egs \                     # true
 #   --cleanup.preserve-model-interval 500 \
 #   --use-gpu true \
@@ -163,17 +163,41 @@ def train(args, run_opts):
 
 
     # 初始化 原始nnet结构, 在训练 LDA预处理矩阵之前
-    # 第一个配置 只做了哪些初始化拼接操作
-    # 这样做,是因为这样很方变能够获得LDA变换矩阵的统计信息.
+    # 第一个配置 只做了一些初始化拼接操作
+    # 这样做,是因为这样很方变能够获得LDA变换矩阵的统计信息.??????
     if (args.stage <= -5) and os.path.exists(args.dir+"/configs/init.config"):
         logger.info("Initializing a basic network for estimating preconditioning matrix")
-        
+        # nnet3-init 利用 exp/nnet3/tdnn_sp/configs/init.config ===> exp/nnet3/tdnn_sp/init.raw.
         common_lib.execute_command(
             """{command} {dir}/log/nnet_init.log \
                     nnet3-init --srand=-2 {dir}/configs/init.config \
                     {dir}/init.raw""".format(command=run_opts.command,
                                              dir=args.dir))
 
+
+# 1038| tdnn_sp/
+# 1039| ├── configs
+# 1040| │   ├── final.config
+# 1041| │   ├── init.config
+# 1042| │   ├── init.raw
+# 1043| │   ├── network.xconfig
+# 1044| │   ├── ref.config
+# 1045| │   ├── ref.raw
+# 1046| │   ├── vars
+# 1047| │   ├── xconfig
+# 1048| │   ├── xconfig.expanded.1
+# 1049| │   └── xconfig.expanded.2
+# 1050| ├── init.raw
+# 1051| ├── log
+# 1052| │   └── nnet_init.log
+# 1053| ├── num_jobs
+# 1054| └── tree 
+
+
+
+
+
+        
     # ================== 生成TDNN训练样本 egs 的过程 ==============
     # ------------ 每个egs 是一段frames, 是一个 chunk, 具有上下文frames,
     # ------------ 并可以加上 ivector特征.
@@ -211,6 +235,7 @@ def train(args, run_opts):
 
     # =============== 上面生成了 egs 这里 对egs 进行验证Verify
     # =============== 读取 exp/nnet3/tdnn_sp/egs/info下的一些参数文件.
+    # 16, 12, 8, 52
     [egs_left_context, egs_right_context, frames_per_eg_str, num_archives]
              = ( common_train_lib.verify_egs_dir(egs_dir, feat_dim,
                                                  ivector_dim, ivector_id,
@@ -220,18 +245,96 @@ def train(args, run_opts):
 
 
 
-
-
-    
-
     if args.num_jobs_final > num_archives:
         raise Exception('num_jobs_final cannot exceed the number of archives '
                         'in the egs directory')
 
+exp/nnet3/tdnn_sp/
+├── configs
+│   ├── final.config
+│   ├── init.config
+│   ├── init.raw
+│   ├── network.xconfig
+│   ├── ref.config
+│   ├── ref.raw
+│   ├── vars
+│   ├── xconfig
+│   ├── xconfig.expanded.1
+│   └── xconfig.expanded.2
+├── egs
+│   ├── ali_special.scp
+│   ├── cmvn_opts
+│   ├── combine.egs
+│   ├── egs.1.ark
+│   ├── egs.2.ark
+│   ├── ....
+│   ├── egs.50.ark
+│   ├── egs.51.ark
+│   ├── egs.52.ark
+│   ├── info
+│   │   ├── egs_per_archive
+│   │   ├── feat_dim
+│   │   ├── final.ie.id
+│   │   ├── frames_per_eg
+│   │   ├── ivector_dim
+│   │   ├── left_context
+│   │   ├── left_context_initial
+│   │   ├── num_archives
+│   │   ├── num_frames
+│   │   ├── right_context
+│   │   └── right_context_final
+│   ├── log
+│   │   ├── create_train_subset_combine.log
+│   │   ├── create_train_subset_diagnostic.log
+│   │   ├── create_train_subset.log
+│   │   ├── create_valid_subset_combine.log
+│   │   ├── create_valid_subset_diagnostic.log
+│   │   ├── create_valid_subset.log
+│   │   ├── get_egs.1.log
+│   ├── ....
+│   │   ├── get_egs.6.log
+│   │   ├── shuffle.1.log
+│   │   ├── shuffle.51.log
+│   ├── ....
+│   │   ├── shuffle.52.log
+│   ├── train_diagnostic.egs
+│   ├── train_subset_uttlist
+│   ├── tree
+│   ├── valid_diagnostic.egs
+│   └── valid_uttlist
+├── init.raw
+├── log
+│   └── nnet_init.log
+├── num_jobs
+└── tree
+
+    
+
+
+    
+
+
+
     # copy the properties of the egs to dir for
     # use during decoding
+    # egs_dir  -- exp/nnet3/tdnn_sp/egs
+    # args.dir -- exp/nnet3/tdnn_sp
+    # copy cmvn_opts, splice_opts, info/file.ie.id, final.mat
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
+
+
+
+    # ====================>  计算 仿射变换 lda exp/nnet3/tdnn_sp/lda.mat
+    # args.dir  --- exp/nnet3/tdnn_sp
+    # args.ali_dir --- exp/tri5a_sp_ali
+    # egs_dir   --- exp/nnet3/tdnn_sp/egs
+    # run_opts  ---
+    # max_lda_jobs --- 10
+    # rand_prune --- 4.0
+
+    # out:
+    # lda.mat --- exp/nnet3/tdnn_sp/lda.mat
     if args.stage <= -3 and os.path.exists(args.dir+"/configs/init.config"):
         logger.info('Computing the preconditioning matrix for input features')
 
@@ -240,6 +343,9 @@ def train(args, run_opts):
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune)
 
+
+    # ====================>  计算 获得 统计性的 pdf vec 可能 与pdf的先验概率有关吧.
+    # args.presoftmax_prior_scale_power ---   -0.25
     if args.stage <= -2:
         logger.info("Computing initial vector for FixedScaleComponent before"
                     " softmax, using priors^{prior_scale} and rescaling to"
@@ -250,11 +356,20 @@ def train(args, run_opts):
             args.dir, args.ali_dir, num_jobs, run_opts,
             presoftmax_prior_scale_power=args.presoftmax_prior_scale_power)
 
+
+    # ====================> 准备 初始化的声学模型
+    # 1 nnet3-init 向exp/nnet3/tdnn_sp/init.raw 中加入 final.config 的信息 增加layers. ==> exp/nnet3/tdnn_sp/0.raw
+    # 2 nnet3-am-init  exp/tri5a_ali/final.mdl 0.raw  - |
+    #        nnet3-am-train-transilation nnet3.raw final.mdl exp/tri5a_ali/alis  0.mdl
     if args.stage <= -1:
         logger.info("Preparing the initial acoustic model.")
         train_lib.acoustic_model.prepare_initial_acoustic_model(
             args.dir, args.ali_dir, run_opts)
 
+
+
+
+    # 准备 进行train训练, 准备 num_iters 让 训练迭代次数 最终能够训练 4 epochs
     # set num_iters so that as close as possible, we process the data
     # $num_epochs times, i.e. $num_iters*$avg_num_jobs) ==
     # $num_epochs*$num_archives, where
@@ -265,24 +380,112 @@ def train(args, run_opts):
     num_iters = ((num_archives_to_process * 2)
                  / (args.num_jobs_initial + args.num_jobs_final))
 
+    # default is true;
     # If do_final_combination is True, compute the set of models_to_combine.
     # Otherwise, models_to_combine will be none.
     if args.do_final_combination:
         models_to_combine = common_train_lib.get_model_combine_iters(
-            num_iters, args.num_epochs,
-            num_archives_expanded, args.max_models_combine,
-            args.num_jobs_final)
+            num_iters,                 # 237
+            args.num_epochs,           # 4
+            num_archives_expanded,     # 52*8 = 416
+            args.max_models_combine,   # 20
+            args.num_jobs_final)       # 12
     else:
         models_to_combine = None
 
+
+    # print models_to_combine     # 
+        
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
 
+
+exp/nnet3/tdnn_sp/
+├── 0.mdl
+├── 0.raw
+├── cmvn_opts
+├── configs
+│   ├── final.config
+│   ├── init.config
+│   ├── init.raw
+│   ├── lda.mat -> ../lda.mat
+│   ├── network.xconfig
+│   ├── presoftmax_prior_scale.vec -> ../presoftmax_prior_scale.vec
+│   ├── ref.config
+│   ├── ref.raw
+│   ├── vars
+│   ├── xconfig
+│   ├── xconfig.expanded.1
+│   └── xconfig.expanded.2
+├── egs
+│   ├── ali_special.scp
+│   ├── cmvn_opts
+│   ├── combine.egs
+│   ├── egs.1.ark
+
+│   ├── egs.52.ark
+│   ├── info
+│   │   ├── egs_per_archive
+│   │   ├── feat_dim
+│   │   ├── final.ie.id
+│   │   ├── frames_per_eg
+│   │   ├── ivector_dim
+│   │   ├── left_context
+│   │   ├── left_context_initial
+│   │   ├── num_archives
+│   │   ├── num_frames
+│   │   ├── right_context
+│   │   └── right_context_final
+│   ├── log
+│   │   ├── create_train_subset_combine.log
+│   │   ├── create_train_subset_diagnostic.log
+│   │   ├── create_train_subset.log
+│   │   ├── create_valid_subset_combine.log
+│   │   ├── create_valid_subset_diagnostic.log
+│   │   ├── create_valid_subset.log
+│   │   ├── get_egs.1.log
+│   │   ├── get_egs.6.log
+│   │   ├── shuffle.1.log
+│   │   ├── shuffle.52.log
+│   ├── train_diagnostic.egs
+│   ├── train_subset_uttlist
+│   ├── tree
+│   ├── valid_diagnostic.egs
+│   └── valid_uttlist
+├── final.ie.id
+├── init.raw
+├── lda.mat
+├── lda_stats
+├── log
+│   ├── acc_pdf.1.log
+│   ├── acc_pdf.30.log
+│   ├── add_first_layer.log
+│   ├── get_lda_stats.1.log
+│   ├── get_lda_stats.10.log
+│   ├── get_transform.log
+│   ├── init_mdl.log
+│   ├── nnet_init.log
+│   ├── sum_pdf_counts.log
+│   └── sum_transform_stats.log
+├── num_jobs
+├── pdf_counts
+├── presoftmax_prior_scale.vec
+└── tree
+
+
+
+
+2018-03-13 17:13:40,822 [steps/libs/nnet3/train/common.py:596 - get_model_combine_iters - INFO ] 1 20 18 237
+2018-03-13 17:13:40,822 [steps/nnet3/train_dnn.py:305 - train - INFO ] models to combine is set([224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 218, 219, 220, 221, 222, 223])
+# args.stage = -10
+ 
+    
     # ====================== training !!! =====================
     for iter in range(num_iters):
         if (args.exit_stage is not None) and (iter == args.exit_stage):
             logger.info("Exiting early due to --exit-stage {0}".format(iter))
             return
+        # 当前iter 的jobs 数量, 从 num_jobs_initial --> num_jobs_final 按照iter/num_iters 比例增长.
         current_num_jobs = int(0.5 + args.num_jobs_initial
                                + (args.num_jobs_final - args.num_jobs_initial)
                                * float(iter) / num_iters)
@@ -321,16 +524,109 @@ def train(args, run_opts):
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 run_opts=run_opts)
 
+
+exp/nnet3/tdnn_sp/
+├── 0.mdl
+├── 0.raw
+├── 1.mdl
+├── cache.1
+├── cmvn_opts
+├── configs
+│   ├── final.config
+│   ├── init.config
+│   ├── init.raw
+│   ├── lda.mat -> ../lda.mat
+│   ├── network.xconfig
+│   ├── presoftmax_prior_scale.vec -> ../presoftmax_prior_scale.vec
+│   ├── ref.config
+│   ├── ref.raw
+│   ├── vars
+│   ├── xconfig
+│   ├── xconfig.expanded.1
+│   └── xconfig.expanded.2
+├── egs
+│   ├── ali_special.scp
+│   ├── cmvn_opts
+│   ├── combine.egs
+│   ├── egs.1.ark
+
+│   ├── egs.52.ark
+│   ├── info
+│   │   ├── egs_per_archive
+│   │   ├── feat_dim
+│   │   ├── final.ie.id
+│   │   ├── frames_per_eg
+│   │   ├── ivector_dim
+│   │   ├── left_context
+│   │   ├── left_context_initial
+│   │   ├── num_archives
+│   │   ├── num_frames
+│   │   ├── right_context
+│   │   └── right_context_final
+│   ├── log
+│   │   ├── create_train_subset_combine.log
+│   │   ├── create_train_subset_diagnostic.log
+│   │   ├── create_train_subset.log
+│   │   ├── create_valid_subset_combine.log
+│   │   ├── create_valid_subset_diagnostic.log
+│   │   ├── create_valid_subset.log
+│   │   ├── get_egs.1.log
+
+│   │   ├── get_egs.6.log
+│   │   ├── shuffle.1.log
+
+│   │   ├── shuffle.52.log
+│   ├── train_diagnostic.egs
+│   ├── train_subset_uttlist
+│   ├── tree
+│   ├── valid_diagnostic.egs
+│   └── valid_uttlist
+├── final.ie.id
+├── init.raw
+├── lda.mat
+├── lda_stats
+├── log
+│   ├── acc_pdf.1.log
+│   ├── acc_pdf.30.log
+│   ├── add_first_layer.log
+│   ├── compute_prob_train.0.log
+│   ├── compute_prob_valid.0.log
+│   ├── get_lda_stats.1.log
+│   ├── get_lda_stats.10.log
+│   ├── get_transform.log
+│   ├── init_mdl.log
+│   ├── nnet_init.log
+│   ├── select.0.log
+│   ├── sum_pdf_counts.log
+│   ├── sum_transform_stats.log
+│   ├── train.0.1.log
+│   └── train.0.2.log
+├── num_jobs
+├── pdf_counts
+├── presoftmax_prior_scale.vec
+├── srand
+└── tree
+
+
+            
+            # 删除两次迭代之前的 mdl
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
                 # conditions
                 common_train_lib.remove_model(
-                    args.dir, iter-2, num_iters, models_to_combine,
-                    args.preserve_model_interval)
+                    args.dir,                      # exp/nnet3/tdnn_sp
+                    iter-2,                        # 删除两次迭代之前的mdl
+                    num_iters,                     # 237
+                    models_to_combine,             # set([224, 225, 226, , 237, 218, 219, 220, 221, 222, 223])
+                    args.preserve_model_interval)  # 100
 
 
+        # 已经处理的 archives  每次train 每个job都跑一个 archives, 每次有 current_num_jobs个 job并行.
         num_archives_processed = num_archives_processed + current_num_jobs
 
+
+
+    # ======================= 训练完成 ========================
     if args.stage <= num_iters:
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
@@ -452,16 +748,20 @@ def get_args():
                         nnet3-merge-egs; run that program without args to see
                         the format.""")
 
+
     # General options
     parser.add_argument("--feat-dir", type=str, required=False,
                         help="Directory with features used for training "
                         "the neural network.")
+
     parser.add_argument("--lang", type=str, required=False,
                         help="Language directory")
+
 
     parser.add_argument("--ali-dir", type=str, required=True,
                         help="Directory with alignments used for training "
                         "the neural network.")
+
     parser.add_argument("--dir", type=str, required=True,
                         help="Directory to store the models and "
                         "all other files.")
