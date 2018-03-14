@@ -175,23 +175,23 @@ def train(args, run_opts):
                                              dir=args.dir))
 
 
-# 1038| tdnn_sp/
-# 1039| ├── configs
-# 1040| │   ├── final.config
-# 1041| │   ├── init.config
-# 1042| │   ├── init.raw
-# 1043| │   ├── network.xconfig
-# 1044| │   ├── ref.config
-# 1045| │   ├── ref.raw
-# 1046| │   ├── vars
-# 1047| │   ├── xconfig
-# 1048| │   ├── xconfig.expanded.1
-# 1049| │   └── xconfig.expanded.2
-# 1050| ├── init.raw
-# 1051| ├── log
-# 1052| │   └── nnet_init.log
-# 1053| ├── num_jobs
-# 1054| └── tree 
+1038| tdnn_sp/
+1039| ├── configs
+1040| │   ├── final.config
+1041| │   ├── init.config
+1042| │   ├── init.raw
+1043| │   ├── network.xconfig
+1044| │   ├── ref.config
+1045| │   ├── ref.raw
+1046| │   ├── vars
+1047| │   ├── xconfig
+1048| │   ├── xconfig.expanded.1
+1049| │   └── xconfig.expanded.2
+1050| ├── init.raw
+1051| ├── log
+1052| │   └── nnet_init.log
+1053| ├── num_jobs
+1054| └── tree 
 
 
 
@@ -503,6 +503,11 @@ exp/nnet3/tdnn_sp/
                                 "shrink-value={1}".format(args.proportional_shrink,
                                                           shrinkage_value))
 
+            logger.info("minibatch_size:{0} momentum:{1} max_param_change:{2} shuffle:{3} ".format(args.minibatch_size,
+                                                                                                   args.momentum,
+                                                                                                   args.max_param_change,
+                                                                                                   args.shuffle_buffer_size))
+            
             train_lib.common.train_one_iteration(
                 dir=args.dir,
                 iter=iter,
@@ -512,12 +517,15 @@ exp/nnet3/tdnn_sp/
                 num_archives_processed=num_archives_processed,
                 num_archives=num_archives,
                 learning_rate=lrate,
+                
                 dropout_edit_string=common_train_lib.get_dropout_edit_string(
                     args.dropout_schedule,
                     float(num_archives_processed) / num_archives_to_process,
                     iter),
+                
                 minibatch_size_str=args.minibatch_size,
                 frames_per_eg=args.frames_per_eg,
+                
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shrinkage_value=shrinkage_value,
