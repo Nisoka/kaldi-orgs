@@ -1,0 +1,4 @@
+
+* nnet3 merge-egs and Compile 
+  t_stride 是什么做什么用的?
+  
