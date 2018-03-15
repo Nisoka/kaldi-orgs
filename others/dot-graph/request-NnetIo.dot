@@ -1,0 +1,46 @@
+digraph ComputationGraph{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        NnetExample -> vec_NnetIo -> NnetIo
+        vec_NnetIo[label="vector-NnetIo"]
+
+
+
+        NnetIo -> features
+        NnetIo -> indexes
+        features[label="GeneralMatrix features"]
+        indexes[label="vector-Index indexes"]
+        indexes -> features[style=dashed, label="Corresponding row by row"]
+
+        NnetIo -> NetworkNode[label="Corresponding",style=dashed]
+
+
+        ComputationRequest -> inputs -> IoSpecification
+        ComputationRequest -> outputs -> IoSpecification
+
+        inputs[label="vector-IoSpecification inputs"]
+        outputs[label="vector-IoSpecification outputs"]
+
+
+        IoSpecification -> indexes[label="save the cp same indexes"]
+
+        indexes_2 -> n_field
+        indexes_2 -> t_field
+
+        indexes_2[label="indexes"]
+        
+        n_field -> n_value[label="n=0 single / n=vary merged"]
+        t_field -> t_value[label="t vary 0--frames_per_eg "]
+
+        indexes_example -> matrix_eg0[label="merged from eg0"]
+        indexes_example -> matrix_eg1[label="merged from eg1"]       
+        indexes_example -> matrix_eg2[label="merged from egN-1"]
+        matrix_eg0[label="n=0, t=0 | n=0, t=1 |... | n=0, t=7"]
+        matrix_eg1[label="n=1, t=0 | n=1, t=1 |... | n=1, t=7"]
+        matrix_eg2[label="n=N-1,t=0 | n=N-1,t=1 |... | n=N-1,t=7"]
+        
+}
+
+
+

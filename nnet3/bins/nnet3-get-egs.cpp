@@ -83,6 +83,8 @@ void nnet3_get_egs()
     // ------------- 结果 num_frames 就是一个元素的数组 8
     // ------------- 并且后面 获得对utterance 的划分**最主要**的数字就是 primary_length = 8---
     eg_config.ComputeDerived();
+
+    
     void ExampleGenerationConfig::ComputeDerived() {
       // split the num_frames_str to array.
       if (!SplitStringToIntegers(num_frames_str, ",", false, &num_frames) ||
@@ -127,6 +129,8 @@ void nnet3_get_egs()
     // ============================ 划分工具 UtteranceSplitter ================
     // 利用这个对utterance 进行划分.
     UtteranceSplitter utt_splitter(eg_config);
+
+    
     UtteranceSplitter::UtteranceSplitter(const ExampleGenerationConfig &config):
         config_(config),
         total_num_utterances_(0), total_input_frames_(0),
@@ -151,6 +155,53 @@ void nnet3_get_egs()
         
         InitSplits(&splits);
 
+        void UtteranceSplitter::InitSplits(std::vector<std::vector<int32> > *splits) const {
+          // we consider splits whose default duration (as returned by
+          // DefaultDurationOfSplit()) is up to MaxUtteranceLength() + primary_length.
+          // We can be confident without doing a lot of math, that splits above this
+          // length will never be chosen for any utterance-length up to
+          // MaxUtteranceLength() (which is the maximum we use).
+          int32 primary_length = config_.num_frames[0],
+              default_duration_ceiling = MaxUtteranceLength() + primary_length;
+
+          typedef unordered_set<std::vector<int32>, VectorHasher<int32> > SetType;
+
+          SetType splits_set;
+
+          int32 num_lengths = config_.num_frames.size();
+
+          // The splits we are allow are: zero to two 'alternate' lengths, plus
+          // an arbitrary number of repeats of the 'primary' length.  The repeats
+          // of the 'primary' length are handled by the inner loop over n.
+          // The zero to two 'alternate' lengths are handled by the loops over
+          // i and j.  i == 0 and j == 0 are special cases; they mean, no
+          // alternate is chosen.
+          for (int32 i = 0; i < num_lengths; i++) {
+            for (int32 j = 0; j < num_lengths; j++) {
+              std::vector<int32> vec;
+              if (i > 0)
+                vec.push_back(config_.num_frames[i]);
+              if (j > 0)
+                vec.push_back(config_.num_frames[j]);
+              int32 n = 0;
+              while (DefaultDurationOfSplit(vec) <= default_duration_ceiling) {
+                if (!vec.empty()) // Don't allow the empty vector as a split.
+                  splits_set.insert(vec);
+                n++;
+                vec.push_back(primary_length);
+                std::sort(vec.begin(), vec.end());
+              }
+            }
+          }
+          for (SetType::const_iterator iter = splits_set.begin();
+               iter != splits_set.end(); ++iter)
+            splits->push_back(*iter);
+          std::sort(splits->begin(), splits->end());  // make the order deterministic,
+          // for consistency of output
+          // between runs and C libraries.
+        }
+
+
 
         // Define a split-index 0 <= s < splits.size() as index into the 'splits'
         // vector, and let a cost c >= 0 represent the mismatch between an
@@ -166,8 +217,7 @@ void nnet3_get_egs()
         // 'costs_for_length[u][s]', indexed by utterance-length u and then split,
         // contains the cost for utterance-length u and split s.
 
-        std::vector<std::vector<float> > costs_for_length(
-            max_utterance_length + 1);
+        std::vector<std::vector<float> > costs_for_length(max_utterance_length + 1);
         int32 num_splits = splits.size();
 
         for (int32 u = 0; u <= max_utterance_length; u++)
@@ -218,40 +268,11 @@ void nnet3_get_egs()
             if (*iter < min_cost + cost_threshold)
               splits_for_length_[u].push_back(splits[s]);
         }
-
-        if (GetVerboseLevel() >= 3) {
-          std::ostringstream os;
-          for (int32 u = 0; u <= max_utterance_length; u++) {
-            if (!splits_for_length_[u].empty()) {
-              os << u << "=(";
-              std::vector<std::vector<int32 > >::const_iterator
-                  iter1 = splits_for_length_[u].begin(),
-                  end1 = splits_for_length_[u].end();
-
-              while (iter1 != end1) {
-                std::vector<int32>::const_iterator iter2 = iter1->begin(),
-                    end2 = iter1->end();
-                while (iter2 != end2) {
-                  os << *iter2;
-                  ++iter2;
-                  if (iter2 != end2) os << ",";
-                }
-                ++iter1;
-                if (iter1 != end1) os << "/";
-              }
-              os << ")";
-              if (u < max_utterance_length) os << ", ";
-            }
-          }
-          KALDI_VLOG(3) << "Utterance-length-to-splits map is: " << os.str();
-        }
       }
-
     }
 
 
-
-    
+  
 
     
 
@@ -310,23 +331,28 @@ void nnet3_get_egs()
         }
 
 
+        //                       并且还加入ivector特征.(注意 ivector特征 并不是每帧不同的,因为一句话实际上是一个人)
         
         // prcocess frames of current utt.
+
+        
         // 1 ================== utt_splitter(内部初始化等操作得到Split_for_length), 
         // 2 ================== 利用utt_splitter 对utterance进行划分得到 vector<chunk> 对utterance的划分,
         //    ----------------- 每个chunk就代表一个TDNN的输入样本eg
         // (vector<chunk> 是对utterance 按照<primary, primary, ... primary, other> 的划分,内部可能还会包含 gap空白 overlap重叠)
-        // 3 ================== 每个chunk 本身对应的是utterance的MFCC特征, 内部利用了Index描述数据信息
-        //                       并且还加入ivector特征.(注意 ivector特征 并不是每帧不同的,因为一句话实际上是一个人)
+        // 3 ================== 每个chunk 本身对应的是utterance的MFCC特征+ivector特征, 内部利用了Index描述数据信息
+
         if (!ProcessFile(feats,
                          online_ivector_feats,    online_ivector_period,
                          pdf_post,
-
                          key, compress, num_pdfs, 
                          targets_length_tolerance,
                          &utt_splitter,
-                         
                          &example_writer))
+
+
+
+          
           num_err++;
       }
     }
@@ -359,17 +385,18 @@ void nnet3_get_egs()
 
 
   
-  std::vector<ChunkTimeInfo> chunks;
+
 
 
   // =======================  划分一个utterence 为多个 chunk ========================
   // 每个chunk 是一个n frames的数据块.
-  // main
-  // and
   //    1 primary chunksize x n
   //    2 possibal_split_size  --- split_for_length_  (在 UtteranceSpliter 构造时候创建计算的)
   //    3 gaps 插入到各个chunk 之间.
+  std::vector<ChunkTimeInfo> chunks;
   utt_splitter->GetChunksForUtterance(num_input_frames, &chunks);
+
+  
   void UtteranceSplitter::GetChunksForUtterance(
       int32 utterance_length,
       std::vector<ChunkTimeInfo> *chunk_info) {
@@ -379,6 +406,7 @@ void nnet3_get_egs()
     // ======================= 生成对utterance_length 的划分 --- chunk_size ==============
     // chunk_sizes 是划分结果(primary, primary, ... primary, possiable-split-size)
     GetChunkSizesForUtterance(utterance_length, &chunk_sizes);
+    
     void UtteranceSplitter::GetChunkSizesForUtterance(int32 utterance_length,
                                                       std::vector<int32> *chunk_sizes) const {
       KALDI_ASSERT(!splits_for_length_.empty());
@@ -397,7 +425,6 @@ void nnet3_get_egs()
 
       // ---------------------  primary 划分  -----------------------
       // 先将utterence尽可能的按照 primary 长度. 留下剩余 utterance_length
-      // main
       //     循环切分utterance_length, 以 primary_length repeat,
       //     直到 最后剩余utterance_length < splits_for_length_.size() 长度.
       while (utterance_length > max_tabulated_length) {
@@ -440,8 +467,11 @@ void nnet3_get_egs()
     // gaps 空白. 将空白 按照chunk内比例 分配给 gaps
     std::vector<int32> gaps(chunk_sizes.size());
 
-    
+    // 计算需要增加的空白frames
     GetGapSizes(utterance_length, true, chunk_sizes, &gaps);
+
+
+    
     void UtteranceSplitter::GetGapSizes(int32 utterance_length,
                                         bool enforce_subsampling_factor,
                                         const std::vector<int32> &chunk_sizes,
@@ -727,23 +757,28 @@ void nnet3_get_egs()
       utt_splitter->Config().frame_subsampling_factor;
 
 
+
+
+
+
+
+
+  
   // ===================== 一个chunk(+ C L R context) 作为TDNN的输入样本 =================
   // ----------------------   这个chunk 本身是 MFCC, 还会可能附加 ivector.联合做TDNN的输入样本
   // 将utterance 划分为chunk后, chunk就代表一个训练用的输入样本
   for (size_t c = 0; c < chunks.size(); c++) {
     const ChunkTimeInfo &chunk = chunks[c];
-
     // TDNN输入样本 == 当前chunk的frames + L context frames + R context frames
     int32 tot_input_frames = chunk.left_context + chunk.num_frames + chunk.right_context;
     // TDNN输入起始帧(但是并不是实际代表当前代表的数据, 而是以L 上下文开始, 共同描述当前代表的音素状态)
     int32 start_frame = chunk.first_frame - chunk.left_context;
-
-
     // input_frames 抽取 原始特征中 对应当前chunk eg 的L C R 的行.
     GeneralMatrix input_frames;
-    ExtractRowRangeWithPadding(feats, start_frame, tot_input_frames,
-                               &input_frames);
+    ExtractRowRangeWithPadding(feats, start_frame, tot_input_frames, &input_frames);
 
+
+    
     // 'input_frames' now stores the relevant rows (maybe with padding) from the
     // original Matrix or (more likely) CompressedMatrix.
     // If a CompressedMatrix, it does this without un-compressing and re-compressing, so there is no loss
@@ -762,6 +797,9 @@ void nnet3_get_egs()
     // call the regular input "input".
     eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
 
+
+
+    
     NnetIo::NnetIo(const std::string &name,
                    int32 t_begin, const GeneralMatrix &feats,
                    int32 t_stride = 1):
@@ -803,22 +841,18 @@ void nnet3_get_egs()
       eg.io.push_back(NnetIo("ivector", 0, ivector));
     }
 
-    // --------- Notice:  这里一直都考虑 frame_subsampling_factor,
-    // ------ 但是这里实际用到的还是将frame_subsampling_factor = 1. 所以为了简单 先不考虑其作用能力.
-    // Note: chunk.first_frame and chunk.num_frames will both be
-    // multiples of frame_subsampling_factor.
-    int32 start_frame_subsampled = chunk.first_frame / frame_subsampling_factor,
+    // --------- Notice:  这里一直都考虑 frame_subsampling_factor 但是这里 就是1
+    // start_frame_subsampled = chunk.first_frame
+    // num_frames_subsampled = chunk.num_frames = 8
+    int32
+        start_frame_subsampled = chunk.first_frame / frame_subsampling_factor,
         num_frames_subsampled = chunk.num_frames / frame_subsampling_factor;
 
 
+    // ================  完善一个 chunk-eg-NNet训练样本, 加上对应的 labels ==============
     // ==================  构建对应的chunk(eg)的样本标签
     Posterior labels(num_frames_subsampled);
-    // TODO: it may be that using these weights is not actually helpful (with
-    // chain training, it was not), and that setting them all to 1 is better.
-    // We could add a boolean option to this program to control that; but I
-    // don't want to add such an option if experiments show that it is not
-    // helpful.
-    // 
+    
     for (int32 i = 0; i < num_frames_subsampled; i++) {
       int32 t = i + start_frame_subsampled;
       if (t < pdf_post.size())
@@ -828,11 +862,12 @@ void nnet3_get_egs()
                iter = labels[i].begin(); iter != labels[i].end(); ++iter)
         iter->second *= chunk.output_weights[i];
     }
-
-    // ================  完善一个 chunk-eg-NNet训练样本, 加上对应的 labels ==============
-    // ----------   注意一个 chunk 是多帧(一般为8) 所以 labels 都是8帧 X num_pdfs.
-    // ----------   所以 labels是  8 x num_pdfs.
+    // ----------   注意一个 chunk的num_frames=8 所以 labels 
+    // ----------   所以 labels是  8 x num_pdfs 的矩阵.
     eg.io.push_back(NnetIo("output", num_pdfs, 0, labels));
+
+
+    
     NnetIo::NnetIo(const std::string &name,
                    int32 dim,
                    int32 t_begin,

@@ -1,0 +1,21 @@
+digraph ComputationGraph{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        CachingOptimizerCompiler -> nnet_
+        CachingOptimizerCompiler -> Compiler[label="use"]
+        
+
+        Compiler[label="Compiler(request, nnet_)"]
+
+        Compiler -> nnet_
+        Compiler -> graph_
+        Compiler -> GraphBuilder[label="use"]
+
+        GraphBuilder[label="GraphBuilder(nnet_, &graph_)"]
+
+        GraphBuilder -> graphBuilder_Compute
+        GraphBuilder -> graph_
+        graphBuilder_Compute[label="Compute(request)"]
+
+}

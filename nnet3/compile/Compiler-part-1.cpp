@@ -1,3 +1,95 @@
+struct ComputationGraph {
+
+  // cindexes[cindex_id] 就可获得 对应 cindex_id 的 Cindex对象.
+  /// The mapping of cindex_id to Cindex.
+  std::vector<Cindex> cindexes;
+
+  /// For each Cindex this tells us whether it was provided as an input to the
+  /// network.  This is necessary for a couple of reasons: firstly, the
+  /// framework allows users to provide values for nodes of type kComponent
+  /// (e.g. for RNN context).  Also, Cindexes for input nodes that were not
+  /// provided by the user may be created during computation graph creation
+  /// (although they will not be computable), and we need to distinguish these
+  /// from the provided Cindexes.
+  std::vector<bool> is_input;
+
+  /// dependencies[cindex_id] gives you the list of other cindex_ids that this
+  /// particular cindex_id directly depends on to compute it.  No repeats will
+  /// be present.  Note, some of these dependencies may be optional
+  /// dependencies; in early stages of compilation this will contain all
+  /// "desired" inputs and later we will prune the dependencies contain just
+  /// those that are used (which will vary depending on availability).
+  std::vector<std::vector<int32> > dependencies;
+
+
+
+
+
+  // 这个变量 是为了特定的 multi-segment 计算, 只在当为online操作创建计算时使用.
+  /// This variable is only of particular interest in a 'multi-segment'
+  /// computation, which is used while creating computations for 'online'
+  /// operation (for the kind of situation where you provide some input; run the
+  /// computation; get some output, provide some more input for larger 't'
+  /// values, etc.).
+  // 当前说的 segment 是一个连续的 cindex_ids 的范围.
+  // 一个 segment_end 是一个通过segment的id, 和下一个segemnt的开始cindex_id 相等.
+  // 在一个完整创建的 只有一个segment的 计算图中, 这里只会保存一个值, 等于cindex_ids的数量.
+  // In this context, a 'segment' is a continuous range of
+  /// cindex_ids, and a segment_end is one past the end of each segment, which
+  /// is the same as the beginning of the next segment, if there is one.  In the
+  /// case of a fully-created computation graph with only one segment, this will
+  /// contain just one value which equals the number of cindex_ids.
+  // 这个成员在正确排序计算时需要使用, 因为计算图自己并不会包含编码了segment顺序的依赖关系,
+  // (及时确实包含了这样的依赖关系, 也会能真的用我们的scc方法在nnet网络构图时使用)
+  /// This information is needed to correctly order the computation, because
+  /// the computation graph itself does not contain dependencies that encode the
+  /// ordering of segments (and even if it did contain those dependencies, it's
+  /// not really compatible with the way we use the scc's in the graph structure
+  /// of the network to order the computation).
+  std::vector<int32> segment_ends;
+
+  // 映射Cindex -> cindex_id, 如果不存在, 就增加,并设置对应的is_input标记
+  // 并设置 is_new = true 返回给调用者.
+  /// Maps a Cindex to an integer cindex_id.  If not present, then add it (with
+  /// the corresponding "is_input" flag set to the value "input") and set
+  /// *is_new to true.  If present, set is_new to false and return the existing
+  /// cindex_id.
+  int32 GetCindexId(const Cindex &cindex, bool is_input, bool *is_new);
+
+  
+  /// Const version of GetCindexId that does not add CindexIds.  It will return
+  /// -1 if the Cindex is not present, and the user should check for this.
+  int32 GetCindexId(const Cindex &cindex) const;
+
+  /// This function renumbers the cindex-ids (but only those with index c >= start_cindex_id,
+  // keeping only for which keep[c - start_cindex_id] is true.
+  // The "keep" array must be the same size as this->cindexes.size() - start_cindex_id.
+  void Renumber(int32 start_cindex_id, const std::vector<bool> &keep);
+
+
+  /// This function, useful for debugging/visualization purposes,
+  /// prints out a summary of the computation graph (which will take up
+  /// multiple lines).
+  /// Format is: [ cindex1 -> dep-cindex1 dep-cindex2 ] [ cindex2 -> dep-cindex3 dep-cindex4 ]
+  /// showing each Cindex and the Cindexes it depends on.  cindexes from different network
+  /// nodes are shown on different lines.
+  void Print(std::ostream &os, const std::vector<std::string> &node_names);
+
+
+
+  
+ private:
+
+  //  是对cindexes的一个翻转映射, cindex_to_cindex_id[Cindex] 就可获得 对应Cindex的 cindex_id
+  
+  /// Maps each Cindex to an integer cindex_id: reverse mapping of "cindexes".
+  /// Must be accessed via the GetCindexId() functions.
+  unordered_map<Cindex, int32, CindexHasher> cindex_to_cindex_id_;
+};
+
+
+
+
 ComputationGraphBuilder::ComputationGraphBuilder(
     const Nnet &nnet,
     ComputationGraph *graph):
@@ -8,16 +100,86 @@ ComputationGraphBuilder::ComputationGraphBuilder(
 }
 
 
+
+
+void ComputationGraphBuilder::AddInputs() {
+  int32 num_added = 0;
+
+  // request.inputs 是request中所有的输入 NnetIo
+  // foreach input NnetIo
+  for (int32 i = 0; i < request_->inputs.size(); i++) {
+    // 获得对应的 nnet中node-index( 一般都是 input-node 的 index)
+    int32 n = nnet_.GetNodeIndex(request_->inputs[i].name);
+    if (n == -1)
+      KALDI_ERR << "Network has no input with name "
+                << request_->inputs[i].name;
+
+    // 获得input NnetIo 对应的 input-node
+    // 判断类型.
+    NodeType t = nnet_.GetNode(n).node_type;
+    KALDI_ASSERT((t == kInput || t == kComponent) &&
+                 "Inputs to graph only allowed for Input and Component nodes.");
+
+    // 每个 input NnetIo 都具有 很多indexes 是多个 Matrix 样本,
+    // 每个 index 都是一个frame样本
+    // foreach index 
+    for (int32 j = 0; j < request_->inputs[i].indexes.size(); j++) {
+      Cindex cindex(n, request_->inputs[i].indexes[j]);
+      bool is_input = true, is_new;
+      int32 cindex_id = graph_->GetCindexId(cindex, is_input, &is_new);
+      KALDI_ASSERT(is_new && "Input index seems to be listed more than once");
+      AddCindexId(cindex_id, true, false);
+      num_added++;
+    }
+  }
+  KALDI_ASSERT(num_added > 0 && "AddInputToGraph: nothing to add.");
+}
+
+void ComputationGraphBuilder::AddOutputs() {
+  int32 num_added = 0;
+  for (int32 i = 0; i < request_->outputs.size(); i++) {
+    int32 n = nnet_.GetNodeIndex(request_->outputs[i].name);
+    if (n == -1)
+      KALDI_ERR << "Network has no output with name "
+                << request_->outputs[i].name;
+    for (int32 j = 0; j < request_->outputs[i].indexes.size(); j++) {
+      Cindex cindex(n, request_->outputs[i].indexes[j]);
+      bool is_input = false, is_new;
+      int32 cindex_id = graph_->GetCindexId(cindex, is_input, &is_new);
+      KALDI_ASSERT(is_new && "Output index seems to be listed more than once");
+      AddCindexId(cindex_id, false, true);
+      num_added++;
+    }
+  }
+  if (num_added == 0) {
+    KALDI_ERR << "Cannot process computation request with no outputs";
+  }
+  current_distance_ = 0;
+  // the calls to AddCindexId in this function will have added to next_queue_.
+  KALDI_ASSERT(current_queue_.empty());
+  current_queue_.swap(next_queue_);
+}
+
 void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
+
+  // graph_->segment_ends 是不是empty()?
+  // 在这个函数调用之前 只有默认构造, 没有任何赋值, 应该是empty的啊.
+  // !!!! 靠 前面的条件 是 request_ 不是入参 request!!! 是其原本成员
+  // 这样的话 request_ 也是NULL.
   if (request_ != NULL && graph_->segment_ends.empty()) {
     // this check is relevant to multi-segment (i.e. online) computations.
     KALDI_ERR << "You are calling things in the wrong order: should be "
               << "Compute(), Prune(), Compute, Prune(), ...";
   }
+
+  // 0
   int32 cur_segment_start = graph_->cindexes.size();
+  // 获得request
   request_ = &request;
+  
   AddInputs();
   AddOutputs();  // sets current_distance_ to 0.
+  
   // max_distance for debugging, to detect infinite recursion.
   int32 max_distance = 10000;
   while (current_distance_ < max_distance) {

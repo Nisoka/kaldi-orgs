@@ -100,6 +100,7 @@ alidir=$2
 dir=$3
 
 # Check some files.
+# 不为空, 增加 ivector特征.
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
@@ -137,6 +138,7 @@ fi
 
 # utils/apply_map.pl map.txt  <input.file   >output.file
 # 将input.file 中逐行 向map.txt中定义的map进行映射,
+
 # eg
 # map.txt
 # A   a
@@ -150,7 +152,9 @@ fi
 # c
 
 
-# 在train的utt中, 随机化,  取 300个 作为 有效utt
+# ----------------------------------------------
+# 在train的utt中, 随机化,  取 300个 作为 valid_utt
+# 用来验证什么?
 awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
     > $dir/valid_uttlist || exit 1;
 
@@ -173,7 +177,8 @@ if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
   rm $dir/uniq2utt $dir/valid_uttlist.tmp
 fi
 
-
+# ----------------------------------------------
+# 剩余的 乱序后 取 300 用作 train_subset_uttlist ???
 # filter_scp  filter=utt2spk 将所有的valid_uttlist 去掉, 剩余的shuffle 乱序
 # 取300 作为 train_subset_uttlist.
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
@@ -198,6 +203,10 @@ if [ -f $transform_dir/raw_trans.1 ]; then
   fi
 fi
 
+
+
+
+# ------------------------ 设置 数据 feats -------------
 ## Set up features.
 echo "$0: feature type is raw"
 
@@ -210,7 +219,14 @@ valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp    
 # filter 过滤获得train_subset_uttlist 作为train_subset_feats.
 train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
 
+
+
 echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
+
+
+
+
+
 
 # nil
 if [ -f $dir/trans.scp ]; then
@@ -219,6 +235,8 @@ if [ -f $dir/trans.scp ]; then
   train_subset_feats="$train_subset_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
 fi
 
+
+# ------------------------ ivector feats --------------
 # t
 if [ ! -z "$online_ivector_dir" ]; then
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir/ivector_online.scp -) || exit 1;
@@ -232,23 +250,28 @@ else
 fi
 
 
+
+
+
+# ---------------------- 计算 data/train_sp_hires 的数据帧frame总数 frame-dim---------------
 # exp/nnet3/tdnn_sp/info/num_frames  frames_cnt
 # feats_one
 # feat_dim
 
 if [ $stage -le 1 ]; then
+
   echo "$0: working out number of frames of training data"
   num_frames=$(steps/nnet2/get_num_frames.sh $data)
   echo $num_frames > $dir/info/num_frames
-  echo "$0: working out feature dim"
 
+  
+  echo "$0: working out feature dim"
   # sed s/target/result/g  查找target替换为result.
   feats_one="$(echo $feats | sed s/JOB/1/g)"
   if feat_dim=$(feat-to-dim "$feats_one" - 2>/dev/null); then
     echo $feat_dim > $dir/info/feat_dim
-  else # run without redirection to show the error.
-    feat-to-dim "$feats_one" -; exit 1
   fi
+  
 else
   num_frames=$(cat $dir/info/num_frames) || exit 1;
   feat_dim=$(cat $dir/info/feat_dim) || exit 1;
@@ -303,8 +326,6 @@ done
 # now make sure num_archives is an exact multiple of archives_multiple.
 num_archives=$[$archives_multiple*$num_archives_intermediate]
 
-echo $num_archives >$dir/info/num_archives
-echo $frames_per_eg >$dir/info/frames_per_eg
 
 
 
@@ -316,9 +337,17 @@ egs_per_archive=$[$num_frames/($frames_per_eg_principal*$num_archives)]
   echo "$0: script error: egs_per_archive=$egs_per_archive not <= samples_per_iter=$samples_per_iter" \
   && exit 1;
 
+
+# --------------- 经过计算 得到 num_archives egs_per_archive frames_per_eg num_frames
+# 52
+echo $num_archives >$dir/info/num_archives
+# 394272
 echo $egs_per_archive > $dir/info/egs_per_archive
+# 8
+echo $frames_per_eg >$dir/info/frames_per_eg
 
-
+# 164017282
+# echo $num_frames > $dir/info/num_frames
 
 
 
@@ -347,6 +376,10 @@ if [ -e $dir/storage ]; then
 fi
 
 
+
+
+
+# ------------------ copy 数据的 对齐结果 --------------
 # copy the alidir/ali.n.gz => dir(exp/nnet3/tdnn_sp/egs)ali.ark & ali.scp
 if [ $stage -le 2 ]; then
   echo "$0: copying data alignments"
@@ -355,15 +388,20 @@ if [ $stage -le 2 ]; then
 fi
 
 
-
+# ------------------ 上下文信息 ---------------
 egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress --num-frames=$frames_per_eg"
 [ $left_context_initial -ge 0 ] && egs_opts="$egs_opts --left-context-initial=$left_context_initial"
 [ $right_context_final -ge 0 ] && egs_opts="$egs_opts --right-context-final=$right_context_final"
 
+# 写入上下文信息
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
 echo $left_context_initial > $dir/info/left_context_initial
 echo $right_context_final > $dir/info/right_context_final
+
+
+
+
 
 
 # get num_pdfs from the tree-info.
@@ -384,7 +422,8 @@ if [ $stage -le 3 ]; then
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
     <$dir/ali.scp >$dir/ali_special.scp
 
-  # ================= 获得TDNN训练样本 egs(input output) ===================
+  
+  # ================= nnet3-get-egs  构建 tdnn训练用样本结构 ===========
   #                Train  ---- train_subset_all.egs
   #                Validation -- valid_all.egs
   # 3:
@@ -489,8 +528,11 @@ fi
 
 
 
-
+# ==================== nnet3-get-egs 构建 tdnn-nnet3 训练用结构样本数据 ===========
 # ==================== 划分训练样本, 将egs 分给不同的并行任务job ==================
+
+# ---- 得到 exp/nnet3/tdnn_sp/egs/egs_orig.JOB.1:52.ark
+
 if [ $stage -le 4 ]; then
   # create egs_orig.*.*.ark; the first index goes to $nj,
   # the second to $num_archives_intermediate.
@@ -502,8 +544,6 @@ if [ $stage -le 4 ]; then
   done
 
   # =====================  !!!! 使用全部数据, 生成 egs
-  # 
-  # nnet3-copy-egs 没具体看, 应该是拷贝 按照 egs_list 生成 egs.JOB_index.archives_index.ark.
 
   echo "$0: Generating training examples on disk"
   # -------- 从全部数据中 获得egs > 生成 egs_orig.JOB.$n.ark  JOB: 1:16

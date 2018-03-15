@@ -1,4 +1,22 @@
 
+
+steps/nnet3/get_egs.sh --cmd run.pl
+--cmvn-opts --norm-means=false --norm-vars=false
+--transform-dir exp/tri5a_sp_ali
+--online-ivector-dir exp/nnet3/ivectors_train_sp
+--left-context 16 --right-context 12 --left-context-initial -1 --right-context-final -1
+--stage 0
+--samples-per-iter 400000
+--frames-per-eg 8
+--srand 0
+data/train_sp_hires       --- data
+exp/tri5a_sp_ali          --- ali
+exp/nnet3/tdnn_sp/egs     --- 输出dir
+
+
+
+
+
 # ================ after run_common_ivector
 local/nnet3/run_tdnn.sh: creating neural net configs
 tree-info exp/tri5a_sp_ali/tree 

@@ -875,6 +875,7 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
           computation = CompileNoShortcut(*request);
           const NnetComputation* CachingOptimizingCompiler::CompileNoShortcut( const ComputationRequest &request) {
 
+            // ============================ 编译 过程 ============================
             // ------------------ 构建 Compiler, 编译目标为 request ---------------
             Compiler compiler(request, nnet_);
             // note: 'opts' only contains 'output_debug_info', which is true by default.

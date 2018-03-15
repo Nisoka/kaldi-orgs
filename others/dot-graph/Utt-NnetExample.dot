@@ -1,0 +1,52 @@
+
+
+digraph ComputationGraph{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        Utterance -> utt_chunkinfo
+        utt_chunkinfo[label="<1> ChunkTimeInfo | <2>  ChunkTimeInfo | <ignore> ... |<3>  ChunkTimeInfo "]
+
+        utt_chunkinfo:1 -> vec_NnetIo:1[label="MFCC feature"]
+//        utt_chunkinfo:2 -> NnetExample  
+//        utt_chunkinfo:3 -> NnetExample
+//        utt_chunkinfo:ignore -> NnetExample
+
+        NnetExample -> vec_NnetIo
+        NnetExample[shape=box]
+
+
+
+        vec_NnetIo[label="<1> NnetIo | <2> NnetIo | <3> NnetIo |... "]
+        
+        vec_NnetIo:1 -> vec_Index[label="NnetIo -- ChunkInfo"]
+        vec_Index[label="Index(n=0,t=-l) | Index(n=0, t=-l+1) |... | Index(n=0, t=num+r)"]
+        vec_NnetIo:1 -> features[label="Correspond data"]
+
+
+        ChunkTimeInfo -> first_time
+        ChunkTimeInfo -> num_frames
+        ChunkTimeInfo -> left_context
+        first_time -> start_frame[label="first_time - left_context"]
+        left_context -> start_frame[label="first_time - left_context"]
+
+        ChunkTimeInfo -> right_context
+        right_context -> end_frame[label="start_frame + l + num_frames + r"]
+
+        start_frame -> MFCC_FRAMES
+        end_frame -> MFCC_FRAMES[label="Corresponding"]
+
+
+        Utterance -> Ivector
+        Ivector -> vec_NnetIo:2[label="Ivector feature"]
+
+        Utterance -> align[label="get the ali", style=dashed]
+        align -> labels[label="through ali-to-pdf to-post"]
+        
+        labels -> labels_type[label="type is", style=dashed]
+        labels_type[label="Matrix num_frames(8) X num_pdfs"]
+
+        labels -> vec_NnetIo:3
+        
+
+}

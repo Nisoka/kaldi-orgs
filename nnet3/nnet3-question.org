@@ -1,4 +1,28 @@
 
+* nnet3 训练的步骤
+
+** 0 prepare 准备
+
+*** 1 init.raw
+
+** 1 get-egs 准备eg数据
+
+** 2 prepare train 训练前准备
+
+** 3 train
+   
+*** 1 GetRequest
+
+*** 2 Compile Computation
+    
+*** 3 
+
+
+
 * nnet3 merge-egs and Compile 
   t_stride 是什么做什么用的?
+  n_stride 貌似就是 frames_per_eg, 是两个eg 的间隔, 实际上就是一个eg 的frames数量.
+
+
+  
   
