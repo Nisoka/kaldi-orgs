@@ -3,17 +3,17 @@ digraph ComputationGraph{
         node[shape=Mrecord, width=.1, height=.1]
 
         NnetExample -> vec_NnetIo -> NnetIo
-        vec_NnetIo[label="vector-NnetIo"]
+        vec_NnetIo[label="<1>NnetIo | NnetIo | NnetIo |..."]
 
 
 
-        NnetIo -> features
-        NnetIo -> indexes
+        vec_NnetIo:1 -> features
+        vec_NnetIo:1 -> indexes
         features[label="GeneralMatrix features"]
         indexes[label="vector-Index indexes"]
         indexes -> features[style=dashed, label="Corresponding row by row"]
 
-        NnetIo -> NetworkNode[label="Corresponding",style=dashed]
+        vec_NnetIo:1 -> NetworkNode[label="Corresponding",style=dashed]
 
 
         ComputationRequest -> inputs -> IoSpecification
@@ -33,14 +33,16 @@ digraph ComputationGraph{
         n_field -> n_value[label="n=0 single / n=vary merged"]
         t_field -> t_value[label="t vary 0--frames_per_eg "]
 
-        indexes_example -> matrix_eg0[label="merged from eg0"]
-        indexes_example -> matrix_eg1[label="merged from eg1"]       
-        indexes_example -> matrix_eg2[label="merged from egN-1"]
+        vec_indexes_in_merged_eg -> matrix_eg0[label="merged from eg0"]
+        vec_indexes_in_merged_eg -> matrix_eg1[label="merged from eg1"]       
+        vec_indexes_in_merged_eg -> matrix_eg2[label="merged from egN-1"]
         matrix_eg0[label="n=0, t=0 | n=0, t=1 |... | n=0, t=7"]
         matrix_eg1[label="n=1, t=0 | n=1, t=1 |... | n=1, t=7"]
         matrix_eg2[label="n=N-1,t=0 | n=N-1,t=1 |... | n=N-1,t=7"]
-        
+
+        vec_indexes_in_eg0 -> matrix_eg0[label="standard NnetIo"]
 }
+
 
 
 

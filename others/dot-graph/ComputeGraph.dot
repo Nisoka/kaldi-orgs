@@ -1,0 +1,37 @@
+// ComputeClasses??
+digraph ComputationGraph{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        ComputeGraph -> vec_Cindex
+        ComputeGraph -> vec_vec_dependences
+        ComputeGraph -> vec_segment_ends
+        ComputeGraph -> map_cindex_to_cindex_id
+
+        vec_Cindex[label="vec-Cindex"]
+        vec_vec_dependences[label="vec-dependences"]
+        map_cindex_to_cindex_id[label="Cindex-to-cindex_id"]
+
+
+        indexes_for_input  -> vec_Cindex
+        indexes_for_ivector -> vec_Cindex
+        indexes_for_output -> vec_Cindex
+        
+
+
+        ComputationGraphBuilder -> ComputeGraph
+        ComputationGraphBuilder -> request_
+        ComputationGraphBuilder -> computable_queue_
+        ComputationGraphBuilder -> computable_queued_
+        ComputationGraphBuilder -> computable_info_
+
+        computable_queue_ -> 
+
+        request_ -> input
+        request_ -> input_ivector
+        request_ -> output
+
+        input -> indexes_for_input
+        input_ivector -> indexes_for_ivector
+        output -> indexes_for_output
+}
