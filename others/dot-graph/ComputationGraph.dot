@@ -27,7 +27,6 @@ digraph ComputationGraph{
         cindex_interpret[label="a computation target"]
 
         Computation -> _matrices
-
 }
 
 

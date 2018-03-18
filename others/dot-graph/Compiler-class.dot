@@ -4,18 +4,63 @@ digraph ComputationGraph{
 
         CachingOptimizerCompiler -> nnet_
         CachingOptimizerCompiler -> Compiler[label="use"]
-        
-
-        Compiler[label="Compiler(request, nnet_)"]
 
         Compiler -> nnet_
         Compiler -> graph_
         Compiler -> GraphBuilder[label="use"]
 
-        GraphBuilder[label="GraphBuilder(nnet_, &graph_)"]
 
-        GraphBuilder -> graphBuilder_Compute
-        GraphBuilder -> graph_
-        graphBuilder_Compute[label="Compute(request)"]
+        
+        GraphBuilder -> func_Compute
+        GraphBuilder -> nnet_
+        GraphBuilder -> request_
+        GraphBuilder -> graph_[label="GraphBuilder(nnet_, &graph_)"]
 
+        request_ -> inputs
+        request_ -> outputs
+        outputs[label="outputs[0]"]
+        inputs[label="<1> inputs[0] | <2> inputs[1]"]
+        inputs:1 -> NnetIo1_Merged -> indexes_MFCC
+        inputs:1 -> NnetIo2_Merged -> indexes_Ivector
+        outputs -> indexes_label
+
+
+        graph_ -> ComputationGraph
+        ComputationGraph -> cindexes
+        ComputationGraph -> is_input
+        cindexes[label="vec_cindex"]
+        is_input[label="vec_is_input"]
+
+        is_input -> cindexes[label="one to one", style=dashed]
+
+        indexes_MFCC -> cindexes
+        indexes_Ivector -> cindexes
+        indexes_label -> cindexes
+
+
+
+        subgraph ComputationGraphBuilder{
+
+                ComputationGraphBuilder -> next_queue_[label="需要计算依赖的cindex_ids"]
+                ComputationGraphBuilder -> current_queue_
+                next_queue_ -> current_queue_[style=dashed, label="发送给, 等待计算"]
+                
+                ComputationGraphBuilder -> computable_info_[label="是否可以从input计算得到, 一开始除了input都是false"]
+                computable_info_ -> cindex_is_input_Mfcc_Ivector[label="kComputable"]
+                computable_info_ -> cindex_is_output_label[label="kUnKnowm"]
+                
+                ComputationGraphBuilder -> computable_queue_
+                ComputationGraphBuilder -> computable_queued_
+                ComputationGraphBuilder -> usable_count_[label=">0,可能参与输出output的计算"]
+                usable_count_ -> usable_1[label="1"]
+                usable_count_ -> usable_2[label=">1"]
+                usable_count_ -> usable_0[label="0"]
+                usable_1[label="cindexes output"]
+                usable_2[label="cindexes for output"]
+                usable_0[label="cindexes input"]
+
+                
+        }        
+        
+        
 }

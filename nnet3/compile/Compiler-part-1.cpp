@@ -179,12 +179,19 @@ class ComputationGraphBuilder {
   // 这个变量被设计用来简单能够保持更新 随着我们增加cindex_ids???
   // This quantity is designed to be easy to keep updated as we add cindex_ids.
   std::vector<int32> usable_count_;
+
+  // ?????
   // current_distance_ >= 0 is the distance to the output, of the cindex_ids in
   // current_queue_.
   int32 current_distance_;
+  
+  // 没有计算依赖的cindex_ids. (那些需要依赖, 但是还没有计算其依赖的cindex_ids)
   // the cindex_ids in current_queue_ are at distance "current_distance" to the
   // output and have not yet had their dependencies processed.
   std::vector<int32> current_queue_;
+
+  // 当前距离+1的位置上的cindex_ids，
+  // 并且还没有计算依赖的cindex_ids. (那些需要依赖, 但是还没有计算其依赖的cindex_ids)
   // the cindex_ids in next_queue_ are at distance current_distance + 1 to the
   // output and have not yet had their dependencies processed.
   std::vector<int32> next_queue_;
@@ -234,11 +241,10 @@ void ComputationGraphBuilder::AddCindexId(int32 cindex_id,
     computable_queued_.push_back(false);
     // other -- 一般就是 output
   } else {
+    // 
     computable_info_.push_back(kUnknown);
-    // add to the queue of things for which we need to compute their computable
-    // status.
+    // cindex_ids 是否加入了 computable_queue_ 的标记.
     computable_queued_.push_back(false);
-
     // next_queue_ 保存的是 output 输出cindex-id
     next_queue_.push_back(cindex_id);
   }
@@ -346,6 +352,7 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
               << "Compute(), Prune(), Compute, Prune(), ...";
   }
 
+  
   // 0
   int32 cur_segment_start = graph_->cindexes.size();
   // 获得request
@@ -372,10 +379,17 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
         
         KALDI_ASSERT(computable_info_[cindex_id] == kUnknown);
 
-        // 非output Cindex
+
+        
+        // input Cindexes MFCC IVECTOR.
         if (usable_count_[cindex_id] == 0){
+
+          // 将输入的cindex_id GraphBuilder->computable_info_[cindex_id] = kWillNotCompute 不需要计算.
+          // 将其depend_on_this_ 的其他cindex_id
+          // 1 都加入  需要计算队列-computable_queue_ 
+          // 2 并设置  需要计算信息-computable_info_ 为未知(需要看是否是output的依赖)
+          //  ----- BuildGraph算法中的 正向方向处理 ------------
           SetAsWillNotCompute(cindex_id);
-          
           // 对cindex_id 设置其对应标记 为 不需要进行计算.
           // 然后对 依赖于cindex_id的所有其他 other_cindex_id 设置为
           // 需要重新计算他们是否需要计算 Computable. (加入到需要计算队列 computable_queue_)
@@ -390,11 +404,13 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
             // computable_queue_  保存那些需要重新计算Computable的cindex_id
             // computable_queued_ 保存cindex_id是否已经加入到computable_queue_ 的标记.
             computable_info_[cindex_id] = kWillNotCompute;
-            std::vector<int32>::const_iterator iter = depend_on_this_[cindex_id].begin(),
+            std::vector<int32>::const_iterator
+                iter = depend_on_this_[cindex_id].begin(),
                 end = depend_on_this_[cindex_id].end();
             
             for (; iter != end; ++iter) {
               int32 other_cindex_id = *iter;
+              // 未知是否需要计算, && 还没加入到 需要计算队列 -- computable_queue_中. 
               if (computable_info_[other_cindex_id] == kUnknown && !computable_queued_[other_cindex_id]) {
                 computable_queue_.push_back(other_cindex_id);
                 computable_queued_[other_cindex_id] = true;
