@@ -1,0 +1,29 @@
+digraph ComputeProcess{
+        rankdir=LR
+        ComputationGraphBuilder -> f_Compute
+        f_Compute -> f_AddInputs
+        f_Compute -> f_AddOutputs
+
+
+
+        subgraph ComputeComputableInfo{
+
+                 Cindex -> node_index -> node_type
+                 Cindex -> index
+
+                 graph_ -> CindexSet[label="cindexes"]
+                 computable_info_ -> CindexSet[label="是否需要计算信息"]
+                 node_type -> kDescriptor
+                 kDescriptor -> descriptor -> func_IsComputable
+                 func_IsComputable[label = "IsComputable(index, CindexSet)"]
+
+                 index -> func_IsComputable
+                 func_IsComputable -> CindexSet
+
+                 
+                 
+
+
+        }
+
+}

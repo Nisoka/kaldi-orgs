@@ -42,22 +42,26 @@ digraph ComputationGraph{
         subgraph ComputationGraphBuilder{
 
                 ComputationGraphBuilder -> next_queue_[label="需要计算依赖的cindex_ids"]
-                ComputationGraphBuilder -> current_queue_
+                ComputationGraphBuilder -> current_queue_[label="计算依赖队列"]
                 next_queue_ -> current_queue_[style=dashed, label="发送给, 等待计算"]
                 
-                ComputationGraphBuilder -> computable_info_[label="是否可以从input计算得到, 一开始除了input都是false"]
+                ComputationGraphBuilder -> computable_info_[label="可计算性信息"]
                 computable_info_ -> cindex_is_input_Mfcc_Ivector[label="kComputable"]
                 computable_info_ -> cindex_is_output_label[label="kUnKnowm"]
                 
-                ComputationGraphBuilder -> computable_queue_
-                ComputationGraphBuilder -> computable_queued_
-                ComputationGraphBuilder -> usable_count_[label=">0,可能参与输出output的计算"]
+                ComputationGraphBuilder -> computable_queue_[label="更新可计算性队列"]
+                ComputationGraphBuilder -> computable_queued_[label="cindex in computable_queue_??"]
+                
+                ComputationGraphBuilder -> usable_count_[label=">0,可能参与输出output的计算计数"]
                 usable_count_ -> usable_1[label="1"]
                 usable_count_ -> usable_2[label=">1"]
                 usable_count_ -> usable_0[label="0"]
                 usable_1[label="cindexes output"]
                 usable_2[label="cindexes for output"]
                 usable_0[label="cindexes input"]
+
+                ComputationGraphBuilder -> comment
+                comment[label="next_queue_, computable_queue_ \n是Compile流程的 需要求解 可计算性 和 依赖 队列"]
 
                 
         }        

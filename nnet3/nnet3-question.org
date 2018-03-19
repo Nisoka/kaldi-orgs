@@ -26,3 +26,18 @@
 
   
   
+
+
+* nnet3 Compile ...
+
+** compute
+
+*** 1
+
+*** 2
+    
+*** 3 
+
+**** ComputeEpochInfo()
+     ?? FindSccs()  通过DFS 在找什么?
+     每个node 的什么东西
