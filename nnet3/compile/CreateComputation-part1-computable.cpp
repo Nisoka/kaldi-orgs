@@ -1415,7 +1415,6 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
   // ================  构建ComputationGraph  ================
   // 为每个request_ 构建 ComputationGraph -- cindexes 依赖以及计算性.
-
   for (size_t segment = 0; segment < requests_.size(); segment++) {
     // 从output 开始计算依赖, 可计算性.
     builder.Compute(*(requests_[segment]));
