@@ -1,9 +1,17 @@
 digraph ComputeProcess{
         rankdir=LR
-        ComputationGraphBuilder -> f_Compute
-        f_Compute -> f_AddInputs
-        f_Compute -> f_AddOutputs
+        node[shape=Mrecord, width=.1, height=.1]
 
+        subgraph builder_func{
+                edge[style=dashed]
+                
+                GraphBuilder_func[label="ComputationGraphBuilder"]
+        
+                GraphBuilder_func -> Compute
+                Compute -> Compute_call
+                Compute_call[label="AddInputs | AddOutputs |"]
+
+        }
 
 
         subgraph ComputeComputableInfo{
@@ -19,10 +27,6 @@ digraph ComputeProcess{
 
                  index -> func_IsComputable
                  func_IsComputable -> CindexSet
-
-                 
-                 
-
 
         }
 

@@ -722,14 +722,8 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
   ComputationRequest request;
 
   // ==================== 获得计算目标request ==================
-  GetComputationRequest(nnet_,
-                        eg,
-                        need_model_derivative,
-                        store_component_stats,
-                        &request);
+  GetComputationRequest(nnet_, eg, need_model_derivative, store_component_stats, &request);
 
-  
-  
 
   // ====================== 根据 request 利用编译器 Compile 生成computation =================
   // 使用Compiler 编译request 生成一个computation.
@@ -883,12 +877,14 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
             CompilerOptions opts;
             NnetComputation *computation = new NnetComputation;
 
-            // ------------------ 编译 request 构建一个 computation --------------
+            // ------------------ 编译 request 构建一个 computation 见下方代码 --------------
             {
               Timer timer;
               compiler.CreateComputation(opts, computation);
               seconds_taken_compile_ += timer.Elapsed();
             }
+
+            
 
             // --------------- 优化Optimize -----------------
             {
@@ -929,16 +925,8 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
     return ans;
   }
 
-
   
-
-
-
-  
-  NnetComputer computer(config_.compute_config,
-                        *computation,
-                        nnet_,
-                        deriv_nnet_);
+  NnetComputer computer(config_.compute_config, *computation, nnet_, deriv_nnet_);
   
   // give the inputs to the computer object.
   computer.AcceptInputs(nnet_, eg.io);
@@ -946,6 +934,7 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
   this->ProcessOutputs(eg, &computer);
   if (config_.compute_deriv)
     computer.Run();
+  
 }
 
 void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
@@ -1005,6 +994,107 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
 
 
 
+Compiler::Compiler(
+    const ComputationRequest &request,
+    const Nnet &nnet): nnet_(nnet) {
+  requests_.push_back(&request);
+}
+
+
+
+
+
+
+
+
+// ============================== Main ====================================
+// ============================== Main ====================================
+// ============================== Main ====================================
+// 根据 requests_ 构建 Computation.
+void Compiler::CreateComputation(const CompilerOptions &opts,
+                                 NnetComputation *computation) {
+
+
+
+
+  // ***** Target computation *****
+  computation->Clear();
+
+
+
+  
+
+
+  // ================ part1 构建ComputationGraph Compute Cindex computable  ================
+  // -------- use the ComputationGraphBuilder build the graph_ ---------
+  ComputationGraphBuilder builder(nnet_, &graph_);
+  
+  // 为每个request_ 构建 ComputationGraph -- cindexes 依赖以及计算性.
+  for (size_t segment = 0; segment < requests_.size(); segment++) {
+
+    // 从output cindexes  开始计算依赖cindexes , 然后计算所有Cindexes 的 可计算性.
+    builder.Compute(*(requests_[segment]));
+    
+    // 根据可计算性, 判断output节点是否都可计算, output节点都可计算则 可计算.
+    if (!builder.AllOutputsAreComputable()) {
+      builder.ExplainWhyAllOutputsNotComputable();  // prints logging info
+      KALDI_ERR << "Not all outputs were computable, cannot create computation.";
+    }
+    // 剪枝掉 无用cindexes.
+    builder.Prune();
+  }
+
+
+
+
+
+
+  // ================  part2 为ComputationGraph 中的 cindex 计算 phase 计算次序  ===============
+  // 一个phase 会被分解为 一个或多个steps.
+  // 对每个segment phase_per_segment 是phases的list, 每个phase 都是cindex_ids的list.
+  std::vector<std::vector<std::vector<int32> > > phases_per_segment;
+  ComputeComputationPhases(nnet_, graph_, &phases_per_segment);
+
+
+
+
+
+  std::vector<std::vector<int32> > steps;
+  steps.reserve(1000);
+  
+  // maps each step to the segment in which it appears.  in the normal case
+  // (non-looped computation), a vector of all zeros.
+  std::vector<int32> step_to_segment;
+
+  {
+    // note: this class will output to 'steps' and to 'cindex_id_to_location_'.
+    // it may incidentally change 'graph_' by adding a few cindexes.
+    ComputationStepsComputer steps_computer(nnet_, &graph_, &steps,
+                                            &cindex_id_to_location_);
+
+    for (size_t segment = 0; segment < requests_.size(); segment++) {
+      steps_computer.ComputeForSegment(*(requests_[segment]),
+                                       phases_per_segment[segment]);
+      while (step_to_segment.size() < steps.size())
+        step_to_segment.push_back(segment);
+
+      // save memory, by deleting the phases we just consumed.  the
+      // following two lines just exist to save memory.
+      std::vector<std::vector<int32> > temp;
+      phases_per_segment[segment].swap(temp);
+    }
+    steps_computer.Check();
+  }
+  std::vector<bool> deriv_needed;
+  ComputeDerivNeeded(steps, step_to_segment, &deriv_needed);
+  CreateStepInfo(deriv_needed, step_to_segment, &steps, computation);
+  AddCommands(deriv_needed, step_to_segment, computation);
+  // the following command reorders commands so kAcceptInput and kProvideOutput
+  // appear in the desired places.
+  ConsolidateIoOperations(nnet_, computation);
+  if (opts.output_debug_info)
+    OutputDebugInfo(computation);
+}
 
 
 

@@ -1,0 +1,43 @@
+digraph ComputePhases{
+        rankdir=LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        subgraph computePhaseFunc{
+                edge[style=dashed]
+                edge[style=dotted]
+                edge[style=filled]
+                edge[style=dashed]
+                ComputeComputationPhases -> ComputeEpochInfo -> ComputeComputationPhasesForEpoch
+                ComputeComputationPhases -> ComputeDependenciesSubset -> ComputeComputationPhasesForEpoch
+                ComputeComputationPhases -> ComputeGraphTranspose -> ComputeComputationPhasesForEpoch
+        }
+
+        ComputeEpochInfo -> epoch
+        ComputeComputationPhasesForEpoch -> phase
+        epoch -> ComputeComputationPhasesForEpoch[style=dashed]
+
+
+        cGraph -> request1[style=dashed]
+        cGraph -> request2[style=dashed]
+        cGraph -> request3[style=dashed]
+        cGraph -> cindexes
+
+        request1 -> cindexes_segment1[style=dashed]
+        request2 -> cindexes_segment2[style=dashed]
+        request3 -> cindexes_segment3[style=dashed]
+
+        cindexes_segment1 -> cindexes[style=dashed]
+        cindexes_segment2 -> cindexes[style=dashed]
+        cindexes_segment3 -> cindexes[style=dashed]
+
+        cindexes[label="Cindex_0 (input-mfcc, Index(n, t, x)) | Cindex_1 (input-ivector, Index(n, t, x)) | ... |Cindex_n (outpu-node, Index(n, t, x))"]
+
+        cindexes -> epoch
+        epoch[label="epoch-compute-index for Cindex_0 | epoch-compute-index for Cindex_1 | ... | epoch-compute-index for Cindex_n"]
+        cindexes -> phase
+        phase[label="phase-c-index for Cindex_0 | phase-c-index for Cindex_1 | ... | phase-c-index for Cindex_n"]
+
+
+
+        
+}
