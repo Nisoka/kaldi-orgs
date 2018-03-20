@@ -876,6 +876,19 @@ void ComputationGraphBuilder::Check(int32 start_cindex_id) const {
   }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+// 
 // 所有 !kComputable的 cindex 对应的node 不是 outputNode 时候 认为 output可计算.
 bool ComputationGraphBuilder::AllOutputsAreComputable() const {
   char is_computable_char = static_cast<char>(kComputable);

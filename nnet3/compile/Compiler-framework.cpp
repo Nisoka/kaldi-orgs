@@ -1034,12 +1034,14 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
     // 从output cindexes  开始计算依赖cindexes , 然后计算所有Cindexes 的 可计算性.
     builder.Compute(*(requests_[segment]));
+
     
     // 根据可计算性, 判断output节点是否都可计算, output节点都可计算则 可计算.
     if (!builder.AllOutputsAreComputable()) {
       builder.ExplainWhyAllOutputsNotComputable();  // prints logging info
       KALDI_ERR << "Not all outputs were computable, cannot create computation.";
     }
+    
     // 剪枝掉 无用cindexes.
     builder.Prune();
   }
@@ -1059,6 +1061,9 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
 
 
+
+
+  
   std::vector<std::vector<int32> > steps;
   steps.reserve(1000);
   

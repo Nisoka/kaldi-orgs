@@ -1,15 +1,27 @@
 digraph ComputeProcess{
-        rankdir=LR
+        rankdir=TB
         node[shape=Mrecord, width=.1, height=.1]
 
         subgraph builder_func{
                 edge[style=dashed]
                 
                 ComputationGraphBuilder -> Compute
-                Compute -> AddInputs
-                Compute -> AddOutputs
+                ComputationGraphBuilder -> Prune
+                ComputationGraphBuilder -> AllOutputsAreComputable
+                Compute -> AddInputs[label="only once", color=grey]
+                Compute -> AddOutputs[label="only once", color=grey]
+
                 Compute -> BuildGraphOneIter
-                BuildGraphOneIter -> AddDependencies
+                Compute -> UpdateAllComputableInfo
+
+                Compute[color=red, style=bold]
+                BuildGraphOneIter[color=red, style=bold]
+                UpdateAllComputableInfo[color=red, style=bold]
+                AddDependencies[style=bold, color=red]
+
+                AddDependencies -> AddCindexId[color=red, style=bold]
+                AddCindexId -> GetCindexId[color=blue, style=bold, label="input, output, middle"]
+                GetCindexId[color=blue, style=bold]
 
         }
 
@@ -33,70 +45,71 @@ digraph ComputeProcess{
 
                  
 
-                 AddInputs -> AddCindexId[style=dashed]
-                 AddCindexId -> cindexes:input
-                 AddCindexId -> computable_info_:kComputable
+                 AddInputs -> AddCindexId[style=dashed, color=grey]
+                 AddCindexId -> computable_info_:head[label="input, middle, output", color=purple]
                  
-                 AddOutputs -> AddCindexId[style=dashed]
-                 AddCindexId -> cindexes:output
-                 AddCindexId -> computable_info_:kUnknown
+                 
+                 AddOutputs -> AddCindexId[style=dashed, color=grey]
                  
                  cindexes:input -> computable_info_:kComputable[style=dashed, color=red]
                  cindexes:input_ivector -> computable_info_:kComputable[style=dashed, color=red]
+                 cindexes:middle -> computable_info_:kUnknown[style=dashed, color=blue]                 
                  cindexes:output -> computable_info_:kUnknown[style=dashed]
-                 computable_info_[label="computable_info_ | <kComputable> kComputable | kWillNotCompute | kNotComputable | <kUnknown> kUnknown"]
 
-                 cindexes:output -> next_queue_
-                 AddCindexId -> next_queue_
+                 
+                 computable_info_[label="<head> computable_info_ | <kComputable> kComputable | kWillNotCompute | kNotComputable | <kUnknown> kUnknown"]
 
+                 
+                 AddCindexId -> next_queue_[label="from output start, then all middles", color=green, style=bold]
 
-                 depned_on_this_
 
                  cindexes:input -> usable_count_:0[style=dashed, color=red]
                  cindexes:input_ivector -> usable_count_:0[style=dashed, color=red]
+                 cindexes:middle -> usable_count_:more[style=dashed, color=blue]
                  cindexes:output -> usable_count_:1[style=dashed]
                  
-                 usable_count_[label="usable_count_ |<1> 1 |<more>  more 1 |<0> 0 "]
+                 usable_count_[label="<head> usable_count_ |<0> 0  |<1> 1 |<more>  more 1 "]
 
 
 
                  
-                 next_queue_ -> current_queue_
-                 current_queue_ -> AddDependencies
-                 AddDependencies -> AddCindexId
+                 next_queue_ -> current_queue_[color=blue]
+                 BuildGraphOneIter -> current_queue_[color=blue]
+                 current_queue_ -> cindex_id
+                 cindex_id -> AddDependencies[color=red, style=dashed]
+
+
+
+
+                 GetCindexId -> cindexes:output
+                 GetCindexId -> cindexes:input
+                 GetCindexId -> cindexes:middle[color=blue]
+
+                 dependencies[label="Vec list dependencies"]
 
 
 
 
 
 
+                 AddDependencies -> depend_on_this_[label="depend on cindex_id"]
+                 depend_on_this_ -> other_cindex_id
+                 depend_on_this_[label="Vec list depend_on_this_"]
+                 
+                 other_cindex_id -> computable_queue_[label="add to queue"]
+
+                 computable_queue_ -> UpdateAllComputableInfo
+                 UpdateAllComputableInfo -> computable_info_
 
 
-
-
-
-
-
-
-
-
-
-
-
-                 nnet -> node_index
-
-                 Cindex -> node_index -> node_type
-                 Cindex -> index
-
-                 graph_ -> CindexSet[label="cindexes"]
-
-
-                 node_type -> kDescriptor
-                 kDescriptor -> descriptor -> func_IsComputable
-                 func_IsComputable[label = "IsComputable(index, CindexSet)"]
-
-                 index -> func_IsComputable
-                 func_IsComputable -> CindexSet
+                 AddDependencies -> dependencies[label="cindex_id's dependencies"]
+                 dependencies -> dep_cindex_id
+                 AddDependencies -> IncrementUsableCount
+                 dep_cindex_id -> IncrementUsableCount
+                 IncrementUsableCount -> cindexes:middle
+                 IncrementUsableCount -> IncrementUsableCount[label="dependence"]
+                 IncrementUsableCount -> usable_count_:head[color=purple]
+                 
 
         }
 
