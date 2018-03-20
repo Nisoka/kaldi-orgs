@@ -5,22 +5,92 @@ digraph ComputeProcess{
         subgraph builder_func{
                 edge[style=dashed]
                 
-                GraphBuilder_func[label="ComputationGraphBuilder"]
-        
-                GraphBuilder_func -> Compute
-                Compute -> Compute_call
-                Compute_call[label="AddInputs | AddOutputs |"]
+                ComputationGraphBuilder -> Compute
+                Compute -> AddInputs
+                Compute -> AddOutputs
+                Compute -> BuildGraphOneIter
+                BuildGraphOneIter -> AddDependencies
 
         }
 
 
         subgraph ComputeComputableInfo{
 
+                 ComputationGraphBuilder -> request_
+                 request_ -> input_MFCC
+                 request_ -> input_IVECTOR
+                 request_ -> output
+                 input_MFCC -> input_indexes
+                 input_IVECTOR -> input_indexes
+                 output -> output_indexes
+
+                 input_indexes -> AddInputs
+                 output_indexes -> AddOutputs
+
+
+                 cindexes[label="<input> Cindexes(input, Index)(for MFCC) | <input_ivector> Cindexes(input, Index)(for IVECTOR)\
+ |<middle>  Cindexes(input, Index)(for MIDDLE) | ... | <output>Cindexes(output, Index)(for output)"]
+
+                 
+
+                 AddInputs -> AddCindexId[style=dashed]
+                 AddCindexId -> cindexes:input
+                 AddCindexId -> computable_info_:kComputable
+                 
+                 AddOutputs -> AddCindexId[style=dashed]
+                 AddCindexId -> cindexes:output
+                 AddCindexId -> computable_info_:kUnknown
+                 
+                 cindexes:input -> computable_info_:kComputable[style=dashed, color=red]
+                 cindexes:input_ivector -> computable_info_:kComputable[style=dashed, color=red]
+                 cindexes:output -> computable_info_:kUnknown[style=dashed]
+                 computable_info_[label="computable_info_ | <kComputable> kComputable | kWillNotCompute | kNotComputable | <kUnknown> kUnknown"]
+
+                 cindexes:output -> next_queue_
+                 AddCindexId -> next_queue_
+
+
+                 depned_on_this_
+
+                 cindexes:input -> usable_count_:0[style=dashed, color=red]
+                 cindexes:input_ivector -> usable_count_:0[style=dashed, color=red]
+                 cindexes:output -> usable_count_:1[style=dashed]
+                 
+                 usable_count_[label="usable_count_ |<1> 1 |<more>  more 1 |<0> 0 "]
+
+
+
+                 
+                 next_queue_ -> current_queue_
+                 current_queue_ -> AddDependencies
+                 AddDependencies -> AddCindexId
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                 nnet -> node_index
+
                  Cindex -> node_index -> node_type
                  Cindex -> index
 
                  graph_ -> CindexSet[label="cindexes"]
-                 computable_info_ -> CindexSet[label="是否需要计算信息"]
+
+
                  node_type -> kDescriptor
                  kDescriptor -> descriptor -> func_IsComputable
                  func_IsComputable[label = "IsComputable(index, CindexSet)"]
