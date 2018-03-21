@@ -245,7 +245,8 @@ int32 ComputationStepsComputer::AddStep(const std::vector<Cindex> &cindexes,
 
   
   size_t row_index = 0;
-  std::vector<Cindex>::const_iterator iter = cindexes.begin(),
+  std::vector<Cindex>::const_iterator
+      iter = cindexes.begin(),
       end = cindexes.end();
   
   std::vector<int32>::iterator out_iter = step.begin();

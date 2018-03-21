@@ -1,0 +1,50 @@
+
+digraph CreateComputationStep{
+        rankdir=LR
+        node[shape=Mrecord]
+
+        Compiler -> cindex_id_to_location_
+        Compiler -> request_
+        request_[label="request_ | request1 | request2 | request3"]
+
+        fun_ComputeComputationPhases -> phases_per_segment
+        phases_per_segment -> pps_comment[color=grey]
+        pps_comment[label=" --------- request1 vector-phases ------- | <one_phase> phase1-vector- cindex1,cindex2,cindex3 | phase2-vector- cindex4,cindex5,cindex6 | phases-vector ....  | --------- request2 vector-phases ------- | phase1-vector- cindex1,cindex2,cindex3 | phase2-vector- cindex4,cindex5,cindex6| phases-vector ... ", style=dotted]
+        
+
+
+        ComputationStepsComputer -> steps_
+        ComputationStepsComputer -> locations_
+        ComputationStepsComputer -> func_ComputeForSegment[style=dashed]
+        phases_per_segment -> func_ComputeForSegment
+        
+        request_ -> func_ComputeForSegment
+
+
+        pps_comment:one_phase -> SplitIntoSubPhases[label="split phase1 into\n vec-sub_phases", color=blue]
+        SplitIntoSubPhases -> sub_phases[label="same node-index in\n phase1 into subs", color=blue]
+        sub_phases[label="  -- phase1-   vec-sub_phases --- | <sub1> -sub1- cindex1,cindex2(same node-index) | <sub2>-sub2- - -cindex3- - -(same node-index)"]
+
+        sub_phases:sub1 -> func_ProcessSubPhase
+        sub_phases:sub2 -> func_ProcessSubPhase
+
+        func_ProcessSubPhase -> func_AddStep
+        func_AddStep -> steps_
+
+
+
+
+        step_per_segment -> sps_comment[color=grey]
+        sps_comment[label="0,0,0, 1,1,1, .. req_cnt,req_cnt", style=dotted]
+
+
+
+
+
+        // ComputationStepsComputer -> steps_
+        
+
+
+
+
+}

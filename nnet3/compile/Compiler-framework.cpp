@@ -927,6 +927,17 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
     return ans;
   }
 
+
+
+
+
+
+
+
+
+
+
+
   
   NnetComputer computer(config_.compute_config, *computation, nnet_, deriv_nnet_);
   
@@ -996,15 +1007,6 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
 
 
 
-Compiler::Compiler(
-    const ComputationRequest &request,
-    const Nnet &nnet): nnet_(nnet) {
-  requests_.push_back(&request);
-}
-
-
-
-
 
 
 
@@ -1066,14 +1068,12 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
 
 
-  // =============== part3 
-  // 将获得的phases_per_segment 转化为 steps.
+  // =============== part3  将获得的phases_per_segment 转化为 steps.
   // steps_ 顺序保存 每个segment的 每个phase的 每个sub_phase的 所有cindexes.
   std::vector<std::vector<int32> > steps;
   steps.reserve(1000);
 
   // 将每个 step 映射划分为segment
-  // 正常情况下(无环计算), 是全0向量.
   // <0,0,0,0, 1,1,1,1,1,1,1, 2,2,2,2,2 .... >
   std::vector<int32> step_to_segment;
 
@@ -1086,7 +1086,7 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
     
     // foreach request_, phases_per_segment
     for (size_t segment = 0; segment < requests_.size(); segment++) {
-      // ===================== 根据reqeust, 和 phase计算次序的 cindex_ids 计算steps ===============
+      // ===================== 根据reqeust 和 phase计算次序的 cindex_ids 计算steps ===============
       steps_computer.ComputeForSegment(*(requests_[segment]), phases_per_segment[segment]);
 
       // 
@@ -1128,11 +1128,13 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
   // =========== 向computation中增加 命令Commands ===========
   AddCommands(deriv_needed, step_to_segment, computation);
-  // the following command reorders commands so kAcceptInput and kProvideOutput
-  // appear in the desired places.
+
+
+  // =========== 如下函数 从新安排添加的command的顺序。 如kAcceptInput kProvideOutput等命令
   ConsolidateIoOperations(nnet_, computation);
   if (opts.output_debug_info)
     OutputDebugInfo(computation);
+  
 }
 
 
