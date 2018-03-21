@@ -44,9 +44,10 @@ void ComputeComputationPhases(
 
   //  epoch 在这里的意思是 计算批次 或者说是计算次序, 一个完整的计算 需要多批进行计算???
 
-  // cindex_id_to_segment_and_epoch
+  // cindex_id_to_segment_and_epoch ***** 每个 cindex_id 对应的 segment+epoch 次序
   // ------------- request1== 0 1 2 3 4 .. 30, request2= 31 32 ... 60.
-  // epochs_per_segment
+  
+  // epochs_per_segment *********************************
   // ------------- < request1-epochs< epoch-id-1 <cindex_id, ..>
   //                                  epoch-id-2 <cindex-id, ..>
   //                                  ..
@@ -57,6 +58,7 @@ void ComputeComputationPhases(
   //                                  ..
   //                                  epoch-id-n <cindex-id, ..> > 
   //                 >
+
   // epoch_is_trivial
   // ------------- 表示每个 每个epoch内含有的cindex-id数量 true 表示数量 <=1
   static void ComputeEpochInfo(
@@ -66,6 +68,11 @@ void ComputeComputationPhases(
       std::vector<std::vector<std::vector<int32 > > > *epochs_per_segment,
       std::vector<bool> *epoch_is_trivial) {
 
+    // ====================== 1 处理nnet 中node 的epoch-c-order ==============
+    // --------------------------------------------------------------
+    // 注意 这里是映射的 node 而不是cindex, 是node的epoch 次序.
+    // 每个request 都具有相同数量的node. 也就是有相同的 node_to_epoch.
+    // --------------------------------------------------------------    
     // node_to_epoch 映射每个 nnet node 到 一个index, 粗略的告诉我们 计算他们的顺序.
     // 但是我们可能需要计算 更好的cindex_id级别的顺序, 例如在RNN结构下.
     // 经过 ComputeNnetComputationEpochs() 处理 将nnet的信息转化为 node_to_epoch 结果如下:
@@ -251,13 +258,19 @@ void ComputeComputationPhases(
       
       // LOG (nnet3-compute-prob[5.3]:ComputeNnetComputationEpochs():nnet-graph.cc:318) Result node to epoch is:
       // 0 -> (1,); 1 -> (0,); 2 -> (2,); 3 -> (3,); 4 -> (4,); 5 -> (5,); 6 -> (6,); 7 -> (7,); 8 -> (8,); 9 -> (9,); 10 -> (10,); 11 -> (11,); 12 -> (12,); 13 -> (13,); 14 -> (14,); 15 -> (15,); 16 -> (16,); 17 -> (17,); 18 -> (18,); 19 -> (19,); 20 -> (20,); 21 -> (21,); 22 -> (22,); 23 -> (23,); 24 -> (24,); 25 -> (25,); 26 -> (26,); 27 -> (27,); 28 -> (28,); 29 -> (29,); 30 -> (30,)
+        
 
-        
-        
-                                                                                                                                                                                                                                                                                                                                                                                                                                                      
     }
- 
 
+
+    // ------------- 每个request 都共享相同的 nnet node 结构, 因此每个request的 epoch-c-order 当前是一样的
+    // ------------- 都是 node_to_epoch
+
+    // ====================== 2 计算 每个request内 cindex 根据对应node 的epoch-c-order(node_to_epoch),
+    // ====================== 计算每个cindex 的 epoch-c-order 
+    //            
+    // ------------------ node_to_epoch 保存的是每个node 的 epoch-c-order ----------------
+    
     // 向node_to_epoch[i] + 1, 因为我们要保留0 给输入network的input.
     // 并且我们不想证明 epoch-id = 0 只对应于input.????
     for (int32 i = 0; i < node_to_epoch.size(); i++)
@@ -267,15 +280,24 @@ void ComputeComputationPhases(
         num_nodes = nnet.NumNodes(),
         num_cindex_ids = graph.cindexes.size(),
         num_segments = graph.segment_ends.size(),
-        // node_to_epoch 保存的是 (0 -- epoch_last) 所以总共的epoch总数应该是 epoch_last + 1
+
+    
+        // 对于所有request都是具有相同的 epoch-c-order.
+        // 所以num_epoch_indexes 保存的是 epoch总数   ---- 应该是 epoch_last + 1
         num_epoch_indexes = 1 + *std::max_element(node_to_epoch.begin(),
                                                   node_to_epoch.end());
     
     KALDI_ASSERT(node_to_epoch.size() == num_nodes);
 
+
+
+
+
+    // ======================== 目标 是每个 Request-segment 的cindex 的 epoch-c-order ============
     // vector size = 段总数--Request总数
     epochs_per_segment->clear();
     epochs_per_segment->resize(num_segments);
+
 
     
     // epoch_to_num_nodes 只是为了让我们知道是否每个epoch-index 对应多个nodes.
@@ -286,7 +308,7 @@ void ComputeComputationPhases(
     for (int32 n = 0; n < num_nodes; n++)
       epoch_to_num_nodes[node_to_epoch[n]]++;
 
-    // vector size =  epoch 总数
+    // vector size =  node level 下 epoch 总数
     epoch_is_trivial->resize(num_epoch_indexes);
     // 对每个epoch-id, 设置epoch_is_trival = true 表示琐碎的 只有对应一个node.
     for (int32 o = 0; o < num_epoch_indexes; o++) {
@@ -294,6 +316,7 @@ void ComputeComputationPhases(
       (*epoch_is_trivial)[o] = (epoch_to_num_nodes[o] <= 1);
     }
 
+    
     // vector size = cindex 总数
     cindex_id_to_segment_and_epoch->resize(num_cindex_ids);
     KALDI_ASSERT(graph.segment_ends.back() == num_cindex_ids);
@@ -320,9 +343,15 @@ void ComputeComputationPhases(
             node_index = graph.cindexes[cindex_id].first,
             epoch_index = (graph.is_input[cindex_id] ? 0 :
                            node_to_epoch[node_index]);
+
+        // ====================== 如下就得到 foreach request, foreach cindex 的 epoch-c-order. ================
         // 每个cindex_id 设置为 对应的epoch_index + request-id * num_epoch_indexes.
         //  ------------- request1== 0 1 2 3 4 .. 30, request2= 31 32 ... 60.
         (*cindex_id_to_segment_and_epoch)[cindex_id] = epoch_index + segment * num_epoch_indexes;
+
+        // ====================== epochs_per_segment 就是每个request的每个cindex的计算顺序,
+        // ====================== epochs_per_segment 保存的每个request下的每个epoch顺序下的,cindex list
+        
         // 对每个epoch-id 向对应的epochs[epoch-id] push 对应的 cindex_id.
         // 实际就是将每个 node的cindex_id 加入到node对应的epoch中.
         // 这样就将 cindex 安排进入了 epochs.
@@ -439,7 +468,7 @@ void ComputeComputationPhases(
 
 
   int32
-      // epoch总数
+      // epoch总数 per segment
       num_epoch_indexes = epoch_is_trivial.size(),
       // segment-request总数
       num_segments = graph.segment_ends.size();
@@ -481,7 +510,7 @@ void ComputeComputationPhases(
   // =========================================================
   // ==================== 至此 ===============================
   // 将 每个request-segment 的 Cindex
-  // 1 首先计算了 epoch计算次序 是一个粗略的计算次序
+  // 1 首先计算了 epoch计算次序 是一个粗略的计算次序  -- 结果是 epochs_per_segemnt
   // 2 然后通过epoch 计算了 phase计算次序 实现了 phase计算次序.
   // =========================================================
 

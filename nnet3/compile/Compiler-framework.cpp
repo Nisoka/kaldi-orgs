@@ -714,7 +714,9 @@ static bool IoSpecificationIsDecomposable(const IoSpecification &io_spec,
 
 
 void NnetComputeProb::Compute(const NnetExample &eg) {
+
   bool
+      // 是否需要计算导数.
       need_model_derivative = config_.compute_deriv,  // false
       store_component_stats = config_.store_component_stats;  // false
 
@@ -1053,7 +1055,8 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
   // ================  part2 为ComputationGraph 中的 cindex 计算 phase 计算次序  ===============
   // 一个phase 会被分解为 一个或多个steps.
-  // 对每个segment phase_per_segment 是phases的list, 每个phase 都是cindex_ids的list.
+  // 对每个segment phase_per_segment 是phase计算次序 list,
+  //               每个phase计算次序 都保存了该次序应该进行计算的cindex_ids
   std::vector<std::vector<std::vector<int32> > > phases_per_segment;
   ComputeComputationPhases(nnet_, graph_, &phases_per_segment);
 
@@ -1063,36 +1066,67 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
 
 
-  
+  // =============== part3 
+  // 将获得的phases_per_segment 转化为 steps.
+  // steps_ 顺序保存 每个segment的 每个phase的 每个sub_phase的 所有cindexes.
   std::vector<std::vector<int32> > steps;
   steps.reserve(1000);
-  
-  // maps each step to the segment in which it appears.  in the normal case
-  // (non-looped computation), a vector of all zeros.
+
+  // 将每个 step 映射划分为segment
+  // 正常情况下(无环计算), 是全0向量.
+  // <0,0,0,0, 1,1,1,1,1,1,1, 2,2,2,2,2 .... >
   std::vector<int32> step_to_segment;
 
   {
-    // note: this class will output to 'steps' and to 'cindex_id_to_location_'.
-    // it may incidentally change 'graph_' by adding a few cindexes.
-    ComputationStepsComputer steps_computer(nnet_, &graph_, &steps,
-                                            &cindex_id_to_location_);
+    // ComputationStepsComputer 会输出steps cindex_id_to_location_
+    // 可能会增加一些cindexes 改变graph_
+    // cindex_id_to_location_ 就是 ComputationStepsComputer->locations_
+    ComputationStepsComputer steps_computer(nnet_, &graph_, &steps, &cindex_id_to_location_);
 
+    
+    // foreach request_, phases_per_segment
     for (size_t segment = 0; segment < requests_.size(); segment++) {
-      steps_computer.ComputeForSegment(*(requests_[segment]),
-                                       phases_per_segment[segment]);
+      // ===================== 根据reqeust, 和 phase计算次序的 cindex_ids 计算steps ===============
+      steps_computer.ComputeForSegment(*(requests_[segment]), phases_per_segment[segment]);
+
+      // 
       while (step_to_segment.size() < steps.size())
         step_to_segment.push_back(segment);
 
+
+      // 节省空间.
       // save memory, by deleting the phases we just consumed.  the
       // following two lines just exist to save memory.
       std::vector<std::vector<int32> > temp;
       phases_per_segment[segment].swap(temp);
+      
     }
+    
     steps_computer.Check();
   }
+
+
+
+
+
+  // ============ part4   计算每个step 是否需要求解导数 ==============
+  // 1 计算step的依赖关系dep_steps
+  // 2 依赖需要导数, 那么step 也需要导数, 结果得到每个 step是否需要导数.
   std::vector<bool> deriv_needed;
   ComputeDerivNeeded(steps, step_to_segment, &deriv_needed);
+
+
+
+  // ============ 创建StepInfo,
+  // in:
+  // deriv_needed     每个step 是否需要计算导数
+  // step_to_segment  每个step属于那个request <0,0,0,0,0, 1,1,1,1,1, 2,2,2,2, request-cnt,request-cnt,>
+  // steps            每个phase的每个子sub_phase(phase中相同node-index) 的vector
+  // computation      目标计算computation
   CreateStepInfo(deriv_needed, step_to_segment, &steps, computation);
+
+
+  // =========== 向computation中增加 命令Commands ===========
   AddCommands(deriv_needed, step_to_segment, computation);
   // the following command reorders commands so kAcceptInput and kProvideOutput
   // appear in the desired places.
