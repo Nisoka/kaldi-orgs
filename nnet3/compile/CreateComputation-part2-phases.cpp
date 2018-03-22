@@ -61,6 +61,8 @@ void ComputeComputationPhases(
 
   // epoch_is_trivial
   // ------------- 表示每个 每个epoch内含有的cindex-id数量 true 表示数量 <=1
+
+  
   static void ComputeEpochInfo(
       const Nnet &nnet,
       const ComputationGraph &graph,
@@ -82,6 +84,7 @@ void ComputeComputationPhases(
     // 0 -> (1,); 1 -> (0,); 2 -> (2,); 3 -> (3,); 4 -> (4,); 5 -> (5,); 6 -> (6,); 7 -> (7,); 8 -> (8,); 9 -> (9,); 10 -> (10,); 11 -> (11,); 12 -> (12,); 13 -> (13,); 14 -> (14,); 15 -> (15,); 16 -> (16,); 17 -> (17,); 18 -> (18,); 19 -> (19,); 20 -> (20,); 21 -> (21,); 22 -> (22,); 23 -> (23,); 24 -> (24,); 25 -> (25,); 26 -> (26,); 27 -> (27,); 28 -> (28,); 29 -> (29,); 30 -> (30,)
     std::vector<int32> node_to_epoch;
     ComputeNnetComputationEpochs(nnet, &node_to_epoch);
+    
     void ComputeNnetComputationEpochs(const Nnet &nnet, std::vector<int32> *node_to_epoch) {
       KALDI_ASSERT(node_to_epoch != NULL);
 
@@ -435,7 +438,7 @@ void ComputeComputationPhases(
 
 
 
-  // ================= 计算每个 cindex 关于 epoch 计算次序的 依赖子集的 反向依赖子集 ===============
+  // ================= 计算每个 cindex 关于 epoch 计算次序的 依赖子集的 反向后继子集 ===============
   // =======================(为了计算后续cindex的phase计算次序使用)=================
  
   // depned_on_subset 是 正常depend_on的子集,
@@ -444,6 +447,7 @@ void ComputeComputationPhases(
   //  ------- 根据 依赖子集 denpendencies_subset 生成 反向依赖子集depend_on_subset.
   std::vector<std::vector<int32> > depend_on_subset;
   ComputeGraphTranspose(dependencies_subset, &depend_on_subset);
+  
   void ComputeGraphTranspose(const std::vector<std::vector<int32> > &graph,
                              std::vector<std::vector<int32> > *graph_transpose) {
     int32 size = graph.size();
@@ -486,6 +490,7 @@ void ComputeComputationPhases(
   // ==================================================================================================
   // foreach reqeust-segment.
   for (int32 segment = 0; segment < num_segments; segment++) {
+
     phases_per_segment->reserve(50);  // minimize unnecessary copies.  50 is
                                       // very arbitrarily chosen.
     // 对每个 epoch-index.
@@ -590,9 +595,20 @@ void ComputeComputationPhases(
                           function; different invocations of this function work
                           with different non-overlapping elements of the vector.
 
+
   这是本函数的输出, 每次我们增加一个phase, 我们向*phase增加一个vector.
   eg (*phases)[0] 是在计算中的第一个phase中的 被排序的cindexes 的list
-  Note, 这个函数会被调用多次, 每次我们都向这个vector 增加一个或多个 phases, 这个phases每次都增长一下size.
+
+  Note, 这个函数会被调用多次, 每次我们都向这个vector 增加一个或多个 phases,
+  
+  1 当epoch琐碎的时候, 增加一个phase
+  2 当epoch不琐碎情况, 在内部就通过
+    while(!this_phases.empty())
+      phases.resize(phases.size() + 1)
+      next_phases_candicates -> this_phases,
+    循环的增长.
+      
+  这个phases每次都增长一下size.
   @param [in,out] phases This is the output of this
                           function.  Each time we add a new phase, we append a
                           vector to *phases.  E.g. (*phases)[0] is the sorted

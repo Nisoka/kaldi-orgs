@@ -215,7 +215,6 @@ int main(int argc, char *argv[]) {
             }
             return true;
           }
-
         }
       }
 
@@ -263,6 +262,10 @@ int main(int argc, char *argv[]) {
         config_(config), writer_(writer) { }
     
 
+
+
+
+    
     // ================ merge 处理所有example ==============
     // 但是都是等待一个具体的minibatch_size才进行merged, 最后一次merged时,可能不到minibatch,
     // 所以后面需要一个finish里面进行 终止判断的merge,　这里的batch大小 != minibatch_size.
@@ -270,6 +273,8 @@ int main(int argc, char *argv[]) {
     // merge对象 读取所有的example
     for (; !example_reader.Done(); example_reader.Next()) {
       const NnetExample &cur_eg = example_reader.Value();
+
+      // 读取NnetExample 根据minibatch-size 进行merge
       merger.AcceptExample(new NnetExample(cur_eg));
 
       void ExampleMerger::AcceptExample(NnetExample *eg) {
@@ -279,12 +284,6 @@ int main(int argc, char *argv[]) {
         // 在清空vector之前我们会删除key.
         // 这样 我们可以保证 key中的eg 会一直是vector中的first元素.
         
-        // If an eg with the same structure as 'eg' is already a key in the
-        // map, it won't be replaced, but if it's new it will be made
-        // the key.  Also we remove the key before making the vector empty.
-        // This way we ensure that the eg in the key is always the first
-        // element of the vector.
-
         // eg_to_egs_
         // [[eg][eg][eg][eg][eg][eg]]  具有相同规格
         // [[eg][eg][eg][eg][eg]]
@@ -299,7 +298,7 @@ int main(int argc, char *argv[]) {
         
         vec.push_back(eg);
         int32
-            // 该eg中多个input的index中最大size的size
+            // 该eg中多个NnetIo 的indexes数量最多的的size (一般就是MFCC 多加了 L R)
             eg_size = GetNnetExampleSize(*eg),
             // 已经接收过的n个eg.
             num_available = vec.size();
@@ -389,9 +388,13 @@ int main(int argc, char *argv[]) {
           }
           WriteMinibatch(egs_to_merge);
 
+          // WriteMinibatch 将多个等待合并的 egs 写入到一个 eg里面.
           void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
+
+
+            
             KALDI_ASSERT(!egs.empty());
-            // egs[0] 中 多个组成部分中 多个io的 indexes中 size最大的size??
+            // egs[0] 中 多个组成部分中 多个io的 indexes中 size最大的size
             int32 eg_size = GetNnetExampleSize(egs[0]);
 
             // 向minibatch中写入 多个eg的信息头
@@ -414,6 +417,9 @@ int main(int argc, char *argv[]) {
             //   注意 汇总前, 每个eg 是一句话的多帧数据, 所以内部的NnetIo 的 indexes的n都保持不变
             //        汇总后, 多个eg中相同的NnetIo输入, 会汇总在一起, 对应的indexes也需要修改n , n 表示来自原本的第几个eg.
             MergeExamples(egs, config_.compress, &merged_eg);
+
+
+            
             void MergeExamples(const std::vector<NnetExample> &src,
                                bool compress,
                                NnetExample *merged_eg) {
@@ -437,22 +443,12 @@ int main(int argc, char *argv[]) {
             writer_->Write(key.str(), merged_eg);
           }
 
-          
         }
       }
-
-
-
-      
-      
-
       
     }
 
-
-
     // =============== merge eg_to_egs_ 中到达最终时剩余的不到minibatch_size 的eg(不能浪费数据)
-    
     // merge 自己打印必要的诊断信息
     // the merger itself prints the necessary diagnostics.
     merger.Finish();

@@ -110,8 +110,8 @@ void Compiler::ComputeDerivNeeded(
         (*deriv_needed)[step] = true;
     }
 
-    // 如果step 是输出, 并且用户提供了导数, 对该输出我们需要一个位置 保存导数, 这样也会设置 deriv_needed=true.
-
+    // 如果step 是输出, 并且用户提供了导数, 对该输出我们需要一个位置
+    // 保存导数, 这样也会设置 deriv_needed=true.
     if (nnet_.IsOutputNode(node_index)) {
       int32 output_index = request.IndexForOutput(node_name);
       KALDI_ASSERT(output_index != -1);
@@ -121,7 +121,6 @@ void Compiler::ComputeDerivNeeded(
 
     // 如果是一个 updatable Component node 具有 非0学习率, 并且用户需要模型导数(如训练时)
     // 我们就需要计算导数
-
     if (nnet_.IsComponentNode(node_index) && request.need_model_derivative) {
       const NetworkNode &node = nnet_.GetNode(node_index);
       const Component *c = nnet_.GetComponent(node.u.component_index);
@@ -246,6 +245,9 @@ void Compiler::CreateStepInfo(
     const std::vector<int32> &step_to_segment,
     std::vector<std::vector<int32> > *by_step,
     NnetComputation *computation) {
+
+
+  
   
   KALDI_ASSERT(!by_step->empty());
 

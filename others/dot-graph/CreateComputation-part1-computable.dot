@@ -8,8 +8,8 @@ digraph ComputeProcess{
                 ComputationGraphBuilder -> Compute
                 ComputationGraphBuilder -> Prune
                 ComputationGraphBuilder -> AllOutputsAreComputable
-                Compute -> AddInputs[label="only once", color=grey]
-                Compute -> AddOutputs[label="only once", color=grey]
+                Compute -> AddInputs[label="only once"]
+                Compute -> AddOutputs[label="only once"]
 
                 Compute -> BuildGraphOneIter
                 Compute -> UpdateAllComputableInfo
@@ -106,7 +106,6 @@ digraph ComputeProcess{
                  dependencies -> dep_cindex_id
                  AddDependencies -> IncrementUsableCount
                  dep_cindex_id -> IncrementUsableCount
-                 IncrementUsableCount -> cindexes:middle
                  IncrementUsableCount -> IncrementUsableCount[label="dependence"]
                  IncrementUsableCount -> usable_count_:head[color=purple]
                  

@@ -1,0 +1,32 @@
+digraph ComputationGraph{
+        rankdir = TB
+        node[shape=Mrecord, width=.1, height=.1]
+
+        UpdateAllComputableInfo -> computable_queue_
+        UpdateAllComputableInfo -> UpdateComputableInfo        
+        computable_queue_ -> cindex_id
+        cindex_id -> UpdateComputableInfo-> ComputeComputableInfo-> IsComputable
+        ComputeComputableInfo -> computable_info_[style=dashed]
+        computable_info_[label="computable_info_[cindex_id]"]
+        
+
+        cindex_id -> dependencies[style=dashed]
+        cindex_id -> depend_on_this[style=dashed]
+
+        IsComputable -> kUnknown
+        IsComputable -> kNotComputable
+        IsComputable -> kComputable
+        IsComputable -> kWillNotCompute
+
+        // depend_on_this -> kNotComputable
+        // depend_on_this -> kComputable
+        // depend_on_this -> kWillNotCompute
+        kNotComputable -> computable_queue_[label="depend_on_this"]
+        kComputable -> computable_queue_[label="depend_on_this"]
+        kWillNotCompute -> computable_queue_[label="depend_on_this"]
+        
+        dependencies -> kNotComputable
+        kNotComputable -> DecrementUsableCount[label="dependencies"]
+        DecrementUsableCount -> dependencies
+
+}

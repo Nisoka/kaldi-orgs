@@ -82,6 +82,9 @@ int main(int argc, char *argv[]) {
     Nnet nnet;
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
 
+
+
+    
     if (batchnorm_test_mode)
       SetBatchnormTestMode(true, &nnet);
 
@@ -97,8 +100,7 @@ int main(int argc, char *argv[]) {
 
 
 
-    // 以Options nnet 构建一个计算对象.
-    // 内部最终要的是构建 
+    // ==============================================
     NnetComputeProb prob_computer(opts, nnet);
 
     SequentialNnetExampleReader example_reader(examples_rspecifier);

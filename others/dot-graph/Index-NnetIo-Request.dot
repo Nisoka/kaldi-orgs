@@ -24,6 +24,9 @@ digraph ComputationGraph{
 
 
         IoSpecification -> indexes[label="save the cp same indexes"]
+        NnetIo -> IoSpecification[style=dashed, label=" the same as", color=blue]
+        IoSpecification -> name
+        
 
         indexes_2 -> n_field
         indexes_2 -> t_field

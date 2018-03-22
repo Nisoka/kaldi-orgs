@@ -1,0 +1,22 @@
+digraph ComputationGraph{
+        rankdir = TB
+        node[shape=Mrecord, width=.1, height=.1]
+
+        request_
+        CompileNoShortcut[style=bold,color=red]
+        CachingOptimizingCompiler -> Compile
+        CachingOptimizingCompiler -> computation_cache_[style=dashed]
+
+        request_ -> CompileInternel
+        Compile -> CompileInternel -> CompileAndCache
+        CompileAndCache -> computation_cache_
+        CompileAndCache -> CompileViaShortcut
+        CompileViaShortcut -> is_mini_request:m -> CompileNoShortcut
+        CompileViaShortcut -> is_mini_request:n -> RequestIsDecomposable
+        is_mini_request[label="<m> mini | <n> normal"]
+
+
+        request_ -> RequestIsDecomposable -> mini_request
+        mini_request -> CompileInternel
+        
+}

@@ -365,7 +365,22 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
   int32 max_distance = 10000;
   while (current_distance_ < max_distance) {
 
-    // output向前 构建编译逻辑Cindexes.
+    // 从output向前 构建编译逻辑Cindexes.
+
+    // 内部循环 current_queue_,
+    // 对current_queue_ 上的cindex_id
+    
+    // 根据usable_count_[cindex_id] 进行判断,
+    // (input 不会加入current_queue_, 因此不用考虑 input的usable_count_)
+    //      =0   1 设置computable_info_[cindex_id] = kWillNotComputable,
+    //                 表示不会进行计算该cindex
+    //           2 对其后继 denpen_on_cindex_id 的other_cindex_id 加入computable_queue_
+    //                 等待进行计算可计算性
+    //      !=0  1 调用AddDependencies() 加入cindex_id 的依赖denpend_cindex_id的Cindex.
+    //                 AddCindexId(depend_cindex_id) 内部将这些依赖Cindex > next_queue_
+    //           2 调用IncrementalUsableCount 增加自身 usable_count_
+    //                 表示output会用到该cindex_id, 递归调用增加 depend_cindex_id的usable_cnt.
+    //           3 加入computable_queue_ 等待进行计算可计算性
     BuildGraphOneIter();
     void ComputationGraphBuilder::BuildGraphOneIter() {
       // current_queue_ ------- 扩展依赖性队列
@@ -557,7 +572,6 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
                   }
                 }
               }
-              
             }
 
             // 增加了依赖cindexes, 将当前cindex_id  加入到 可计算性队列中, 等待计算其可计算性.
@@ -576,16 +590,19 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
     if (GetVerboseLevel() >= 3 || RandInt(1,  (current_distance_ + 1)) == 1)
       Check(cur_segment_start);
 
-    // ================= 更新 computable_queue_ 中所有cindex 的computable_info_ ===========
-    // ==========1 判断cindex node_index 的节点类型 kDescriptor, kComponent kInput等
-    //                 计算computable 为kComputable, kNotComputable, kUnknown.
-    // ==========2 处理 确定不是 kUnknown的cindex
-    //                 1 cindex的后续 other_cindex_id 都需要重新计算 可计算性 加入到 computable_queue_
-    //                 2 如果是 kNotComputable, 并且 需要计数 usable_count_ != 0 需要更新其依赖的各个usable_count -- 并判断.
-    //                   
-    // TODO: come up with a scheme to delay when we call
-    // UpdateAllComputableInfo().
+    // ==== 更新 computable_queue_ 中所有cindex 的computable_info_ =======
+    // 内部循环 computable_queue_
+    // ==1 判断cindex node_index 的节点类型 kDescriptor, kComponent kInput等
+    //       计算computable 为kComputable, kNotComputable, kUnknown.
+    //       更新 computable_info_[cindex_id]
+    
+    // ==2 处理 不是kUnknown的 cindex
+    //       1 cindex的后续 other_cindex_id 都需要重新计算 可计算性
+    //           加入到 computable_queue_, 等待循环计算
+    //       2 如果是 kNotComputable, 并且 需要计数 usable_count_ != 0
+    //           DecrementUsableCount() 递归更新其依赖的各个usable_count
     UpdateAllComputableInfo();
+    
     void ComputationGraphBuilder::UpdateAllComputableInfo() {
 
       // 处理 需要更新计算性队列. 内部还会追加.
@@ -770,7 +787,6 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
                     }
                   }
                 }
-
               }
             }
           }
@@ -887,9 +903,9 @@ void ComputationGraphBuilder::Check(int32 start_cindex_id) const {
 
 
 
-
-// 
+ 
 // 所有 !kComputable的 cindex 对应的node 不是 outputNode 时候 认为 output可计算.
+// 所有outputNode 都是 kComputeble 的 return true
 bool ComputationGraphBuilder::AllOutputsAreComputable() const {
   char is_computable_char = static_cast<char>(kComputable);
   std::vector<char>::const_iterator iter = computable_info_.begin(),
@@ -903,6 +919,12 @@ bool ComputationGraphBuilder::AllOutputsAreComputable() const {
   }
   return true;
 }
+
+
+
+
+
+
 
 // 1 剪枝依赖, 剩下真实用到的依赖
 // 2 清理那些不可计算的依赖
@@ -942,9 +964,12 @@ void ComputationGraphBuilder::PruneDependencies(int32 cindex_id) {
 
       bool dont_care = false;  // there should be no kUnknown, and we check this
       CindexSet cindex_set(*graph_, computable_info_, dont_care);
+
       // 必要依赖 used_cindexes
       std::vector<Cindex> used_cindexes;
       bool ans = desc.IsComputable(index, cindex_set, &used_cindexes);
+
+      
       // If the next assert fails it could be a failure in the assumption that
       // making more inputs available will never change something from not being
       // computable to being computable; or it could be a bug elsewhere.
@@ -1015,17 +1040,25 @@ void ComputationGraphBuilder::Prune() {
   for (int32 cindex_id = start_cindex_id; cindex_id < num_cindex_ids; cindex_id++)
     PruneDependencies(cindex_id);
 
+
+  
   // 如下的代码, 清理 cindex_id 的后续. 不需要获得所有的数据?
   // 先删除掉 以前的依赖
-  // 然后扩展这些依赖.  (设计也可以循环设置也可以)
+  // 然后扩展这些依赖.  
   depend_on_this_.resize(start_cindex_id);
   depend_on_this_.resize(num_cindex_ids);
 
-  // ==================== cindex 中所有计算output的必要cindex
-  // 设置对应required[cindex_id] = true ==========================
+  // == 所有计算output的必要cindex 设置对应required[cindex_id] = true, 认为是必要cindexes ==
+  
+  // 从 output-node 的cindexes 开始, 根据依赖关系递归向前
+  // 所有构建output 的依赖cindex 都对required[cindex_id]=true
+  // required -- 保持所有必要的cindexes.
   std::vector<bool> required;
   ComputeRequiredArray(start_cindex_id, &required);
+
+  
   void ComputationGraphBuilder::ComputeRequiredArray(int32 start_cindex_id, std::vector<bool> *required) const {
+
     int32 num_cindex_ids = graph_->cindexes.size();
 
     // 设置为 当前request 加入的cindex的总数

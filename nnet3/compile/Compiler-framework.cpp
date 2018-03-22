@@ -1,135 +1,3 @@
-// Options class for optimizing a NnetComputation.  The main projected use for
-// this is in debugging the optimization code itself, so that if an error is
-// detected, we can work out which optimization was responsible for the error.
-struct NnetOptimizeOptions {
-  bool optimize;  // setting this false disallow all optimization.
-  bool consolidate_model_update;
-  bool propagate_in_place;
-  bool backprop_in_place;
-  bool optimize_row_ops;
-  bool convert_addition;
-  bool remove_assignments;
-  bool allow_left_merge;
-  bool allow_right_merge;
-  bool initialize_undefined;
-  bool move_sizing_commands;
-  bool allocate_from_other;
-  int32 min_deriv_time;
-  int32 max_deriv_time;
-  int32 max_deriv_time_relative;
-  bool snip_row_ops;
-  // optimize_looped_computation is a 'hidden config' not available from
-  // the command line; it's set to true to enable the optimization for
-  // looped computation that turns a linear computation into a loop.
-  bool optimize_looped_computation;
-
-  NnetOptimizeOptions():
-      optimize(true),
-      consolidate_model_update(true),
-      propagate_in_place(true),
-      backprop_in_place(true),
-      optimize_row_ops(true),
-      convert_addition(true),
-      remove_assignments(true),
-      allow_left_merge(true),
-      allow_right_merge(true),
-      initialize_undefined(true),
-      move_sizing_commands(true),
-      allocate_from_other(true),
-      min_deriv_time(std::numeric_limits<int32>::min()),
-      max_deriv_time(std::numeric_limits<int32>::max()),
-      max_deriv_time_relative(std::numeric_limits<int32>::max()),
-      snip_row_ops(true),
-      optimize_looped_computation(false) { }
-
-  void Register(OptionsItf *opts) {
-    opts->Register("optimize", &optimize, "Set this to false to turn off all "
-                 "optimizations");
-    opts->Register("consolidate-model-update", &consolidate_model_update,
-                   "Set to false to disable optimization that consolidates "
-                   "the model-update phase of backprop (e.g. for recurrent "
-                   "architectures");
-    opts->Register("propagate-in-place", &propagate_in_place, "Set to false to "
-                   "disable optimization that allows in-place propagation");
-    opts->Register("backprop-in-place", &backprop_in_place, "Set to false to "
-                   "disable optimization that allows in-place backprop");
-    opts->Register("optimize-row-ops", &optimize_row_ops, "Set to false to "
-                   "disable certain optimizations that act on operations of "
-                   "type *Row*.");
-    opts->Register("convert-addition", &convert_addition, "Set to false to "
-                   "disable the optimization that converts Add commands into "
-                   "Copy commands wherever possible.");
-    opts->Register("remove-assignments", &remove_assignments, "Set to false to "
-                   "disable optimization that removes redundant assignments");
-    opts->Register("allow-left-merge", &allow_left_merge, "Set to false to "
-                   "disable left-merging of variables in remove-assignments "
-                   "(obscure option)");
-    opts->Register("allow-right-merge", &allow_right_merge, "Set to false to "
-                   "disable right-merging of variables in remove-assignments "
-                   "(obscure option)");
-    opts->Register("initialize-undefined", &initialize_undefined, "Set to false "
-                   "to disable optimization that avoids redundant zeroing");
-    opts->Register("move-sizing-commands", &move_sizing_commands, "Set to false "
-                   "to disable optimization that moves matrix allocation and "
-                   "deallocation commands to conserve memory.");
-    opts->Register("allocate-from-other", &allocate_from_other, "Instead of "
-                   "deleting a matrix of a given size and then allocating "
-                   "a matrix of the same size, allow re-use of that memory");
-    opts->Register("min-deriv-time", &min_deriv_time, "You can set this to "
-                   "the minimum t value that you want derivatives to be computed "
-                   "at when updating the model.  This is an optimization that "
-                   "saves time in the backprop phase for recurrent frameworks");
-    opts->Register("max-deriv-time", &max_deriv_time, "You can set this to "
-                   "the maximum t value that you want derivatives to be computed "
-                   "at when updating the model.  This is an optimization that "
-                   "saves time in the backprop phase for recurrent frameworks");
-    opts->Register("max-deriv-time-relative", &max_deriv_time_relative,
-                   "An alternative mechanism for setting the --max-deriv-time, "
-                   "suitable for situations where the length of the egs is "
-                   "variable.  If set, it is equivalent to setting the "
-                   "--max-deriv-time to this value plus the largest 't' value "
-                   "in any 'output' node of the computation request.");
-    opts->Register("snip-row-ops", &snip_row_ops, "Set this to false to "
-                   "disable an optimization that reduces the size of certain "
-                   "per-row operations");
-  }
-  void Read(std::istream &is, bool binary);
-  void Write(std::ostream &os, bool binary) const;
-  bool operator == (const NnetOptimizeOptions &other) const;
-};
-
-struct NnetComputeOptions {
-  bool debug;
-  NnetComputeOptions(): debug(false) { }
-  void Register(OptionsItf *opts) {
-    opts->Register("debug", &debug, "If true, turn on "
-                   "debug for the neural net computation (very verbose!) "
-                   "Will be turned on regardless if --verbose >= 5");
-  }
-
-};
-
-struct CachingOptimizingCompilerOptions {
-  bool use_shortcut;
-  int32 cache_capacity;
-
-  CachingOptimizingCompilerOptions():
-      use_shortcut(true),
-      cache_capacity(64) { }
-
-  void Register(OptionsItf *opts) {
-    opts->Register("use-shortcut", &use_shortcut,
-                   "If true, use the 'shortcut' in compilation whereby "
-                   "computation requests with regular structure are identified "
-                   "as such, a computation with a smaller number of distinct "
-                   "values of 'n' is compiled (e.g. 2), and the compiled "
-                   "computation is expanded to match the size of the real "
-                   "computation request.");
-    opts->Register("cache-capacity", &cache_capacity,
-                   "Determines how many computations the computation-cache will "
-                   "store (most-recently-used).");
-  }
-};
 
 struct NnetComputeProbOptions {
   bool debug_computation;
@@ -181,11 +49,11 @@ struct NnetComputeProbOptions {
   }
 };
 
+
+
+
 //  这个类, 能够在一个调用中执行 Compilation 和 Optimization操作
-//  并确保当 ComputationRequest没变时, 不会重复进行编译过程.
-/// This class enables you to do the compilation and optimization in one call,
-/// and also ensures that if the ComputationRequest is identical to the previous
-/// one, the compilation process is not repeated.
+//  并确保当 ComputationRequest没变时, 不会重复进行编译过程 (Cache机制).
 class CachingOptimizingCompiler {
  public:
   CachingOptimizingCompiler(const Nnet &nnet,
@@ -336,38 +204,6 @@ class NnetComputeProb {
   }
   
 
-  // This version of the constructor may only be called if
-  // config.store_component_stats == true and config.compute_deriv == false;
-  // it means it will store the component stats in 'nnet'.  In this
-  // case you should call ZeroComponentStats(nnet) first if you want
-  // the stats to be zeroed first.
-  NnetComputeProb(const NnetComputeProbOptions &config,
-                  Nnet *nnet);
-
-
-  // Reset the likelihood stats, and the derivative stats (if computed).
-  void Reset();
-
-  // compute objective on one minibatch.
-  void Compute(const NnetExample &eg);
-
-  // Prints out the final stats, and return true if there was a nonzero count.
-  bool PrintTotalStats() const;
-
-  // returns the objective-function info for this output name (e.g. "output"),
-  // or NULL if there is no such info.
-  const SimpleObjectiveInfo *GetObjective(const std::string &output_name) const;
-
-  // This function returns the total objective over all output nodes recorded here, and
-  // outputs to 'tot_weight' the total weight (typically the number of frames)
-  // corresponding to it.
-  double GetTotalObjective(double *tot_weight) const;
-
-  // if config.compute_deriv == true, returns a reference to the
-  // computed derivative.  Otherwise crashes.
-  const Nnet &GetDeriv() const;
-
-  ~NnetComputeProb();
  private:
   void ProcessOutputs(const NnetExample &eg,
                       NnetComputer *computer);
@@ -386,6 +222,27 @@ class NnetComputeProb {
 
   unordered_map<std::string, PerDimObjectiveInfo, StringHasher> accuracy_info_;
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -720,10 +577,8 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
       need_model_derivative = config_.compute_deriv,  // false
       store_component_stats = config_.store_component_stats;  // false
 
-  // 计算目标request
+  // ==================== 获得Merged_eg 的 计算 request ==================
   ComputationRequest request;
-
-  // ==================== 获得计算目标request ==================
   GetComputationRequest(nnet_, eg, need_model_derivative, store_component_stats, &request);
 
 
@@ -731,6 +586,9 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
   // 使用Compiler 编译request 生成一个computation.
   const NnetComputation *computation = compiler_.Compile(request);
 
+
+
+  
   const NnetComputation* CachingOptimizingCompiler::Compile(const ComputationRequest  &in_request) {
     Timer timer;
     const NnetComputation *ans = CompileInternal(in_request);
@@ -879,7 +737,7 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
             CompilerOptions opts;
             NnetComputation *computation = new NnetComputation;
 
-            // ------------------ 编译 request 构建一个 computation 见下方代码 --------------
+            // ------------------ 编译 request 构建一个 computation --------------
             {
               Timer timer;
               compiler.CreateComputation(opts, computation);
@@ -926,12 +784,6 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
     }
     return ans;
   }
-
-
-
-
-
-
 
 
 
@@ -1010,7 +862,12 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
 
 
 
-
+Compiler::Compiler(
+    const ComputationRequest &request,
+    const Nnet &nnet): nnet_(nnet) {
+  // 构造Compiler 时, 将request 加入了 内部的 request_ 队列中, 但是一般实际上就只有一个request.
+  requests_.push_back(&request);
+}
 // ============================== Main ====================================
 // ============================== Main ====================================
 // ============================== Main ====================================
@@ -1031,6 +888,8 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
 
   // ================ part1 构建ComputationGraph Compute Cindex computable  ================
   // -------- use the ComputationGraphBuilder build the graph_ ---------
+
+  
   ComputationGraphBuilder builder(nnet_, &graph_);
   
   // 为每个request_ 构建 ComputationGraph -- cindexes 依赖以及计算性.
@@ -1072,7 +931,6 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
   // steps_ 顺序保存 每个segment的 每个phase的 每个sub_phase的 所有cindexes.
   std::vector<std::vector<int32> > steps;
   steps.reserve(1000);
-
   // 将每个 step 映射划分为segment
   // <0,0,0,0, 1,1,1,1,1,1,1, 2,2,2,2,2 .... >
   std::vector<int32> step_to_segment;
@@ -1082,26 +940,18 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
     // 可能会增加一些cindexes 改变graph_
     // cindex_id_to_location_ 就是 ComputationStepsComputer->locations_
     ComputationStepsComputer steps_computer(nnet_, &graph_, &steps, &cindex_id_to_location_);
-
     
     // foreach request_, phases_per_segment
     for (size_t segment = 0; segment < requests_.size(); segment++) {
       // ===================== 根据reqeust 和 phase计算次序的 cindex_ids 计算steps ===============
       steps_computer.ComputeForSegment(*(requests_[segment]), phases_per_segment[segment]);
-
       // 
       while (step_to_segment.size() < steps.size())
         step_to_segment.push_back(segment);
-
-
       // 节省空间.
-      // save memory, by deleting the phases we just consumed.  the
-      // following two lines just exist to save memory.
       std::vector<std::vector<int32> > temp;
       phases_per_segment[segment].swap(temp);
-      
     }
-    
     steps_computer.Check();
   }
 
@@ -1112,6 +962,7 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
   // ============ part4   计算每个step 是否需要求解导数 ==============
   // 1 计算step的依赖关系dep_steps
   // 2 依赖需要导数, 那么step 也需要导数, 结果得到每个 step是否需要导数.
+  // - deriv_needed - 每个step 是否需要导数
   std::vector<bool> deriv_needed;
   ComputeDerivNeeded(steps, step_to_segment, &deriv_needed);
 
