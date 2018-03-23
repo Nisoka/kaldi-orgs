@@ -101,6 +101,12 @@ int main(int argc, char *argv[]) {
 
 
     // ==============================================
+    // NnetComputeProbOptions opts
+    // 只设置了
+    // batchnorm_test_mode = true,
+    // dropout_test_mode = true,
+    // collapse_model = true;
+
     NnetComputeProb prob_computer(opts, nnet);
 
     SequentialNnetExampleReader example_reader(examples_rspecifier);

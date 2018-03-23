@@ -732,3 +732,144 @@
 
 
 }  // done part-Cmds
+
+
+
+
+
+
+
+
+// 将计算计算到不同的segment中, 增加AddCommand 时 增加了分界标记 kNoOperationMarker.
+// 输出分割vector<segment> 保存command-index 的 start 和 end
+// 所以每个segment代表的 commands 都是从start end-1 的编号.
+static void SplitComputationIntoSegments(
+    const NnetComputation &computation,
+    std::vector<std::pair<int32, int32> > *segments) {
+
+  int32 num_commands = computation.commands.size();
+  segments->clear();
+  int32 cur_start = 0;
+  for (int32 c = 0; c < num_commands; c++) {
+    if (computation.commands[c].command_type == kNoOperationMarker) {
+      segments->push_back(std::pair<int32, int32>(cur_start, c));
+      cur_start = c + 1;
+    }
+  }
+  segments->push_back(std::pair<int32, int32>(cur_start, num_commands));
+}
+
+
+// 统一数据结构操作
+void ConsolidateIoOperations(const Nnet &nnet,
+                             NnetComputation *computation) {
+  // These segments, represented as (start-index, end-index),
+  // are segments of the computation separated by kNoOperationMarker.
+  std::vector<std::pair<int32, int32> > segments;
+  SplitComputationIntoSegments(*computation, &segments);
+
+  // 重新编号 command-index 保存到reordered_comands中.
+  int32 num_commands = computation->commands.size();
+  std::vector<NnetComputation::Command> reordered_commands(num_commands);
+
+  // 先处理 每个segment的分解 - kNoOperationMarker.
+  for (size_t s = 0; s + 1 < segments.size(); s++)
+    reordered_commands[segments[s].second].command_type = kNoOperationMarker;
+
+  // 对每个Segment 重新安排命令,
+  // kAcceptInput 必须在一个段的最开始 left_commands
+  // kProvideOutput 必须在一个段的最末 right_commands
+  // 其他命令都在中间位置              middle_commands
+
+  std::vector<int32> left_commands, middle_commands, right_commands;
+
+  for (size_t s = 0; s < segments.size(); s++) {
+    int32 segment_start = segments[s].first,
+        segment_end = segments[s].second;
+    left_commands.clear();
+    middle_commands.clear();
+    right_commands.clear();
+    // left middle right 临时保存三种commands
+    for (int32 c = segment_start; c < segment_end; c++) {
+      if (computation->commands[c].command_type == kProvideOutput) {
+        right_commands.push_back(c);
+      } else if (computation->commands[c].command_type == kAcceptInput) {
+        left_commands.push_back(c);
+      } else {
+        middle_commands.push_back(c);
+      }
+    }
+
+    // 顺序安排 left middle right commands => reordered_commands.
+    std::vector<int32>::const_iterator iter = left_commands.begin(),
+        end = left_commands.end();
+    int32 c = segment_start;
+    for (; iter != end; ++iter, ++c)
+      reordered_commands[c] = computation->commands[*iter];
+    iter = middle_commands.begin();
+    end = middle_commands.end();
+    for (; iter != end; ++iter, ++c)
+      reordered_commands[c] = computation->commands[*iter];
+    iter = right_commands.begin();
+    end = right_commands.end();
+    for (; iter != end; ++iter, ++c)
+      reordered_commands[c] = computation->commands[*iter];
+    KALDI_ASSERT(c == segment_end);
+  }
+
+
+  // swap 将reordered_commands 保存到computation中.
+  computation->commands.swap(reordered_commands);
+}
+
+
+
+
+// 
+void Compiler::OutputDebugInfo(NnetComputation *computation) const {
+
+  // 为所有的matrices 都增加 matrix_debug_info.
+  int32 num_matrices = computation->matrices.size(),
+      num_steps = steps_.size();
+  computation->matrix_debug_info.resize(num_matrices);
+
+  // 每个 StepInfo
+  for (int32 step = 0; step < num_steps; step++) {
+    const StepInfo &step_info = steps_[step];
+
+    if (step_info.value == 0)
+      continue;  // e.g. input step for ConstantComponent.
+
+    if (!computation->IsWholeMatrix(step_info.value))
+      continue;
+
+    // 当前step的 matrix_index, 并保存到deriv_matrix
+    int32 value_matrix = computation->submatrices[step_info.value].matrix_index;
+    int32 deriv_matrix = 0;
+    if (step_info.deriv != 0 && computation->IsWholeMatrix(step_info.deriv))
+      deriv_matrix = computation->submatrices[step_info.deriv].matrix_index;
+
+    // 设置每个 matrix_debug_info.
+    NnetComputation::MatrixDebugInfo &debug_info = computation->matrix_debug_info[value_matrix];
+
+    // 增加需要计算(只是为了debug 打印输出)的 cindexes
+    debug_info.is_deriv = false;
+    AppendCindexes(step_info.node_index, step_info.output_indexes, &debug_info.cindexes);
+
+    // 如果具有导数矩阵, 将该StepInfo的导数matrix 也加入
+    if (deriv_matrix != 0) {
+      NnetComputation::MatrixDebugInfo &deriv_debug_info = computation->matrix_debug_info[deriv_matrix];
+      deriv_debug_info.is_deriv = true;
+      deriv_debug_info.cindexes = debug_info.cindexes;
+    }
+  }
+}
+
+void AppendCindexes(int32 node, const std::vector<Index> &indexes,
+                    std::vector<Cindex> *out) {
+  size_t indexes_size = indexes.size();
+  if (indexes_size > out->size())
+    out->reserve(out->size() + indexes_size);
+  for (size_t i = 0; i < indexes_size; i++)
+    out->push_back(Cindex(node, indexes[i]));
+}

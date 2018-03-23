@@ -1,0 +1,17 @@
+digraph ComputeProcess{
+        rankdir=LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        Compiler -> CreateComputation
+
+        CreateComputation -> CreateSteps
+        CreateSteps[label="\
+        part1: ComputationGraphBuilder Compute(), AllOutputsAreComputable(), Prune() | \
+        part2: ComputeComputationPhases epochs, phases | \
+        part3: ComputationStepsComputer ComputeForSegment()(phases  steps) | \
+        part4: ComputeDerivNeeded() CreateStepInfo() | \
+        part5: AddCommands() "]
+        
+        
+
+}

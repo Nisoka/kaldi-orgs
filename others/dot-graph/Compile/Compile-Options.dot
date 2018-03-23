@@ -1,0 +1,67 @@
+digraph CompileGraph{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+        edge[style=dashed]
+
+
+        NnetComputeProbOptions[color=red]
+        NnetOptimizeOptions[color=red]
+        NnetComputeOptions[color=red]
+        CachingOptimizingCompilerOptions[color=red]
+        
+        NnetComputeProb -> NnetComputeProbOptions
+        NnetComputeProb -> Compute[style=filled]
+
+        Compute[label="Compute()"]
+
+        NnetComputeProbOptions ->   NnetOptimizeOptions
+        NnetComputeProbOptions ->   NnetComputeOptions
+        NnetComputeProbOptions ->   CachingOptimizingCompilerOptions
+
+
+        Compute -> NnetComputeProbOptions
+        
+
+        NnetComputeProbOptions -> debug_computation -> false
+        NnetComputeProbOptions -> compute_deriv -> false
+        NnetComputeProbOptions -> compute_accuracy -> true 
+        NnetComputeProbOptions -> store_component_stats -> false
+        NnetComputeProbOptions -> compute_per_dim_accuracy -> false
+
+
+
+        Optimize[label="Optimize()"]
+        Optimize -> NnetOptimizeOptions
+        
+        NnetOptimizeOptions ->       optimize -> true
+        NnetOptimizeOptions ->       consolidate_model_update -> true
+        NnetOptimizeOptions ->       propagate_in_place -> true
+        NnetOptimizeOptions ->       backprop_in_place -> true
+        NnetOptimizeOptions ->       optimize_row_ops -> true
+        NnetOptimizeOptions ->       convert_addition -> true
+        NnetOptimizeOptions ->       remove_assignments -> true
+        NnetOptimizeOptions ->       allow_left_merge -> true
+        NnetOptimizeOptions ->       allow_right_merge -> true
+        NnetOptimizeOptions ->       initialize_undefined -> true
+        NnetOptimizeOptions ->       move_sizing_commands -> true
+        NnetOptimizeOptions ->       allocate_from_other -> true
+        NnetOptimizeOptions ->       min_deriv_time -> min
+        NnetOptimizeOptions ->       max_deriv_time -> max
+        NnetOptimizeOptions ->       max_deriv_time_relative -> max
+        NnetOptimizeOptions ->       snip_row_ops -> true
+        NnetOptimizeOptions ->       optimize_looped_computation -> false
+
+
+        
+        NnetComputeOptions -> debug -> false
+
+
+        CachingOptimizingCompilerOptions -> use_shortcut -> true
+        CachingOptimizingCompilerOptions -> cache_capacity -> 64
+
+
+
+       
+
+
+}

@@ -1,0 +1,34 @@
+digraph ComputePhases{
+        rankdir=LR
+        // rankdir=TB        
+        node[shape=Mrecord, width=.1, height=.1]
+
+        
+
+        Optimize[label="Optimize()"]
+        
+        Optimize -> LimitDerivativeTimse[label="config.max_deriv_time_relative if seted"]
+        
+        Optimize -> ConsolidateModelUpdate[label="config.optimize && config.consolidate_model_update"]
+        
+        Optimize -> ConvertAdditionToAssignment[label="config.optimize && config.convert_addition"]
+        
+        Optimize -> VariableMergingOptimization[label=" (config.remove_assignments || config.backprop_in_place ||  config.propagate_in_place)"]
+
+        Optimize -> RenumberComputation[label=" (config.snip_row_ops || config.optimize_row_ops)"]
+
+        Optimize -> MoveSizingCommands[label=" config.initialize_undefined"]
+        
+        Optimize -> OptimizeLoopedComputation[label="config.move_sizing_commands"]
+        
+        Optimize -> RemoveUnnecessaryAllocation[label="config.optimize_looped_computation"]
+        
+        Optimize -> ConsolidateIoOperations
+        
+        Optimize -> FixGotoLabel[label="config.optimize_looped_computation"]
+
+        Optimize -> CheckComputation[style=dashed]
+        
+
+
+}
