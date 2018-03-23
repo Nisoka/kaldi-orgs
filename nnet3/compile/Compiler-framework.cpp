@@ -977,12 +977,21 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
   CreateStepInfo(deriv_needed, step_to_segment, &steps, computation);
 
 
-  // =========== 向computation中增加 命令Commands ===========
+
+
+  
+  // =========== part5 向computation中增加 命令Commands ===========
   AddCommands(deriv_needed, step_to_segment, computation);
 
 
-  // =========== 如下函数 从新安排添加的command的顺序。 如kAcceptInput kProvideOutput等命令
+
+ 
+
+  // =========== 如下函数 从新安排添加的command的顺序。
+  // 所以kAcceptInput 和 kProvideOutput命令 会出现在正确位置上.
   ConsolidateIoOperations(nnet_, computation);
+
+  
   if (opts.output_debug_info)
     OutputDebugInfo(computation);
   
