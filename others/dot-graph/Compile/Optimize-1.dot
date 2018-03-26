@@ -1,0 +1,85 @@
+digraph Optimize_1{
+        rankdir=LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        ConvertAdditionToAssignment -> Analyzer
+        nnet
+        computation
+        
+        subgraph Analyzer {
+                Analyzer -> variables -> ComputationVariables
+                
+                Analyzer -> command_attributes -> cmd_attri_comment
+                cmd_attri_comment[label="vector - CommandAttributes", style=dashed]
+                Analyzer -> variable_accesses -> vari_acc_comment
+                vari_acc_comment[label="vector- vector - Access", style=dashed]
+                Analyzer ->  matrix_accesses -> mat_acc_comment
+                mat_acc_comment[label="vector - MatrixAccesses", style=dashed]
+
+
+                Analyzer -> Init
+                Init[label="Init()"]
+                Init -> variables -> Init_for_variables
+                Init_for_variables[label="variables.Init"]
+
+
+                Analyzer -> ComputeCommandAttributes
+                nnet -> ComputeCommandAttributes[style=dashed]
+                computation -> ComputeCommandAttributes[style=dashed]
+                variables -> ComputeCommandAttributes[style=dashed]
+                command_attributes -> ComputeCommandAttributes[style=dashed]
+
+
+        }
+
+        subgraph Init_for_variables_{
+                edge[style=dashed]
+                Init_for_variables ->  ComputeSplitPoints[style=filled]
+                ComputeSplitPoints -> row_split_points_
+                ComputeSplitPoints -> column_split_points_
+                ComputeSplitPoints -> matrix_to_variable_index_
+                ComputeSplitPoints -> num_variables_
+                
+                Init_for_variables ->  ComputeVariablesForSubmatrix[style=filled]
+                Init_for_variables ->  ComputeVariableToMatrix[style=filled]
+
+                ComputeVariablesForSubmatrix -> variables_for_submatrix_
+                ComputeVariableToMatrix -> variable_to_matrix_
+        
+        }
+
+
+        subgraph ComputationVariable{
+                 ComputationVariables -> row_split_points_ -> split_points_comment
+                 ComputationVariables -> column_split_points_ -> split_points_comment
+                 split_points_comment[label="vec-matrix list- split-points ", style=dashed]
+
+                 ComputationVariables -> matrix_to_variable_index_ -> m_t_v_index_comment
+                 m_t_v_index_comment[label="matrix to the variable index", style=dashed]
+                 
+                 ComputationVariables -> num_variables_ -> num_variables_comment
+                 num_variables_comment[label="matrix_to_variable_index.back()", style=dashed]
+
+
+                 ComputationVariables -> variables_for_submatrix_
+                 ComputationVariables -> variable_to_matrix_
+
+                 variables_[label="variables 对一个submatrix, 是多个 将matrix 分割成的最小块 组成的一个部分块.\n
+                 对一个matrix 那么就正是 matrix的所有块的集合."]
+
+        }
+
+
+        subgraph CommandAttributes_{
+        CommandAttributes -> AppendVariablesForSubmatrix
+        AppendVariablesForSubmatrix -> variables_read[label="add all the variables-index of the submatrix \n to the variables_read",style=dashed]
+        CommandAttributes -> variables_read
+        CommandAttributes -> matrices_read
+        CommandAttributes -> submatrices_read
+
+        CommandAttributes -> Command[label="one-by-one", style=dashed]
+        
+        
+}
+
+}
