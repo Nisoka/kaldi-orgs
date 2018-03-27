@@ -327,33 +327,9 @@
                 ComputeValueSubmatLocationsList(input_locations_list,
                                                 &submat_locations_list);
 
-                void Compiler::ComputeValueSubmatLocationsList(
-                    std::vector<std::vector<std::pair<int32, int32> > > &input_locations_list,
-                    std::vector<std::vector<std::pair<int32, int32> > >*submat_locations_list)
-                    const {
-                  submat_locations_list->clear();
-                  submat_locations_list->resize(input_locations_list.size());
-                  int32 size = submat_locations_list->size();
-                  
-                  for (int32 i = 0; i < size; i++) {
-                    const std::vector<std::pair<int32, int32> > &this_list = input_locations_list[i];
-                    std::vector<std::pair<int32, int32> > &this_submat_list = (*submat_locations_list)[i];
-                    this_submat_list.resize(this_list.size());
-                    std::vector<std::pair<int32, int32> >::const_iterator
-                        input_iter = this_list.begin(), input_end = this_list.end();
-                    std::vector<std::pair<int32, int32> >::iterator iter =
-                        this_submat_list.begin();
-                    for (; input_iter != input_end; ++input_iter, ++iter) {
-                      int32 step = input_iter->first,
-                          value_submat_index = steps_[step].value,
-                          row = input_iter->second;
-                      iter->first = value_submat_index;
-                      iter->second = row;
-                    }
-                  }
-                }
-
-              
+                // value_submatrix_index : step_info.value_parts[part_index];
+                // shared_alpha : 1.0
+                // submat_locations_list : 类似input_locations_list, 不过pair的first域中保存的是 submatrix-index
                 CompileForwardFromSubmatLocationsList(
                     value_submatrix_index,
                     shared_alpha,
@@ -366,13 +342,12 @@
                     const std::vector<std::vector<std::pair<int32, int32> > > &submat_lists,
                     NnetComputation *computation) const {
 
-
+                  // 具体内容没看 比较复杂. 具体需要详细看.
                   std::vector<std::vector<std::pair<int32, int32> > > split_lists;
                   SplitLocations(submat_lists, &split_lists);
                   
                   int32 size = split_lists.size();
-                  // note: `size` may be empty in unusual cases so don't assert that it's
-                  // nonzero.
+                  // 里面会增加 kMatrixAdd kMatrixCopy 等命令, 并且增加computation indexes 这个并不是Index类型的.
                   for (int32 i = 0; i < size; i++)
                     CompileForwardFromSubmatLocations(
                         value_submatrix_index,

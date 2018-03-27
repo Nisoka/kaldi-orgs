@@ -257,11 +257,14 @@ void ModelUpdateConsolidator::AddCommandsToComputation() {
 
     // 构建分析器
     ComputationAnalysis analysis(*computation, analyzer);
+
+    
     // 所有命令commands 将一些命令类型 修改为简单命令 .
     int32 num_commands = computation->commands.size();
     for (int32 command = 0; command < num_commands; command++) {
       NnetComputation::Command &c = computation->commands[command];
       switch (c.command_type) {
+        
         case kMatrixAdd: case kAddRows: case kAddRowsMulti:
         case kAddToRowsMulti: {
           const std::vector<int32> &submatrices_written =
@@ -283,6 +286,7 @@ void ModelUpdateConsolidator::AddCommandsToComputation() {
               break;
             }
           }
+          
           if (can_convert) {  // convert to a copy command.
             switch (c.command_type) {
               case kMatrixAdd: c.command_type = kMatrixCopy;
@@ -307,7 +311,8 @@ void ModelUpdateConsolidator::AddCommandsToComputation() {
 
 
 
-  // 这个结构体是为了设置分析的各个部分, 帮助在顺序过程中计算一些东西时候, 避免代码重复, 
+  // 这个结构体是为了设置分析的各个部分, 帮助在顺序过程中计算一些东西时候, 避免代码重复,
+  // 主要是 variables submatrix的划分小块.
   struct Analyzer {
     ComputationVariables variables;
   

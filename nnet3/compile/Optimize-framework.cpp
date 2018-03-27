@@ -25,34 +25,41 @@ void Optimize(const NnetOptimizeOptions &config,
                            max_deriv_time, computation);
   }
 
-  if (GetVerboseLevel() >= 3)
-    CheckComputation(nnet, *computation, true);
+
+
+  // -------------- Optimize-1.cpp ------------------------
 
   if (config.optimize && config.consolidate_model_update) {
     ConsolidateModelUpdate(nnet, computation);
 
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, true);
   }
 
   if (config.optimize && config.convert_addition) {
     ConvertAdditionToAssignment(nnet, computation);
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, true);
   }
 
+
+
+  
+  // -------------  Optimize-2.cpp ---------------
   if (config.optimize && (config.remove_assignments || config.backprop_in_place ||  config.propagate_in_place)) {
     VariableMergingOptimization(config, nnet, computation);
     if (GetVerboseLevel() >= 3)
       CheckComputation(nnet, *computation, false);
   }
 
+
+  // -------------- Optimize-3.cpp ----------------
   if (config.optimize && (config.snip_row_ops || config.optimize_row_ops)) {
     bool must_renumber = false;
+    // 削减不必要的Row操作
     if (config.snip_row_ops && SnipRowOps(computation))
       must_renumber = true;
+    // 将某些特殊的Rows操作转化为 Matrix操作
     if (config.optimize_row_ops && ReplaceRowWithMatrixOps(computation))
       must_renumber = true;
+
+    // 如果经过上面的处理确实有操作被修改, 需要重新更新 matrix submatrix 等的编号.
     if (must_renumber) {
       RenumberComputation(computation);
       if (GetVerboseLevel() >= 3)
@@ -67,12 +74,16 @@ void Optimize(const NnetOptimizeOptions &config,
       CheckComputation(nnet, *computation, false);
   }
 
+  
   if (config.optimize && config.move_sizing_commands) {
     MoveSizingCommands(nnet, computation);
     if (GetVerboseLevel() >= 3)
       CheckComputation(nnet, *computation, false);
   }
 
+
+
+  // ------------------ Optimize-4.cpp ----------------
   // the looped computation optimization has to go before
   // 'RemoveUnnecessaryAllocation()'.  We don't gate this by 'config.optimize'
   // because it's necessary for looped computation to run.
