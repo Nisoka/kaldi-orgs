@@ -341,34 +341,45 @@ void RemoveUnnecessaryZeroing(const Nnet &nnet,
 
 
 // ====================== part 3 ============================
-// 移除 尽可能多的 resize zero matrix的命令
-// 但是需要保持 input output命令, 因为这样的命令如果我们删除了 会创建令人头痛的东西.???
+// 重新排序 allocate命令 将allocate命令 安排到每个matrix第一个访问命令刚刚之前.
 void MoveSizingCommands(const Nnet &nnet, NnetComputation *computation) {
 
   // 实际也是实现了 Analyzer的功能, 分析每个matrix variables的访问流程
+
+  // 初始化variables, 计算每个submatrix的variables.
   ComputationVariables variables;
   variables.Init(*computation);
-  
+
+  // 计算命令的Attributes
+  // attributes 保存了该命令用到的
+  // read 的matrix 保存到其队列matrix_read中
+  // write的matrix 保存到其队列matrix_write中
+  // read write的submatrix队列
+  // read write 的 variables等等.
   std::vector<CommandAttributes> attributes;
   ComputeCommandAttributes(nnet, *computation, variables, &attributes);
+
+  // 计算每个variables的访问流程
   std::vector<std::vector<Access> > variable_accesses;
   ComputeVariableAccesses(variables, attributes, &variable_accesses);
+
+  // 计算每个matrix的访问流程
   std::vector<MatrixAccesses> matrix_accesses;
   ComputeMatrixAccesses(nnet, *computation, variables, attributes,
                         &matrix_accesses);
 
 
-  // 我们对command重新编号的方法, 我们会首先用pair<command-index, pointer-to-command> 设置vector,
+  // 我们对command重新编号的方法
   // 然后我们会修改command-indexes 为了按照我们希望的顺序重新编号, 然后排序
-  // 使用command-index*3的原因是这样我们可以编号命令 按照 
-  // The reason for the * 3 is so that we can number commands "just-after"
-  // existing indexes (by adding 1) and "just-before" (by subtracting 1).
-  int32 num_commands = computation->commands.size(),
+  // 使用command-index*3的原因是我们这样编号命令, 可以将某个matrix的allocate命令 放到matrix的第一个访问命令刚刚之前.
+  // 或者将deallocate命令 放到最后一个访问命令刚刚之后.
+  int32
+      num_commands = computation->commands.size(),
       num_matrices = matrix_accesses.size();
 
   // Matrix allocate命令希望 后面接一个zero该matrix的命令
-  // 我们希望将两个命令看做为一个 重新排序的单元,
-  // 如果命令c 是这样一个pair的第一个元素 is_command_pair[c]=true
+  // 我们希望将这样的两个命令看做为重新排序的 一个待排序单元,
+  // 如果命令c c+1是这样一个pair 设置 is_command_pair[c]=true
   std::vector<bool> is_command_pair(num_commands, false);
   for (int32 c = 0; c + 1 < num_commands; c++) {
     if (computation->commands[c].command_type == kAllocMatrix &&
@@ -392,18 +403,26 @@ void MoveSizingCommands(const Nnet &nnet, NnetComputation *computation) {
     command_reordering[c].second = c;
   }
 
+
+
+  
   // 对每个matrix
   for (int32 m = 1; m < num_matrices; m++) {
-    
+
+    // matrix的 访问流程
     const MatrixAccesses &ma = matrix_accesses[m];
-    // 如下的if-block 涉及 allocate命令的重排序(隐性包含了 zero)
+    
     if (ma.allocate_command != -1 && computation->commands[ma.allocate_command].command_type == kAllocMatrix) {
-      // first_access_command 回事 first access的索引 除了zero命令 隐含跟着初始化命令.
-      // first_access_command will be index of first access, except for the
-      // zeroing command that immediately follows the initialization command.
-      
+
+      // ---------------- --------------- -----------
+      // first_access_command 是 除了zero命令的第一个访问命令的索引
       int32 first_access_command = -1;
-      // 判断第一个访问命令 是否是个kSetConst, 能够成为一个 pair, 因此能够进行重新排序 allocate?
+
+      // 1 矩阵具有访问
+      // 2 第一个访问命令是个 allocate命令之后的命令 && 这个allocate命令是个 pair
+      //      (说明 是一个 allocate + kSetConst命令)
+      // 3 设置first_access_command 为除zero之后的第一个访问命令.
+      
       if (!ma.accesses.empty()) {
         first_access_command = ma.accesses[0].command_index;
 
@@ -421,10 +440,13 @@ void MoveSizingCommands(const Nnet &nnet, NnetComputation *computation) {
       // 将allocate命令 安排到 去掉第一个kSetConst命令之后第一个命令之前.
       // ** 这样才能保证命令顺序不会出错, 对其他不相关的命令 相对顺序随意即可 不用关心 **
       if (first_access_command != -1) {
-        KALDI_ASSERT(first_access_command > ma.allocate_command);
-        // 重新安排allocate命令的 command_reordering.first = first_access_command*3-1.
+        // 重新安排allocate命令的执行位置为
+        // command_reordering.first = first_access_command*3-1.
+        // 该矩阵的第一个非zero命令 刚刚之前.
         command_reordering[ma.allocate_command].first = first_access_command * 3 - 1;
       }
+      // 但是这里好像没考虑 allocate之后的kSetConst命令呢!?
+      
     }
 
     // 如下的代码 设计重新排序 deallocate命令.
@@ -450,6 +472,7 @@ void MoveSizingCommands(const Nnet &nnet, NnetComputation *computation) {
   std::vector<NnetComputation::Command> reordered_commands;
   reordered_commands.reserve(num_commands);
 
+  
   // 每个command
   for (int32 c = 0; c < num_commands; c++) {
     // 命令原始index
@@ -457,10 +480,7 @@ void MoveSizingCommands(const Nnet &nnet, NnetComputation *computation) {
     // 获得命令
     NnetComputation::Command &old_command = computation->commands[old_index];
     
-    // the following assert is because this optimization is not allowed
-    // after looped optimization.
-    KALDI_ASSERT(old_command.command_type != kGotoLabel);
-
+  
     // 如果旧的命令 是一个在allocate之后的zero命令 忽略它.
     // 因为它将会被重新排序到 其配对的allocate命令之后,
     // 我们在处理 那个allocate命令时候处理这个zero命令.

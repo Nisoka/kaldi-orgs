@@ -44,11 +44,11 @@ void Optimize(const NnetOptimizeOptions &config,
   // -------------  Optimize-2.cpp ---------------
   if (config.optimize && (config.remove_assignments || config.backprop_in_place ||  config.propagate_in_place)) {
     VariableMergingOptimization(config, nnet, computation);
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, false);
   }
 
 
+
+  
   // -------------- Optimize-3.cpp ----------------
   if (config.optimize && (config.snip_row_ops || config.optimize_row_ops)) {
     bool must_renumber = false;
@@ -62,53 +62,49 @@ void Optimize(const NnetOptimizeOptions &config,
     // 如果经过上面的处理确实有操作被修改, 需要重新更新 matrix submatrix 等的编号.
     if (must_renumber) {
       RenumberComputation(computation);
-      if (GetVerboseLevel() >= 3)
-        CheckComputation(nnet, *computation, false);
     }
   }
 
-
+  // ----------------- Optimize-3.cpp part2 -----------------
   if (config.optimize && config.initialize_undefined) {
     RemoveUnnecessaryZeroing(nnet, computation);
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, false);
   }
 
-  
+  // ----------------- Optimize-3.cpp part3 -----------------  
   if (config.optimize && config.move_sizing_commands) {
     MoveSizingCommands(nnet, computation);
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, false);
   }
 
 
 
+  
   // ------------------ Optimize-4.cpp ----------------
-  // the looped computation optimization has to go before
-  // 'RemoveUnnecessaryAllocation()'.  We don't gate this by 'config.optimize'
-  // because it's necessary for looped computation to run.
+  // false.
+  // 循环的计算优化 必须在 RemoveUnnecessaryAllocation之前
+  // 这个循环的意思是 让computation的 command 构成一个循环, 只保留两个 seg -- NnetExample.
+  // 然后形成循环结构.
   if (config.optimize_looped_computation){
     OptimizeLoopedComputation(nnet, computation);
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, false);
   }
 
+
+  // ------------------ Optimize-5.cpp ----------------
   if (config.optimize && config.allocate_from_other &&
       !config.optimize_looped_computation) {
-    // Don't do this if it's an looped computation because we're not sure if it
-    // would be correct in that case, as written.  In any case the performance
-    // benefit is tiny.
+    // 如果构成循环结构, 这个就不要调用, 因为我们不确定是否在循环命令结构下 是正确的.
+    // 无论如何 优化效率都很小.
     RemoveUnnecessaryAllocation(nnet, computation);
-    if (GetVerboseLevel() >= 3)
-      CheckComputation(nnet, *computation, false);
   }
 
-  // The following is not configurable because it is necessary for
-  // the computation to run correctly (we do it after compilation too,
-  // but the operations may have been put out of order by
-  // other optimizations.)
+
+  // ------------------ Optimize-5.cpp part2 ----------------
+  // 这个是不能配置的必须调用的
+  // 为了让computation 运算正确, 我们经过编译时也要调用一下
+  // 但是经过其他优化操作之后 已经可能已经被淘汰了.
   ConsolidateIoOperations(nnet, computation);
 
+
+  // 如果经过了 循环命令结构优化, 需要在进行一下修正GotoLabel命令的目标地点.
   if (config.optimize_looped_computation)
     FixGotoLabel(computation);
 
