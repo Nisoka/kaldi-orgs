@@ -161,11 +161,12 @@ class ComputationGraphBuilder {
   int32 current_distance_;
   
   // 没有计算依赖的cindex_ids. (那些需要依赖, 但是还没有计算其依赖的cindex_ids)
+  // 当前保存在current_queue_中的cindex_ids, 是距离output current_distance的 还没有添加他们的依赖的cindex_id.
   // the cindex_ids in current_queue_ are at distance "current_distance" to the
   // output and have not yet had their dependencies processed.
   std::vector<int32> current_queue_;
 
-  // 当前距离+1的位置上的cindex_ids，
+  // 当前距离current_distance + 1 的位置上的cindex_ids，
   // 并且还没有计算依赖的cindex_ids. (那些需要依赖, 但是还没有计算其依赖的cindex_ids)
   // the cindex_ids in next_queue_ are at distance current_distance + 1 to the
   // output and have not yet had their dependencies processed.
@@ -224,17 +225,18 @@ void ComputationGraphBuilder::AddCindexId(int32 cindex_id,
     computable_queued_.push_back(false);
     // other -- 一般就是 output
   } else {
-    // 
+    // 可计算信息为kUnknown
     computable_info_.push_back(kUnknown);
     // cindex_ids 是否加入了 computable_queue_ 的标记.
     computable_queued_.push_back(false);
     // next_queue_
-    // output 输出的cindex-id
-    // output 向前依赖的cindex-1, 等待计算
+    // 等待计算依赖的 cindex_id.
     next_queue_.push_back(cindex_id);
   }
-  depend_on_this_.push_back(std::vector<int32>());
 
+  // cindex_id的后续的数组
+  depend_on_this_.push_back(std::vector<int32>());
+  // cindex_id 是否是对output计算必要的. (input 不考虑)
   // output:1    others:0(一般就是input-MFCC 和 input-Ivector)
   usable_count_.push_back(is_output ? 1 : 0);
 }
@@ -277,10 +279,12 @@ void ComputationGraphBuilder::AddInputs() {
     for (int32 j = 0; j < request_->inputs[i].indexes.size(); j++) {
       Cindex cindex(n, request_->inputs[i].indexes[j]);
       bool is_input = true, is_new;
+      
       // 向ComputeGraph 中增加Cindex, 实际上就是将原本的indexes 转化为 Cindex描述 数据.
       int32 cindex_id = graph_->GetCindexId(cindex, is_input, &is_new);
       
       KALDI_ASSERT(is_new && "Input index seems to be listed more than once");
+      // 加入计算依赖队列, 标记是否可计算或者kUnknown.
       AddCindexId(cindex_id, true, false);
       num_added++;
     }
@@ -1027,7 +1031,7 @@ void ComputationGraphBuilder::PruneDependencies(int32 cindex_id) {
 }
 
 void ComputationGraphBuilder::Prune() {
-  // 剪枝, 对每个request都进行剪枝, 所以只处理当前处理的reqeust.
+  // 剪枝, 对每个Segment_end都进行剪枝, 所以只处理当前处理的reqeust.
   // 每个request 都对应自己的 cindexes ,
   // 多个request都加入一个graph_, 所以区分需要 使用 graph_中的segment_ends 标记.
   int32 start_cindex_id = (graph_->segment_ends.empty() ? 0 :
@@ -1055,7 +1059,6 @@ void ComputationGraphBuilder::Prune() {
   // required -- 保持所有必要的cindexes.
   std::vector<bool> required;
   ComputeRequiredArray(start_cindex_id, &required);
-
   
   void ComputationGraphBuilder::ComputeRequiredArray(int32 start_cindex_id, std::vector<bool> *required) const {
 
@@ -1162,6 +1165,7 @@ void ComputationGraphBuilder::Prune() {
   // 断言! 可计算性队列  必然为空.
   KALDI_ASSERT(computable_queue_.empty());
 
-  // 一个新的终止
+  // 一个新的终止, 一般只保存这一个 segment_end.
+  // 后面会出现很多个segment_end 但是好像都不是描述这个这个意思.
   graph_->segment_ends.push_back(new_num_cindex_ids);
 }

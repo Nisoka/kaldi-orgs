@@ -228,6 +228,7 @@ static void MergeIo(const std::vector<NnetExample> &src,
   // Initialize the merged_eg
   merged_eg->io.clear();
   merged_eg->io.resize(num_feats);
+  
   for (int32 f = 0; f < num_feats; f++) {
     NnetIo &io = merged_eg->io[f];
     int32 size = sizes[f];

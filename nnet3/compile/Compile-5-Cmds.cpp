@@ -1,176 +1,65 @@
 
-
-
 // xxxxxxxxxxxxxxxx  part-Cmds  xxxxxxxxxxxxxxxxxxxxxxxx
 {
-  // 某个submatrices 是否是一个完整的matrix, 获得对应的matrix-index
-  // 如果是, 设置whole_submatrix[matrix-index] = s, 表示某个matrix具有一个全部域的submatrix.
-  void NnetComputation::GetWholeSubmatrices(
-      std::vector<int32> *whole_submatrices) const {
-    int32
-        num_matrices = matrices.size(),
-        num_submatrices = submatrices.size();
-    whole_submatrices->clear();
-    whole_submatrices->resize(num_matrices, 0);
-
-    for (int32 s = 1; s < num_submatrices; s++) {
-      if (IsWholeMatrix(s)) {
-        int32 m = submatrices[s].matrix_index;
-        (*whole_submatrices)[m] = s;
-      }
-    }
+  // 1 计算computation的matrix的全域submatrix的 submaxtrix-id 保存到 whold_submatrices
+  //   向computation->commands 中 对 非input 非output_deriv 的StepInfo 增加 kAllocMatrix cmd 命令,
 
   
-    for (int32 m = 1; m < num_matrices; m++) {
-      KALDI_ASSERT((*whole_submatrices)[m] != 0 &&
-                   "Matrix exists with no submatrix that is "
-                   "the whole of it.");
-    }
-  }
-
-  // 根据每个 computation matrix 是否具有全域的 submatrix 增加matrix.
-  void Compiler::AllocateMatrices(const std::vector<int32> &whole_submatrices,
-                                  NnetComputation *computation) const {
-
-    // 当前computation 还没有任何命令cmd
-    KALDI_ASSERT(computation->commands.empty());
-
-    // 计算出哪些matrix是Computation 的 input. 或者用来作为Computation的输入的一些 输出导数,
-
-    unordered_set<int32> input_and_oderiv_matrices;
-    int32 num_steps = steps_.size();
+  void Compiler::AddCommands(const std::vector<bool> &deriv_needed,
+                             const std::vector<int32> &step_to_segment,
+                             NnetComputation *computation) {
   
-    for (int32 step = 0; step < num_steps; step++) {
-      const StepInfo &this_info = steps_[step];
-      // this_info的输出目标cindexes.
-      if (this_info.output_cindex_ids.empty())
-        continue;
+    computation->need_model_derivative = requests_[0]->need_model_derivative;
+  
+    int32 arbitrary_factor = 8;
+    computation->commands.reserve(computation->matrices.size() * arbitrary_factor);
+
+    std::vector<int32> whole_submatrices;
+    computation->GetWholeSubmatrices(&whole_submatrices);
+    AllocateMatrices(whole_submatrices, computation);
+
     
-      int32 first_cindex_id = this_info.output_cindex_ids.front(),
-          node_index = this_info.node_index;
-      bool is_input = graph_.is_input[first_cindex_id],
-          is_output = nnet_.IsOutputNode(node_index);
-
-      // 如果当前StepInfo是个input-node类型的, 将对应的Matrix-index 加入到 input_and_oderiv_matrices.
-      if (is_input) {
-        int32 value_submatrix_index = this_info.value,
-            value_matrix_index = computation->submatrices[value_submatrix_index].matrix_index;
-        input_and_oderiv_matrices.insert(value_matrix_index);
-      }
-      // 如果是输出, 并且有导数计算空间, 也将对应的Matrix-index加入到 input_and_oderiv_matrices
-      if (is_output && this_info.deriv != 0) {
-        int32 deriv_submatrix_index = this_info.deriv,
-            deriv_matrix_index = computation->submatrices[deriv_submatrix_index].matrix_index;
-        input_and_oderiv_matrices.insert(deriv_matrix_index);
-      }
-    }
-
-    // 全部Matrix总数
-    int32 num_matrices = computation->matrices.size();
-    for (int32 m = 1; m < num_matrices; m++) {
-
-      // 如果不是 input 或者 output_deriv 的matrices 那么就需要真实申请空间.
-      // 向computation->commands 中增加kAllocMatrix cmd
-      if (input_and_oderiv_matrices.count(m) == 0) {
-        // get a submatrix index that refers to the entire matrix.
-        int32 submatrix_index = whole_submatrices[m];
-        computation->commands.push_back( NnetComputation::Command(kAllocMatrix, submatrix_index));
-
-        // 稍后在优化阶段, 发现 zero 对某些matrix是不必要的, 稍后会删除冗余的 kSetConst命令.
-        computation->commands.push_back( NnetComputation::Command(0.0, kSetConst, submatrix_index));
-      }
-    }
-  }
+    SetUpPrecomputedIndexes(step_to_segment, computation);
 
 
 
-  void Compiler::SetUpPrecomputedIndexes(
-      const std::vector<int32> &step_to_segment,
-      NnetComputation *computation) {
-    // Compiler 保存着 StepInfos -- steps_
-    int32 num_steps = steps_.size();
-    // 当前 computation->component_precomputed_indexes 某些component需要提前计算的 还没设置.
-    KALDI_ASSERT(computation->component_precomputed_indexes.empty());
-
-    // the zeroth commponent is special, contains a NULL pointer.
-    computation->component_precomputed_indexes.resize(1);
-
+    
     // foreach StepInfo
+    int32 num_steps = steps_.size();
     for (int32 step = 0; step < num_steps; step++) {
-      StepInfo &step_info = steps_[step];
-      int32 node_index = step_info.node_index;
-      const NetworkNode &node = nnet_.GetNode(node_index);
+      // ============ 编译StepInfo =========
+      CompileForward(step, computation);
 
-      // 这里只考虑 kComponent node 类型的StepInfo
-      // There is only something to do for nodes of type Component.
-      if (node.node_type != kComponent)
-        continue;
-
-      // 获得对应的kDescriptor StepInfo
-      // 对kComponent node类型的StepInfo 具有直接的 kDescriptor node的StepInfo .
-      const StepInfo &input_step_info = steps_[step - 1];
-      // component-index--- 注意是nnet中的component index
-      int32 component_index = node.u.component_index;
-      // descriptor-node-index
-      int32 input_node_index = input_step_info.node_index;
-    
-      KALDI_ASSERT(input_node_index == node_index - 1);
-
-      // kDescriptor StepInfo的输出--- 即当前kComponent StepInfo 的输入.
-      const std::vector<Index> &input_indexes = input_step_info.output_indexes;
-      // kComponent StepInfo 的输出
-      const std::vector<Index> &output_indexes = step_info.output_indexes;
-      // 获得对应的Component
-      const Component *component = nnet_.GetComponent(component_index);
-      // 获得对应的Request
-      const ComputationRequest &request = *(requests_[step_to_segment[step]]);
-
-      // XXXXX ???? 计算需要先进性处理的 Indexes.
-      bool need_derivs = request.NeedDerivatives();
-      ComponentPrecomputedIndexes *precomputed_indexes =
-          component->PrecomputeIndexes(request.misc_info,
-                                       input_indexes, output_indexes,
-                                       need_derivs);
-
-      // 简单一般情况 都没有需要先计算的indexes.
-      if (precomputed_indexes == NULL) {
-        // e.g. simple Components, and some other Components, will return NULL for
-        // precomputed_indexes.
-        step_info.precomputed_indexes_index = 0;
-      } else {
-        step_info.precomputed_indexes_index =
-            computation->component_precomputed_indexes.size();
-
-        NnetComputation::PrecomputedIndexesInfo info;
-        info.data = precomputed_indexes;
-
-        if (!input_indexes.empty() && input_indexes.back().n == 1 &&
-            !output_indexes.empty() && output_indexes.back().n == 1) {
-          // If these conditions are true, it's *possible* that we are doing
-          // 'shortcut' compilation.  So just in case that's what's going on, we
-          // store 'input_indexes' and 'output_indexes, which are needed by
-          // the ExpandComputation() function that is used in that process.
-          info.input_indexes = input_indexes;
-          info.output_indexes = output_indexes;
-        }
-      
-        computation->component_precomputed_indexes.push_back(info);
+      // 1 如果当前StepInfo 不是最后一个reqeust的最后一个StepInfo
+      // 2 且  当前 StepInfo 是一个request的最后一个 StepInfo
+      // 增加一个kNoOperationMarker,标记区分两个request.
+      //  ----- 
+      if (step + 1 < static_cast<int32>(step_to_segment.size()) &&  step_to_segment[step + 1] != step_to_segment[step]) {
+        // insert a marker that separates segments of the computation.
+        computation->commands.push_back( NnetComputation::Command(kNoOperationMarker));
       }
+    }
+
+    // mark the end of the forward phase.
+    computation->commands.push_back(NnetComputation::Command(kNoOperationMarker));
+
+    // 每个需要求导数的StepInfo 增加反向传播 求导命令.
+    for (int32 step = num_steps - 1; step >= 0; step--)
+      if (deriv_needed[step])
+        CompileBackward(step, computation);
+
+
+
 
     
-    }
+    DeallocateMatrices(whole_submatrices, step_to_segment, computation);
   }
 
 
 
 
 
-
-
-
-
-
-
+  
   void Compiler::CompileForward(int32 step,
                                 NnetComputation *computation) const {
     KALDI_ASSERT(step < static_cast<int32>(steps_.size()));
@@ -359,18 +248,7 @@
               }
 
               else {
-                for (size_t i = 0; i < split_locations_lists.size(); i++) {
-                  BaseFloat this_alpha = split_locations_lists[i].first;
-                  KALDI_ASSERT(this_alpha - this_alpha == 0.0);
-                  std::vector<std::vector<std::pair<int32, int32> > > submat_locations_list;
-                  ComputeValueSubmatLocationsList(split_locations_lists[i].second,
-                                                  &submat_locations_list);
-                  CompileForwardFromSubmatLocationsList(
-                      value_submatrix_index,
-                      this_alpha,
-                      submat_locations_list,
-                      computation);
-                }
+                // ＩＧＮＯＲＥ..... 
               }
             }
 
@@ -591,6 +469,91 @@
 
 
 
+  
+
+
+  
+  // 某个submatrices 是否是一个完整的matrix, 获得对应的matrix-index
+  // 如果是, 设置whole_submatrix[matrix-index] = s, 表示某个matrix具有一个全部域的submatrix.
+  void NnetComputation::GetWholeSubmatrices(
+      std::vector<int32> *whole_submatrices) const {
+    int32
+        num_matrices = matrices.size(),
+        num_submatrices = submatrices.size();
+    whole_submatrices->clear();
+    whole_submatrices->resize(num_matrices, 0);
+
+    for (int32 s = 1; s < num_submatrices; s++) {
+      if (IsWholeMatrix(s)) {
+        int32 m = submatrices[s].matrix_index;
+        (*whole_submatrices)[m] = s;
+      }
+    }
+
+  
+    for (int32 m = 1; m < num_matrices; m++) {
+      KALDI_ASSERT((*whole_submatrices)[m] != 0 &&
+                   "Matrix exists with no submatrix that is "
+                   "the whole of it.");
+    }
+  }
+
+  // 根据每个 computation matrix 是否具有全域的 submatrix 增加matrix.
+  void Compiler::AllocateMatrices(const std::vector<int32> &whole_submatrices,
+                                  NnetComputation *computation) const {
+
+    // 当前computation 还没有任何命令cmd
+    KALDI_ASSERT(computation->commands.empty());
+
+    // 计算出哪些matrix是Computation 的 input. 或者用来作为Computation的输入的一些 输出导数,
+
+    unordered_set<int32> input_and_oderiv_matrices;
+    int32 num_steps = steps_.size();
+  
+    for (int32 step = 0; step < num_steps; step++) {
+      const StepInfo &this_info = steps_[step];
+      // this_info的输出目标cindexes.
+      if (this_info.output_cindex_ids.empty())
+        continue;
+    
+      int32 first_cindex_id = this_info.output_cindex_ids.front(),
+          node_index = this_info.node_index;
+      bool is_input = graph_.is_input[first_cindex_id],
+          is_output = nnet_.IsOutputNode(node_index);
+
+      // 如果当前StepInfo是个input-node类型的, 将对应的Matrix-index 加入到 input_and_oderiv_matrices.
+      if (is_input) {
+        int32 value_submatrix_index = this_info.value,
+            value_matrix_index = computation->submatrices[value_submatrix_index].matrix_index;
+        input_and_oderiv_matrices.insert(value_matrix_index);
+      }
+      
+      // 如果是输出, 并且有导数计算空间, 也将对应的Matrix-index加入到 input_and_oderiv_matrices
+      if (is_output && this_info.deriv != 0) {
+        int32 deriv_submatrix_index = this_info.deriv,
+            deriv_matrix_index = computation->submatrices[deriv_submatrix_index].matrix_index;
+        input_and_oderiv_matrices.insert(deriv_matrix_index);
+      }
+    }
+
+    // 全部Matrix总数
+    int32 num_matrices = computation->matrices.size();
+    for (int32 m = 1; m < num_matrices; m++) {
+
+      // 如果不是 input 或者 output_deriv 的matrices 那么就需要真实申请空间.
+      // 向computation->commands 中增加kAllocMatrix cmd
+      if (input_and_oderiv_matrices.count(m) == 0) {
+        // get a submatrix index that refers to the entire matrix.
+        int32 submatrix_index = whole_submatrices[m];
+        computation->commands.push_back( NnetComputation::Command(kAllocMatrix, submatrix_index));
+
+        // 稍后在优化阶段, 发现 zero 对某些matrix是不必要的, 稍后会删除冗余的 kSetConst命令.
+        computation->commands.push_back( NnetComputation::Command(0.0, kSetConst, submatrix_index));
+      }
+    }
+  }
+
+
 
   void Compiler::DeallocateMatrices(const std::vector<int32> &whole_submatrices,
                                     const std::vector<int32> &step_to_segment,
@@ -657,56 +620,98 @@
     
   }
 
-  // 1 计算computation的matrix的全域submatrix的 submaxtrix-id 保存到 whold_submatrices
-  //   向computation->commands 中 对 非input 非output_deriv 的StepInfo 增加 kAllocMatrix cmd 命令,
-  // 2 SetUpProcomputedIndexes 是否有需要先计算的 Indexes 加入到 Computation->component_precompute_indexes
+  
+  void Compiler::SetUpPrecomputedIndexes(
+      const std::vector<int32> &step_to_segment,
+      NnetComputation *computation) {
+    // Compiler 保存着 StepInfos -- steps_
+    int32 num_steps = steps_.size();
+    // 当前 computation->component_precomputed_indexes 某些component需要提前计算的 还没设置.
+    KALDI_ASSERT(computation->component_precomputed_indexes.empty());
 
-  void Compiler::AddCommands(const std::vector<bool> &deriv_needed,
-                             const std::vector<int32> &step_to_segment,
-                             NnetComputation *computation) {
-  
-    computation->need_model_derivative = requests_[0]->need_model_derivative;
-  
-    int32 arbitrary_factor = 8;
-    computation->commands.reserve(computation->matrices.size() * arbitrary_factor);
-
-    std::vector<int32> whole_submatrices;
-    computation->GetWholeSubmatrices(&whole_submatrices);
-    AllocateMatrices(whole_submatrices, computation);
-  
-    SetUpPrecomputedIndexes(step_to_segment, computation);
+    // the zeroth commponent is special, contains a NULL pointer.
+    computation->component_precomputed_indexes.resize(1);
 
     // foreach StepInfo
-    int32 num_steps = steps_.size();
     for (int32 step = 0; step < num_steps; step++) {
-      // ============ 编译StepInfo =========
-      CompileForward(step, computation);
+      StepInfo &step_info = steps_[step];
+      int32 node_index = step_info.node_index;
+      const NetworkNode &node = nnet_.GetNode(node_index);
 
-      // 1 如果当前StepInfo 不是最后一个reqeust的最后一个StepInfo
-      // 2 且  当前 StepInfo 是一个request的最后一个 StepInfo
-      // 增加一个kNoOperationMarker,标记区分两个request.
-      //  ----- 
-      if (step + 1 < static_cast<int32>(step_to_segment.size()) &&  step_to_segment[step + 1] != step_to_segment[step]) {
-        // insert a marker that separates segments of the computation.
-        computation->commands.push_back( NnetComputation::Command(kNoOperationMarker));
+      // 这里只考虑 kComponent node 类型的StepInfo
+      // There is only something to do for nodes of type Component.
+      if (node.node_type != kComponent)
+        continue;
+
+      // 获得对应的kDescriptor StepInfo
+      // 对kComponent node类型的StepInfo 具有直接的 kDescriptor node的StepInfo .
+      const StepInfo &input_step_info = steps_[step - 1];
+      // component-index--- 注意是nnet中的component index
+      int32 component_index = node.u.component_index;
+      // descriptor-node-index
+      int32 input_node_index = input_step_info.node_index;
+    
+      KALDI_ASSERT(input_node_index == node_index - 1);
+
+      // kDescriptor StepInfo的输出--- 即当前kComponent StepInfo 的输入.
+      const std::vector<Index> &input_indexes = input_step_info.output_indexes;
+      // kComponent StepInfo 的输出
+      const std::vector<Index> &output_indexes = step_info.output_indexes;
+      // 获得对应的Component
+      const Component *component = nnet_.GetComponent(component_index);
+      // 获得对应的Request
+      const ComputationRequest &request = *(requests_[step_to_segment[step]]);
+
+      // XXXXX ???? 计算需要先进性处理的 Indexes.
+      bool need_derivs = request.NeedDerivatives();
+      ComponentPrecomputedIndexes *precomputed_indexes =
+          component->PrecomputeIndexes(request.misc_info,
+                                       input_indexes, output_indexes,
+                                       need_derivs);
+
+      // 简单一般情况 都没有需要先计算的indexes.
+      if (precomputed_indexes == NULL) {
+        // e.g. simple Components, and some other Components, will return NULL for
+        // precomputed_indexes.
+        step_info.precomputed_indexes_index = 0;
+      } else {
+        step_info.precomputed_indexes_index =
+            computation->component_precomputed_indexes.size();
+
+        NnetComputation::PrecomputedIndexesInfo info;
+        info.data = precomputed_indexes;
+
+        if (!input_indexes.empty() && input_indexes.back().n == 1 &&
+            !output_indexes.empty() && output_indexes.back().n == 1) {
+          // If these conditions are true, it's *possible* that we are doing
+          // 'shortcut' compilation.  So just in case that's what's going on, we
+          // store 'input_indexes' and 'output_indexes, which are needed by
+          // the ExpandComputation() function that is used in that process.
+          info.input_indexes = input_indexes;
+          info.output_indexes = output_indexes;
+        }
+      
+        computation->component_precomputed_indexes.push_back(info);
       }
+
+    
     }
-
-    // mark the end of the forward phase.
-    computation->commands.push_back(
-        NnetComputation::Command(kNoOperationMarker));
-
-    // 每个需要求导数的StepInfo 增加反向传播 求导命令.
-    for (int32 step = num_steps - 1; step >= 0; step--)
-      if (deriv_needed[step])
-        CompileBackward(step, computation);
-
-  
-    DeallocateMatrices(whole_submatrices, step_to_segment, computation);
   }
 
-
 }  // done part-Cmds
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -735,7 +740,14 @@ static void SplitComputationIntoSegments(
 }
 
 
-// 统一数据结构操作
+
+
+
+
+
+
+
+// 重新编号command
 void ConsolidateIoOperations(const Nnet &nnet,
                              NnetComputation *computation) {
   // These segments, represented as (start-index, end-index),

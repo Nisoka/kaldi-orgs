@@ -331,7 +331,7 @@ void nnet3_get_egs()
         }
 
 
-        //                       并且还加入ivector特征.(注意 ivector特征 并不是每帧不同的,因为一句话实际上是一个人)
+        // 并且还加入ivector特征.(注意 ivector特征 并不是每帧不同的,因为一句话实际上是一个人)
         
         // prcocess frames of current utt.
 
@@ -795,6 +795,7 @@ void nnet3_get_egs()
     // ------------- 内部使用 Index 索引描述数据.
     NnetExample eg;
     // call the regular input "input".
+    // 起始位置 是 -chunk.left_context 是个负数?
     eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
 
 

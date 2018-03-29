@@ -155,7 +155,6 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
                   if (this_num_n_values != *num_n_values)
                     return false;  // .. which would be odd.
                 }
-              
               }
 
               // 
@@ -318,7 +317,10 @@ void GetComputationRequest(const Nnet &nnet,
   // false
   request->store_component_stats = store_component_stats;
 
-  // foreach NnetIo (经过汇总的内部 indexes n t都变化)
+  // 将merged_eg 中的 三个NnetIo 加入到request的 request.inputs.io_spec request.outputs.io_spec中.
+  // 每个NnetIo都包含了 64个Example的 cindexes(64*32 frames).
+  
+  // foreach NnetIo (meged_eg 经过汇总的内部 indexes n t都变化)
   for (size_t i = 0; i < eg.io.size(); i++) {
     const NnetIo &io = eg.io[i];
     const std::string &name = io.name;
@@ -351,7 +353,7 @@ void GetComputationRequest(const Nnet &nnet,
 
 
 
-//  ===== 应该是简单 frames_per_eg.
+//  ===== 返回一个Example的所有frames ====== 
 /*
    本函数发现并返回Indexes向量的n_stride规则.
    或者返回0,如果并没有什么好的规则结构存在.
@@ -604,7 +606,7 @@ static bool IoSpecificationIsDecomposable(const IoSpecification &io_spec,
   // ------------- 输出 io 汇总的eg的总数 ------------
   *num_n_values_out = num_n_values;
 
-  // ------------- 返回的实际上n_stride 就是 frames_per_eg -----------
+  // ------------- 返回的实际上就是 frames总数 -----------
   int32 n_stride = FindNStride(indexes, full_check);
 
   if (n_stride == 0)

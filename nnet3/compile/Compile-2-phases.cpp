@@ -226,6 +226,7 @@ void ComputeComputationPhases(
       
       // ---------------- 创建 scc_graph
       // 这个scc_graph 目的是什么?? 在做什么东西呢??? 结果如下:
+
       std::vector<std::vector<int32> > scc_graph;
       MakeSccGraph(graph, sccs, &scc_graph);
       KALDI_VLOG(6) << "scc graph is: " << PrintGraphToString(scc_graph);
@@ -297,7 +298,7 @@ void ComputeComputationPhases(
 
 
     // ======================== 目标 是每个 Request-segment 的cindex 的 epoch-c-order ============
-    // vector size = 段总数--Request总数
+    // vector size = 段总数--Request总数=1
     epochs_per_segment->clear();
     epochs_per_segment->resize(num_segments);
 

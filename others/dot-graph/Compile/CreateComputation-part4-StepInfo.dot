@@ -1,0 +1,49 @@
+digraph ComputeProcess{
+        rankdir=LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+
+
+        subgraph members{
+                Compiler -> steps_
+                steps_ -> vec_StepInfo
+                vec_StepInfo[label="vec | <one> StepInfo | StepInfo | ..."]
+
+                vec_StepInfo:one -> StepInfo
+                StepInfo -> output_cindex_ids
+                StepInfo -> segment -> 0
+                StepInfo -> output_indexes
+                
+                StepInfo -> node_index
+                
+
+                StepInfo -> kDescriptor[label="node-type is"]
+                StepInfo -> kOthers[label="node-type is"]
+                kOthers -> value -> Matrix_value
+                kOthers -> deriv[label="deriv_need[step_index]"]
+                deriv -> Matrix_deriv
+                Matrix_value -> output_cindex_ids
+                Matrix_deriv -> output_cindex_ids
+                Matrix_value -> Matrix_size[style=dashed]
+                Matrix_deriv -> Matrix_size[style=dashed]
+
+                kDescriptor -> value_parts -> subMatrix_value -> Matrix_value
+                kDescriptor -> deriv_parts[label="deriv_need[step_index]"]
+                deriv_parts -> subMatrix_deriv -> Matrix_deriv
+
+                Matrix_size[label="cindexes_rows X cols"]
+
+
+                kDescriptor -> input_locations_list
+                
+                
+        }
+
+        
+        by_steps -> steps_
+
+        
+        CreateStepInfo -> steps_
+
+
+}

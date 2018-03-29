@@ -1,50 +1,116 @@
 digraph ComputeProcess{
-        rankdir=TB
+        rankdir=LR
        
         node[shape=Mrecord, width=.1, height=.1]
 
-        AddCommands -> AllocateMatrices -> kAllocMatrix
-        AddCommands -> CompileForward -> kPropagate
-        CompileForward -> kAcceptInput
-        AddCommands -> CompileBackward -> kBackProb
-        CompileBackward -> kProvideOutput
-        AddCommands -> DeallocateMatrices -> kDeallocMatrix
-        subgraph AddDescriptorCommands{
-                step -> kDescriptorNode[style=dashed]
-                kDescriptorNode -> CompileForwardDescriptor
-                CompileForwardDescriptor -> step_kDescriptor
+        subgraph Compiler{
+                 Compiler -> matrices
+                 Compiler -> sub_matrices
+                 
+                 
+        }
 
-                step_kDescriptor -> kDescriptor_node_type[style=dashed]
-                kDescriptor_node_type[label="NnetworkNode.Descriptor"]
+
+        subgraph allocAndDealloc{
+                AddCommands -> AllocateMatrices -> kAllocMatrix
+                AllocateMatrices -> matrices[style=dashed]
+
+
+                AddCommands -> DeallocateMatrices -> kDeallocMatrix
+                DeallocateMatrices -> matrices[style=dashed]
+        }
+
+
+        subgraph compileForward{
+
+                AddCommands -> CompileForward->StepInfoNodeTypes
+        
+                StepInfoNodeTypes[label="StepInfoNodeTypes |<input> kInput | <component> kComponent | <descriptor> kDescriptor | <output> kOutput.. "]
+
+// For Input
+                StepInfoNodeTypes:input -> cmd_kAcceptInput -> cmd_kNoOperationPermenent
+                cmd_kAcceptInput -> submatrix_for_input
+                cmd_kAcceptInput -> node_index_for_input
+
                 
-                step_kDescriptor -> value_parts
-                value_parts[label="<1> part1 | part2 | part3"]
-                value_parts:1 -> kDescriptor_part_type[style=dashed]
-                kDescriptor_part_type[label="SumDescriptor"]
-                value_parts:1 -> value_submat_index
-
-                value_parts:1 -> input_locations_list
-                input_locations_list -> ill_comment[style=dashed]
-                ill_comment[label="-----part1----- | <cindex1_loc_list> cindex1- dep_cindex1_loc_list | cindex2- dep_cindex2_loc_list | ..."]
-                ill_comment:cindex1_loc_list -> loc_list_comment[style=dashed]
-                loc_list_comment[label="dep_cindex1_1_locations(step-index, row-index) | dep_cindex1_2_locations(step-index, row-index) | dep_cindex1_1_locations(step-index, row-index)"]
-
-                input_locations_list -> ComputeValueSubmatLocationsList -> sub_locations_list
-                sub_locations_list -> sll_comment[style=dashed]
-                sll_comment[label="-----part1----- | <cindex1_loc_list> cindex1- dep_cindex1_loc_list | cindex2- dep_cindex2_loc_list | ..."]
-                sll_comment:cindex1_loc_list -> sub_loc_list_comment[style=dashed]
-                sub_loc_list_comment[label="dep_cindex1_1_locations(value_submat_index, row-index) | dep_cindex1_2_locations(value_submat_index, row-index) | dep_cindex1_1_locations(value_submat_index, row-index)"]
-                loc_list_comment -> same -> sub_loc_list_comment[style=dashed]
+// For Component
+                StepInfoNodeTypes:component -> cmd_kPropagate
+                cmd_kPropagate -> component_index
+                cmd_kPropagate -> input_submatrix_for_Component_Descriptor
+                cmd_kPropagate -> submatrix_for_Component
 
 
-                sub_locations_list -> CompileForwardFromSubmatLocationsList
-                value_submat_index -> CompileForwardFromSubmatLocationsList
-                // CompileForwardFromSubmatLocationsList -> SplitLocations
-                
-                CompileForwardFromSubmatLocationsList -> Command_kAddRows -> computation_commands
-                CompileForwardFromSubmatLocationsList -> Command_kMatrixAdd -> computation_commands
-                CompileForwardFromSubmatLocationsList -> Command_kAddRowsMulti -> computation_commands
+
+
+// For Descriptor
+                StepInfoNodeTypes:descriptor -> value_parts
+                value_parts[label="<1> value_part1 | value_part2 | value_part3"]
+
+// Descriptor part sumDescriptor
+
+                value_parts:1 -> SumDescriptor
+                SumDescriptor -> cmd_kSetConst
+                cmd_kSetConst -> value_submat_index
+
+                value_submat_index -> thisOutputSubMatrix[style=dotted]
+
+
+// SumDescriptor add kMatrixAdd kAddRows kAddRowsMulti
+
+                SumDescriptor -> CompileForwardFromSubmatLocations
+                CompileForwardFromSubmatLocations -> split_lists
+                split_lists[label="<1> one_src_mat | <2> multi_src_mat"]
+
+                split_lists:1 -> if_whole_subMatrix
+                if_whole_subMatrix[label="<whole> whole | <rows> rows"]
+
+                if_whole_subMatrix:whole -> cmd_kMatrixAdd
+                cmd_kMatrixAdd -> value_submat_index
+                cmd_kMatrixAdd -> src_submat_index
+
+
+                if_whole_subMatrix:whole -> computation_indexes_push_src_rows
+                computation_indexes_push_src_rows[label="computation.indexes.push_back(indexes)"]
+        
+        
+                if_whole_subMatrix:rows -> cmd_kAddRows
+                cmd_kAddRows -> value_submat_index
+                cmd_kAddRows -> src_submat_index
+                cmd_kAddRows -> src_submat_rows
+                computation_indexes_push_src_rows -> src_submat_rows[style=dashed]
+
+
+
+                split_lists:2 -> computation_indexes_multi_push_multi_src_rows
+                computation_indexes_multi_push_multi_src_rows[label="computation.indexes_multi.push(submat_locations)"]
+        
+                split_lists:2 -> cmd_kAddRowsMulti
+                cmd_kAddRowsMulti -> value_submat_index
+                cmd_kAddRowsMulti -> indexes_multi_index
+
+                indexes_multi_index -> submat_locations[style=dashed]
+                submat_locations -> submat_locations_comment[label=""]
+                submat_locations_comment[label="[submat-index1, rows-index] | [submat-index2, rows-index] |..."]
+
+                computation_indexes_multi_push_multi_src_rows -> submat_locations[style=dashed]
+
+
+
+// For Output
+                StepInfoNodeTypes:output -> cmd_kProvideOutput
+                cmd_kProvideOutput -> submatrix_for_output
+                cmd_kProvideOutput -> node_index_for_output
 
         }
 
-}
+
+
+        
+
+        
+        
+
+
+
+        AddCommands -> CompileBackward -> kBackProb
+ }

@@ -121,9 +121,6 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
   AddCommands(deriv_needed, step_to_segment, computation);
 
 
-
- 
-
   // =========== 如下函数 从新安排添加的command的顺序。
   // 所以kAcceptInput 和 kProvideOutput命令 会出现在正确位置上.
   ConsolidateIoOperations(nnet_, computation);

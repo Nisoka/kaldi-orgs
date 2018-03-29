@@ -92,7 +92,6 @@ void ComputationStepsComputer::SplitIntoSubPhases(
   sub_phases->clear();
   sub_phases->resize(num_sub_phases);
 
-  // 对每个划分segment.
   // sub_phases 又对原本的 phase按照node 顺序进行了一下 划分.
   for (size_t i = 0; i < num_sub_phases; i++) {
     size_t this_begin = segment_begins[i],
@@ -201,13 +200,12 @@ void ComputationStepsComputer::ProcessInputOrOutputStep(
 
   // 每个cindex 对应 一个 location的 pair <step_index, row_index>
   //                                      <sub_phase,  row_index>
-  //                                      <node_index, row_index>
+  //                                      <phases + node_index, row_index>
 
   // The actual output in 'steps' must be in the same order as
   int32 step_index = AddStep(io_cindexes);
 
   // 这里按每个点进行详细检查, sub_phase中的cindexes 都会安排到具体的 locations_中.
-
   
   // Now spot-check that the cindexes in 'sub_phase' are the same as those
   // we just added.  [note: they don't have to be in the same order, but
@@ -248,7 +246,9 @@ int32 ComputationStepsComputer::AddStep(const std::vector<Cindex> &cindexes,
   std::vector<Cindex>::const_iterator
       iter = cindexes.begin(),
       end = cindexes.end();
-  
+
+  // 向steps_<step, step, step, step>
+  // 向step中增加每个cindex_id
   std::vector<int32>::iterator out_iter = step.begin();
 
   
@@ -266,52 +266,7 @@ int32 ComputationStepsComputer::AddStep(const std::vector<Cindex> &cindexes,
       locations[cindex_id].second = row_index;
     }
   } else {
-    for (; iter != end; ++iter, ++out_iter, ++row_index) {
-      bool is_input = false;  // only relevant if we have to add the cindex to
-                              // the computation graph, which we won't for
-                              // inputs (we only might for dim-range nodes
-                              // and for the component-input and component
-                              // steps of non-simple Components.
-      bool added;
-      int32 cindex_id = graph_->GetCindexId(*iter, is_input, &added);
-      *out_iter = cindex_id;
-      if (added) {
-        KALDI_ASSERT(cindex_id == static_cast<int32>(locations_->size()));
-        locations_->resize(cindex_id + 1);
-        locations_->back().first = step_index;
-        locations_->back().second = row_index;
-        locations = &((*locations_)[0]);  // in case it was reallocated
-      } else {
-        locations[cindex_id].first = step_index;
-        locations[cindex_id].second = row_index;
-      }
-    }
-  }
-  return step_index;
-}
-
-
-
-
-
-
-int32 ComputationStepsComputer::AddStep(std::vector<int32> *cindex_ids) {
-  int32 step_index = steps_->size();
-  steps_->push_back(std::vector<int32>());
-  
-  // 向steps_ 中保存当前 sub_phase 的所有cindexes .
-  steps_->back().swap(*cindex_ids);
-  
-  std::vector<int32>::const_iterator iter = steps_->back().begin(),
-      end = steps_->back().end();
-  int32 row_index = 0;
-  std::pair<int32,int32> *locations = &((*locations_)[0]);
-  size_t num_cindexes = graph_->cindexes.size();
-  for (; iter != end; ++iter, ++row_index) {
-    int32 cindex_id = *iter;
-    KALDI_ASSERT(static_cast<size_t>(cindex_id) < num_cindexes);
-    locations[cindex_id].first = step_index;
-    locations[cindex_id].second = row_index;
+    // IGNORE......
   }
   return step_index;
 }

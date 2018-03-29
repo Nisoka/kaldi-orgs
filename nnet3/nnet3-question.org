@@ -6,6 +6,17 @@
 *** 1 init.raw
 
 ** 1 get-egs 准备eg数据
+   
+   将Utterance 划分为多个 NnetExample
+   每个NnetExample 包含三个NnetIo
+
+   两个NnetExample 之间虽然是同样来自一个Utterance 但是两者之间不在具有相关性
+   
+   NnetIo-MFCC 保存 32frames -- left_context -18-0, cur_frames 0-8, right_context 8-20(12)
+
+   所以不需要两个NnetExample之间的关系了
+   一个NnetExample 就可以进入训练了 算作一个训练样本.
+
 
 ** 2 prepare train 训练前准备
 
@@ -20,11 +31,11 @@
 
 
 * nnet3 merge-egs and Compile 
-  t_stride 是什么做什么用的?
-  n_stride 貌似就是 frames_per_eg, 是两个eg 的间隔, 实际上就是一个eg 的frames数量.
-
-
   
+  n_stride 就是 一个 NnetExample中包含的 总数据帧数  38帧, 
+  当在一个merged_eg 中用来区分 两个NnetExample之间的边界.
+  
+
   
 
 
