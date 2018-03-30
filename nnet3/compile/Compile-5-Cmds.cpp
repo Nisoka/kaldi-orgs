@@ -498,6 +498,8 @@
     }
   }
 
+
+  
   // 根据每个 computation matrix 是否具有全域的 submatrix 增加matrix.
   void Compiler::AllocateMatrices(const std::vector<int32> &whole_submatrices,
                                   NnetComputation *computation) const {

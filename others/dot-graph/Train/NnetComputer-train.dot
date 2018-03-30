@@ -1,0 +1,23 @@
+digraph NnetComputer-train{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+        subgraph NnetComputer{
+        NnetComputer -> pending_commands_
+        NnetComputer -> program_counter_
+
+
+}
+
+        NnetComputer -> AcceptInputs
+
+        NnetExample -> eg
+        eg[label="merged_eg"]
+
+        eg -> AccetpInputs[label="eg.io(input, ivector, output)"]
+        
+
+
+
+
+}

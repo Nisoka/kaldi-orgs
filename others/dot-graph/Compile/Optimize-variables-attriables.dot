@@ -1,0 +1,90 @@
+digraph ComputationGraph{
+        rankdir = LR
+        node[shape=Mrecord, width=.1, height=.1]
+
+
+        subgraph Analyzer_Init{
+
+                 Analyzer -> Init_for_Analyzer
+                 Init_for_Analyzer[label="Analyzer.Init()"]
+
+                 Init_for_Analyzer -> variables -> Init_for_variables -> ComputationVariables
+                 Init_for_variables[label="variables.Init()"]
+
+                 Analyzer -> matrix_accesses
+                 Analyzer -> variable_accesses
+                 Analyzer -> variables
+                 Analyzer -> command_attributes
+                 Init_for_Analyzer -> ComputeCommandAttributes
+                 Init_for_Analyzer -> ComputeVariableAccesses
+                 Init_for_Analyzer -> ComputeMatrixAccesses
+                 
+
+
+
+                 ComputationVariables -> matrix_to_variable_index_
+                 matrix_to_variable_index_[label="matrix_to_variable_index_ | matrix1's first variable-id | matrix2's first variable-id | ... "]
+
+                 ComputationVariables -> ComputeSplitPoints
+                 
+                 ComputationVariables -> row_split_points_
+                 ComputeSplitPoints -> row_split_points_
+                 
+                 ComputationVariables -> col_split_points_
+                 ComputeSplitPoints -> col_split_points_
+
+                 ComputeSplitPoints -> matrix_to_variable_index_
+
+                 ComputationVariables -> ComputeVariablesForSubmatrix
+
+                 row_split_points_ -> variables_for_submatrix_[style=dashed]
+                 col_split_points_ -> variables_for_submatrix_[style=dashed]
+
+                 row_split_points_[label="row_split_points_ | submatrix1 - Vector of points | submatrix2 - Vector of points | ..."]
+                 col_split_points_[label="col_split_points_ | submatrix1 - Vector of points | submatrix2 - Vector of points | ..."]
+                 
+                 ComputationVariables -> variables_for_submatrix_
+                 variables_for_submatrix_[label="variables_for_submatrix_ | submatrix1 - Vector of variable-ids of submatrix1 | submatrix2 - Vector of variable-ids of submatrix2 | ... "]
+
+                 ComputationVariables -> ComputeVariablesToMatrix
+                 ComputationVariables -> variable_to_matrix_
+                 variable_to_matrix_ -> matrix_to_variable_index_[label="map back"]
+                 
+
+        }
+                
+
+        subgraph CommandAttributes{
+
+                ComputeCommandAttributes -> CommandAttributes
+                Command -> CommandAttributes
+                Command -> CommandType
+                CommandType[label="CommandType | <type_write> kSetConst |  kAddRows | kMatrixCopy | kMatrixAdd | <type_readandwrite> kPropagate | kBackProp "]
+
+
+                CommandType -> Command_args
+                Command_args[label="Command_args | submatrices_in | submatrices_out"]
+
+                
+                CommandAttributes -> variables_read
+                variables_read -> Command_args[label="add variables of submatrices_in to list"]
+                CommandAttributes -> variables_written
+                variables_written -> Command_args[label="add variables of submatrices_out to list"]
+                
+                CommandAttributes -> submatrices_read
+                submatrices_read -> Command_args[label="add submatrices_in to list"]
+                CommandAttributes -> submatrices_written
+                submatrices_written -> Command_args[label="add submatrices_out to list"]
+                
+                CommandAttributes -> matrices_read
+                matrices_read -> Command_args[label="add matrices_in to list"]
+                CommandAttributes -> matrices_written
+                matrices_written -> Command_args[label="add matrices_out to list"]
+                
+                CommandAttributes -> has_side_effects
+
+        }
+        
+
+
+}
