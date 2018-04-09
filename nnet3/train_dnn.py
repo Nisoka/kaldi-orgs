@@ -10,6 +10,7 @@
 
 
 
+# file: local/nnet3/train_tdnn.sh
 
 # stage=0
 # train_stage=-10
@@ -44,8 +45,6 @@
 # graph_dir=$gmm_dir/graph
 
 
-# usefor:
-# and 
 #   提取ivector 特征 == >  ivectordir=exp/nnet3/ivectors_train_sp (copy-feats ark:feats.ark ark,t:-|head)
 #   generate sp data
 #   generate sp and hires feature
@@ -68,7 +67,6 @@
 # steps/nnet3/train_dnn.py
 #   --stage=$train_stage \
 #   --cmd="$decode_cmd" \
-#   --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \    (dim = 100)
 #   --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
 #   --trainer.num-epochs $num_epochs \
 #   --trainer.optimization.num-jobs-initial $num_jobs_initial \
@@ -82,9 +80,10 @@
 #   --use-gpu true \
 
 #     =============== feat-dir ali-dir dir =========== 
-#   --feat-dir=data/${train_set}_hires \                    # data/train_sp_hires (dim = 40)
-#   --ali-dir $ali_dir \                                    # exp/tri5a_sp_ali
-#   --dir=$dir \                                            # dir=exp/nnet3/tdnn_sp
+#   --feat-dir=data/${train_set}_hires \                          # data/train_sp_hires (dim = 40)
+#   --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \   # (dim = 100)
+#   --ali-dir $ali_dir \                                          # exp/tri5a_sp_ali
+#   --dir=$dir \                                                  # dir=exp/nnet3/tdnn_sp
 
 #   --lang data/lang \
 #   --reporting.email="$reporting_email" || exit 1;
@@ -132,10 +131,11 @@ def train(args, run_opts):
     # split the training data into parts for individual jobs
     # we will use the same number of jobs as that used for alignment
     # 将特征数据 按照job数量进行划分, 会使用相同数量的job 进行对齐.
-    # feat_dir -- data/train_set_hires 划分为jos 个子集.
+    # feat_dir -- data/train_sp_hires 划分为jos 个子集.
     common_lib.execute_command("utils/split_data.sh {0} {1}".format(
         args.feat_dir, num_jobs))
-    # copy tri5a_sp_ali/tree(最后训练好的模型tree) --->  exp/nneet3/tdnn_sp
+    
+    # copy tri5a_sp_ali/tree(最后训练好的模型tree) --->  exp/nnet3/tdnn_sp
     shutil.copy('{0}/tree'.format(args.ali_dir), args.dir)
 
     
@@ -532,92 +532,8 @@ exp/nnet3/tdnn_sp/
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 run_opts=run_opts)
 
-
-exp/nnet3/tdnn_sp/
-├── 0.mdl
-├── 0.raw
-├── 1.mdl
-├── cache.1
-├── cmvn_opts
-├── configs
-│   ├── final.config
-│   ├── init.config
-│   ├── init.raw
-│   ├── lda.mat -> ../lda.mat
-│   ├── network.xconfig
-│   ├── presoftmax_prior_scale.vec -> ../presoftmax_prior_scale.vec
-│   ├── ref.config
-│   ├── ref.raw
-│   ├── vars
-│   ├── xconfig
-│   ├── xconfig.expanded.1
-│   └── xconfig.expanded.2
-├── egs
-│   ├── ali_special.scp
-│   ├── cmvn_opts
-│   ├── combine.egs
-│   ├── egs.1.ark
-
-│   ├── egs.52.ark
-│   ├── info
-│   │   ├── egs_per_archive
-│   │   ├── feat_dim
-│   │   ├── final.ie.id
-│   │   ├── frames_per_eg
-│   │   ├── ivector_dim
-│   │   ├── left_context
-│   │   ├── left_context_initial
-│   │   ├── num_archives
-│   │   ├── num_frames
-│   │   ├── right_context
-│   │   └── right_context_final
-│   ├── log
-│   │   ├── create_train_subset_combine.log
-│   │   ├── create_train_subset_diagnostic.log
-│   │   ├── create_train_subset.log
-│   │   ├── create_valid_subset_combine.log
-│   │   ├── create_valid_subset_diagnostic.log
-│   │   ├── create_valid_subset.log
-│   │   ├── get_egs.1.log
-
-│   │   ├── get_egs.6.log
-│   │   ├── shuffle.1.log
-
-│   │   ├── shuffle.52.log
-│   ├── train_diagnostic.egs
-│   ├── train_subset_uttlist
-│   ├── tree
-│   ├── valid_diagnostic.egs
-│   └── valid_uttlist
-├── final.ie.id
-├── init.raw
-├── lda.mat
-├── lda_stats
-├── log
-│   ├── acc_pdf.1.log
-│   ├── acc_pdf.30.log
-│   ├── add_first_layer.log
-│   ├── compute_prob_train.0.log
-│   ├── compute_prob_valid.0.log
-│   ├── get_lda_stats.1.log
-│   ├── get_lda_stats.10.log
-│   ├── get_transform.log
-│   ├── init_mdl.log
-│   ├── nnet_init.log
-│   ├── select.0.log
-│   ├── sum_pdf_counts.log
-│   ├── sum_transform_stats.log
-│   ├── train.0.1.log
-│   └── train.0.2.log
-├── num_jobs
-├── pdf_counts
-├── presoftmax_prior_scale.vec
-├── srand
-└── tree
-
-
             
-            # 删除两次迭代之前的 mdl
+            # 删除两次迭代之前 并且 不在 modes_to_combine 中的 mdl
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
                 # conditions
@@ -644,7 +560,9 @@ exp/nnet3/tdnn_sp/
                 egs_dir=egs_dir,
                 minibatch_size_str=args.minibatch_size, run_opts=run_opts,
                 sum_to_one_penalty=args.combine_sum_to_one_penalty)
-    
+
+
+    # ===================== 验证后验概率? ====================            
     if args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purposes of "
                     "adjusting the priors.")
