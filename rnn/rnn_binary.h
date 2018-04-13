@@ -1,11 +1,17 @@
 #ifndef RUN_BINARY_H
 #define RUN_BINARY_H
-
+#include <iostream>
+#include <math.h>
+#include <stdlib.h>
+#include <time.h>
+#include <vector>
+#include <assert.h>
+#include <cstring>
 
 #define innode 2
 #define hiddenode 16
 #define outnode 1
-#define alpha 0.1
+#define alpha 0.01
 #define binary_dim 8
 
 #define randval(high) ( ((double)rand() / RAND_MAX ) * high )

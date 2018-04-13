@@ -1,0 +1,44 @@
+RNN LM 总览
+http://licstar.net/archives/328 
+来斯特 NLP的 一个新中科院博士, 其有一份博士论文可以看
+http://licstar.net/archives/328
+
+
+阿里云 使用的是 LSTM 训练 -- 声学模型 --- .
+https://yq.aliyun.com/articles/2308?utm_source=tuicool&utm_medium=referral
+
+重要人物
+
+Bengio
+提出 dnn 训练 LM
+最经典原始之作.
+《A Neural Probabilistic Language Model》
+
+Ronan Collobert 和 Jason Weston
+完全一个新领域, 训练的词向量矩阵 是完全一个新的方式处理NLP,,,,, ... 不是特别懂.
+《Natural Language Processing (Almost) from Scratch》
+
+Geoffrey Hinton
+提出一些新的DNN处理方式, 但是没用RNN, 使用平衡二叉树 实现了快速, 高效.
+《Three new graphical models for statistical language modelling》
+《A scalable hierarchical distributed language model》
+
+
+
+
+
+T Mikolov 
+使用RNN 训练 LM 
+
+博士论文最佳读物
+《Statistical Language Models based on Neural Networks》
+
+他制作的一个RNNLM Tookit 
+http://www.fit.vutbr.cz/~imikolov/rnnlm/
+http://rnnlm.org/
+
+
+
+Eric H. Huang
+在 Ronan Collobert 和 Jason Weston 基础上改进, 没有自成一派.
+《Improving Word Representations via Global Context and Multiple Word Prototypes》
