@@ -37,5 +37,22 @@ https://jingyan.baidu.com/article/948f5924ee2a5dd80ff5f9e4.html
 http://blog.csdn.net/jun2016425/article/details/53100963
 
 
-安装低版本的gcc
+有时候cuda 突然 运行不正确了, 一般不会是cuda 的问题, 而是nvidia驱动的问题
+因为内核是不断更新的, 会导致 nvidia驱动不成功, 这时候使用原本好的nvidia驱动安装也不成功
+可以下载最新版本驱动(本来cuda是需要确定版本的驱动的, 但是可以安装最新驱动, 貌似没问题)
+安装最新版驱动可以解决该问题.
+https://blog.csdn.net/xl928471061/article/details/78130165
+
+
+
+安装低版本的gcc(一般不需要)
 http://blog.csdn.net/zyxlinux888/article/details/6709036
+
+
+kaldi-ctc的安装
+kaldi-ctc 必须使用cudnn v5.1, 不能用新的(版本 函数不兼容)
+https://blog.csdn.net/qq_25750561/article/details/78080157
+cudnn 安装
+这样重新目录的方式安装, 不会污染 cuda, 出错了也能确定不是增加量了cudnn的问题.
+https://blog.csdn.net/lucifer_zzq/article/details/76675239
+
