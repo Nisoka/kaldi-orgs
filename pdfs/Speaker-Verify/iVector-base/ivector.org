@@ -1,0 +1,94 @@
+
+* Front-end Factor analysis for speaker verification
+  spker识别的 前端的 因子分析方法
+  
+** Introduction
+   Joint Factor Analysis 联合因子分析 取得了巨大成功,
+   
+   但是在最近的研究中表明, JFA中 信道因子,本来是希望仅仅
+   建模信道信息的因子, 但是也包含了说话人信息. 
+   在这个情况下, 我们提出了一个新的 基于因子分析实现的特征
+   提取器 的说话人识别系统.
+   TV (total variability) 全异变空间
+   因子分析方法 用来建模一个新的 低维子空间 叫做 全异变空间(TV)
+   在TV空间中, 一个 utt 被建模为一个新的vector 叫做 TV因子.(i-vector)
+   
+   信道补偿操作 在新的 低维TV空间中进行, 而不是像在传统的JFA,
+   在高维的GMM超矢量空间中进行.
+   
+   识别过程 就是在两个 TV因子(ivector)之间计算两者的相似度.
+   
+   本论文也介绍了 信道补偿操作 在新的TV因子 如何去除 烦人的影响.
+   
+   使用LDA 获得了最高准确率的结果, 使用LDA的动机是因为 能够最大化spker间的
+   方差, 最小化 spker内的方差, 这是spker verification中相当重要的一点.
+   
+   1 介绍JFA方法
+   2 介绍TV模型 ivector, 以及两种验证系统, 以及信道补偿技术
+
+   
+** Front-end Factor Analysis (TV ivector模型)
+   
+   
+*** Total variability  全空间异变性
+    基本的JFA模型 给予 spker channel因子 被包含定义了两个子空间.
+    1 spker空间 基于 本征音提取矩阵 V   表示spker空间
+    2 channel 空间 基于本征通道提取矩阵U 表示的channel空间
+
+    
+**** TV 模型
+    TV模型 我们定义一个单独空间, 代替上面两个空间. 同时包含了
+    本征音 以及 本征通道的 异变性. 
+    
+    通过 包含特征向量以及最大的几个特征值的全异变矩阵 定义了该 全异变空间
+    在新模型中, 我们不区分 在GMM超矢量空间中spker 和 channel的影响.
+    
+    这个新方法的动机 来自于 论文[6]中的实验提出的, 论文[6]的实验 显示了
+    JFA方法希望只建模channel影响的 channel因子 也会包含spker信息.
+    
+    给定一个utt, 在TV模型下, spker和channel 的GMM超矢量 定义为
+    M = m + Tw
+    m --- spker channel 都独立的 ubm 超矢量
+    T --- 降维矩阵
+    w --- 随机噪声 ~ N(0, I)
+    
+    w 组件就是我们的 全异变空间的 全因子
+    
+    在TV模型中, 我们认为
+    M 服从 N(m, TT^t)的正太分布
+    
+    学习 全异变因子提取矩阵的方法, 与 JFA中学习 本征音因子提取矩阵V基本相同.
+    除了一个地方的不同: 
+    本征音的提取矩阵V的训练     认为 spker的utt都认为是一个人的
+    全异变因子的提取矩阵T的训练 认为 spker的utt 来自不同人
+    
+    这个新方法 可以被认为是一个简单的 因子分析方法, 目的是将 utt 映射到
+    低维 全异变空间.
+    
+    全异变因子w 是一个隐变量, 可以通过在BW(Baum-Welch)统计量下的后验概率
+    分布定义.  后验概率分布是一个 高斯分布. 这个高斯分布的均值 就是我们要的
+    全异变因子 --- ivector特征.
+    
+    当估计好了 T 以及其他一些必要的矩阵之后, 对于一个新的utt 直接可以提取得到
+    TV 空间因子 --- ivector特征.
+    
+    在TV模型方法中, 因子分析作为一个 提取特征的提取器出现, 而不是建模spker
+    channel的影响.
+
+
+    
+**** Intersession compensation
+     不同会话间的补偿
+     LDA
+   
+
+
+   
+   
+   
+   
+   
+   
+   
+  
+  
