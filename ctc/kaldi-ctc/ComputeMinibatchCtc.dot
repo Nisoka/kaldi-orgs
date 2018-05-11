@@ -1,0 +1,18 @@
+digraph cost_and_grad{
+  rankdir = LR
+  node[shape=Mrecord]
+
+  subgraph softmax{
+    //通过softmax 推测得到最终softmax之前的输出结构为
+
+    activations -> act_st
+    act_st[label = " --- frame1 --- | utt1 act_blank act_0 act_... act_num_pdfs | ... | utt_Minibatch act_blank act_0 act_1... act_num_pdfs | |
+                    --- frame2 --- | utt1 act_blank act_0 act_... act_num_pdfs | ... | utt_Minibatch act_blank act_0 act_1... act_num_pdfs | |
+                    --- frame_MaxT --- | utt1 act_blank act_0 act_... act_num_pdfs | ... | utt_Minibatch act_blank act_0 act_1... act_num_pdfs "]
+
+
+
+  }
+
+
+}

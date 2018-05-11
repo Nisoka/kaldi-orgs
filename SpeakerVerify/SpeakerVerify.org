@@ -1,0 +1,77 @@
+
+** 训练plda 模型
+
+   plda 模型的打分, 是需要对待验证 utt  
+   与 所有注册的spker的一个ivector特征进行比较, 得出概率得分.
+   
+   1 spk2utt, 每个说话人的所有utt
+   2 ivector.scp ivector特征数据
+   3 out: 输出一个plda模型
+   run.pl $plda_ivec_dir/log/plda.log \
+   ivector-compute-plda ark:$plda_data_dir/spk2utt \
+      "ark:ivector-normalize-length scp:${plda_ivec_dir}/ivector.scp  ark:- |" \
+       $plda_ivec_dir/plda || exit 1;
+
+
+
+
+** LLR plda 打分
+   echo "LLR scores "
+
+   注册 ivector信息
+   enrollment_ivec_dir=exp/ivectors_enrollment 
+   测试 
+   test_ivec_dir=exp/ivectors_test
+
+   0  1 false, 2 spker的utt数量
+
+   1 plda
+   2 注册人员的 ivector 特征( - mean, 归整) (前面缺个归整啊, 难道前面已经归整过了?)
+   3 测试数据 ivector特征 (归整, -mean, 归整)
+   4 trials文件
+
+   5 out : 输出每个测试语音的打分, 注意 这里只判定了得分, 得分实际就是预测结果
+
+   ivector-plda-scoring --normalize-length=true \
+
+       --simple-length-normalization=false \
+
+       --num-utts=ark:${enrollment_ivec_dir}/num_utts.ark \   
+
+       "ivector-copy-plda --smoothing=0.01 ${plda_ivec_dir}/plda - |" \
+
+       "ark:ivector-subtract-global-mean ${plda_ivec_dir}/mean.vec scp:${enrollment_ivec_dir}/spk_ivector.scp ark:- | 
+           ivector-normalize-length ark:- ark:- |" \
+
+       "ark:ivector-normalize-length scp:${test_ivec_dir}/ivector.scp ark:- | 
+           ivector-subtract-global-mean ${plda_ivec_dir}/mean.vec ark:- ark:- | 
+           ivector-normalize-length ark:- ark:- |" \
+
+       "cat '$trials' | cut -d\  --fields=1,2 |" 
+       
+       $scores_dir/plda_scores || exit 1;
+       
+
+
+
+** compute-eer
+   计算等差错误率 门限值
+   trials
+   spk-target    utt1  target
+   spk-nontarget utt1  nontarget
+   
+   plda_scores
+   spk-target    utt1 socres(big)
+   spk-nontarget utt1 socres(little)
+
+   compute-eer 目标是计算一个 score 使 nontarget_is_target/.. == target_is_nontarget/.. 
+   
+   eer=`compute-eer <(python local/prepare_for_eer.py $trials $scores_dir/plda_scores) `
+
+   1 prepare_for_eer.py 
+   生成中间数据, score 是预测结果, target/nontarget是 真实结果
+   score  target
+   score  nontarget
+   
+   2 compute-eer
+   计算eer 门限 score

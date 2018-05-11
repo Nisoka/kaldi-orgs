@@ -1,0 +1,9 @@
+服务器端 安装nfs-kernel-server 之后才会生成/etc/exports 文件
+客户端 安装 nfs-common
+http://www.linuxidc.com/Linux/2013-08/89154.htm
+
+两个问题
+mount.nfs: remote share not in 'host:dir' format
+http://blog.csdn.net/yuanyuan_186/article/details/8764406
+mount.nfs: access denied by server while mounting 一个解决办法
+http://blog.csdn.net/kelvindream/article/details/53858214

@@ -1,0 +1,300 @@
+
+** 1 kaldi 中对wav文件提取特征方法
+   https://blog.csdn.net/wbgxx333/article/details/27705939
+   简单用 
+   steps/make_mfcc.sh -nj 1 data/test.wav log/make_mfcc/test.make_mfcc.log mfcc/
+   
+   需要准备好
+   wav.scp
+   utt2spk
+   spk2utt
+
+
+
+
+
+
+
+
+** 2 提取Ivector 特征
+   
+*** 1 train_diag_ubm.sh
+    
+    steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 \
+    --num-frames 700000 \
+    --num-threads 8 \
+    ${temp_data_root}/${train_set}_sp_hires_nopitch_subset \
+    512 \
+    exp/nnet3${nnet3_affix}/pca_transform \
+    exp/nnet3${nnet3_affix}/diag_ubm
+
+
+    对subset内的feats.scp 应用 全局cmvn统计量, 拼接数据, 应用变换矩阵
+
+    all_feats="ark,s,cs:
+    apply-cmvn-online --config=$online_cmvn_config $dir/global_cmvn.stats scp:$data/feats.scp ark:- | 
+    splice-feats $splice_opts ark:- ark:- | 
+    transform-feats $dir/final.mat ark:- ark:- |"
+
+    同all_feats 不过 增加了一个子采样, 降低了数据量.
+    feats="ark,s,cs:
+    apply-cmvn-online --config=$online_cmvn_config $dir/global_cmvn.stats scp:$sdata/JOB/feats.scp ark:- | 
+    splice-feats $splice_opts ark:- ark:- | 
+    transform-feats $dir/final.mat ark:- ark:- | 
+    subsample-feats --n=$subsample ark:- ark:- |"
+    
+**** gmm-global-init-from-feats
+
+     num_threads=8
+     num_frames=700000
+     min_gaussian_weight=0.00001
+     num_iters_init=20
+
+     gmm-global-init-from-feats 
+     --num-threads=$num_threads 
+     --num-frames=$num_frames 
+     --min-gaussian-weight=$min_gaussian_weight 
+     --num-gauss=$num_gauss 
+     --num-gauss-init=$num_gauss_init 
+     --num-iters=$num_iters_init 
+     "$all_feats"
+
+
+     1 随机700000 frames 的feat数据
+     2 构造DiagGmm  分量为num_gauss_init,  维度dim
+     gconst_ 
+     // Equals log(weight) - 0.5 * (log det(var) + mean*mean*inv(var))
+     // 保存的是 某个高斯分量的log值, 以后通过 applySoftmax 直接就获得 响应度, 用于更新公式
+     
+     
+
+
+**** gmm-gselect
+     
+     num_gselect=30
+     gmm-gselect
+     --n=$num_gselect 
+     $dir/0.dubm 
+     "$feats" 
+     "ark:|gzip -c >$dir/gselect.JOB.gz"
+
+     1 为每个utt 构建一个 vector<vector<int32>>
+     每帧都有一个 vector 保存最佳的30 个高斯分量
+     
+     2 计算每帧 的每个高斯分量的 对数概率
+     就是放入 log{ak*N(u, delta)} 中求值即可.
+
+     3 选择其中最大的30个 保存起来.
+
+
+
+**** iter 20 次
+     
+***** gmm-global-acc-stats
+
+      gmm-global-acc-stats 
+      "--gselect=ark,s,cs:gunzip -c $dir/gselect.JOB.gz|" 
+      $dir/$x.dubm 
+      "$feats" 
+      $dir/$x.JOB.acc 
+      
+      1 上面保存的初始计算的 每一帧最佳的30个高斯分量
+      2 直接对最佳的30个高斯分量 计算 对数 概率值 
+      3 应用 applySoftmax 计算响应度
+      4 根据响应度 累计计算 occupancy_ mean_accumulator_ covariance_accumulator_ 等 更新式统计量
+      5 保存到 acc 中 等待进行更新使用
+      
+      那实际上其实只有30个高斯分量
+
+***** gmm-global-est
+
+      gmm-global-est (可以移除  < 0.00001 权重的高斯分量)
+      --min-gaussian-weight=$min_gaussian_weight 
+      $dir/$x.dubm 
+      "gmm-global-sum-accs - $dir/$x.*.acc|"
+      $dir/$[$x+1].dubm
+      
+      1 计算 gconst
+      2 计算 目标函数 Q 等待比较obj目标函数的增长
+      3 读取 上面计算的 更新式 统计量
+      occupancy_ mean_accumulator_ covariance_accumulator_ 等 更新式统计量
+      4 更新 means covariance 等
+      
+      
+
+
+
+
+
+
+
+
+
+
+
+*** 2 train_ivector_extractor.sh
+    训练ivector 提取器
+    ubm 已经得到, 使用全部 nopitch 数据进行训练extractor
+    steps/online/nnet2/train_ivector_extractor.sh 
+	--cmd "$train_cmd" 
+	--nj 10 \
+	data/${train_set}_sp_hires_nopitch 
+	exp/nnet3${nnet3_affix}/diag_ubm \
+	exp/nnet3${nnet3_affix}/extractor 
+    
+
+
+    gmm_feats="ark,s,cs:
+    	apply-cmvn-online --config=$dir/online_cmvn.conf $dir/global_cmvn.stats scp: 		$sdata/JOB/feats.scp ark:- | 
+	    splice-feats $splice_opts ark:- ark:- | 
+	    transform-feats $dir/final.mat ark:- ark:- | 
+	    subsample-feats --n=$subsample ark:- ark:- |"
+        
+    feats="ark,s,cs:
+	    splice-feats $splice_opts scp:$sdata/JOB/feats.scp ark:- | 
+	    transform-feats $dir/final.mat ark:- ark:- | 
+	    subsample-feats --n=$subsample ark:- ark:- |"
+        
+        
+
+    ivector-extractor-init 
+    	--ivector-dim=100
+	    --use-weights=false \
+	    "gmm-global-to-fgmm $dir/final.dubm -|" $dir/0.ie 
+
+	结果是一个初始化的 IvectorExtractor.
+	初始化一个 extractor 提取器, 没有进行数据更新. 只是初始化了各种变量 ????????????????? 没看懂
+
+
+    gmm-global-get-post 
+        --n=$num_gselect       5     只选择最高概率的5个高斯分量
+	    --min-post=$min_post   0.025 最小后验概率, 更小的直接被剪枝掉
+	    $dir/final.dubm        训练好的UBM
+	    "$gmm_feats" 			//应用了 cmvn 拼接 变换降维 子采样的特征
+	    ark:- \| \
+
+    只选择 最佳的5个 高斯分量的概率 写入 ark:- 
+        
+    scale-post ark:- $modified_posterior_scale "ark:|gzip -c >$dir/post.JOB.gz" 
+        简单拉伸一些后验概率 *0.2
+
+
+
+
+    迭代计算
+	多线程计算统计量
+    for j in $(seq $nj_full); do
+      Args[$j]=`echo "
+		ivector-extractor-acc-stats 
+			--num-threads=$num_threads 
+			$dir/$x.ie 
+			'$feats' 
+			'ark,s,cs:gunzip -c $dir/post.JOB.gz|' -|" | sed s/JOB/$j/g`
+    done
+
+
+
+	总和统计量
+	for g in $(seq $nj); do
+       start=$[$num_processes*($g-1)+1]
+       $cmd --num-threads $[$num_threads*$num_processes] $dir/log/acc.$x.$g.log \
+      
+		ivector-extractor-sum-accs 
+			--parallel=true 
+			"${Args[@]:$start:$num_processes}" \
+          $dir/acc.$x.$g 
+    done
+
+
+	计算提取器   $[$x+1].ie
+	ivector-extractor-est 
+		--num-threads=$nt 
+		$dir/$x.ie 
+		$dir/acc.$x 
+		$dir/$[$x+1].ie 
+    
+
+
+
+
+*** modify_speaker_info
+    每两句生成一个说话人信息, 将数据放入 temp/train_sp_hires_nopitch_max2
+    utils/data/modify_speaker_info.sh 	
+	--utts-per-spk-max 2 \
+	data/${train_set}_hires_nopitch 
+	${temp_data_root}/${train_set}_sp_hires_nopitch_max2
+
+    将每个说话人 变为n个, 每个新说话人的2个语料
+    结果:
+    S0002-001 BAC009S0002W0122 BAC009S0002W0123
+    S0002-002 BAC009S0002W0124 BAC009S0002W0125
+    S0002-003 BAC009S0002W0126 BAC009S0002W0127
+    S0002-004 BAC009S0002W0128 BAC009S0002W0129
+    S0002-005 BAC009S0002W0130 BAC009S0002W0131
+
+    liujunnan@innovem:/data/home/liujunnan/aishell/s5/tmp$ ls
+    feats.scp  spk2utt  text  utt2spk  wav.scp
+
+
+
+
+*** extract_ivectors_online
+
+    提取ivector特征
+    1 数据路径(feats.scp wav.scp spk2utt utt2spk)
+    2 extractor 
+    3 out : ivector特征
+
+    steps/online/nnet2/extract_ivectors_online.sh 
+	--cmd "$train_cmd" --nj 30 \
+	${temp_data_root}/${train_set}_sp_hires_nopitch_max2 \
+	exp/nnet3${nnet3_affix}/extractor 
+	$ivectordir
+
+
+    data=$1        数据目录
+    srcdir=$2      extractor目录
+    dir=$3         ivector特征输出目录
+
+
+    ivector-extract-online2 
+        --config=$ieconf 
+        ark:$sdata/JOB/spk2utt 
+        scp:$sdata/JOB/feats.scp ark:- \| \
+
+    copy-feats 
+        --compress=$compress
+        ark:- \
+        ark,scp:$absdir/ivector_online.JOB.ark,$absdir/ivector_online.JOB.scp || exit 1;
+
+
+        
+**** ivector-extract-online2
+     特征提取程序
+     1 ivector extract config  ie.config
+     2 spk2utt
+     3 构建 ivector特征 OnlineIvectorFeature
+       包含了 Ivector Extractor, 原始特征 mfcc
+       
+     4 计算需要为每个utt 生成多少个ivector
+         int32 
+         T = feats.NumRows(),
+         // 10帧 提取一个ivector??
+         n = (repeat ? 1 : ivector_config.ivector_period),   //10
+         // 提取多少个 ivector??
+         num_ivectors = (T + n - 1) / n;
+
+
+     5 生成utt的 ivector ==> ivectors [num_ivectors X 100]
+     for (int32 i = 0; i < num_ivectors; i++) {
+          int32 t = i * n;
+          // utt的第i个输出ivector, 从第t帧开始生成ivector
+          SubVector<BaseFloat> ivector(ivectors, i);
+          ivector_feature.GetFrame(t, &ivector);
+     }
+
+
+
+       
+
+

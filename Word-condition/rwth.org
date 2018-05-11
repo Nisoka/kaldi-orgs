@@ -1,0 +1,126 @@
+
+* 基本类
+
+** Configuration
+   
+   Configuration 中保存
+   ResourceDataBase *db_; 所有资源保存的列表
+   
+   bool isDataBaseOwner_;
+   std::string selection_; 当前选择的域.
+   std::string name_;      所属对象 已知的 只有speech-recognizer
+
+   取某个资源时, 需要先提供 selection_ 来作为域, 然后提供需要获取的参数名 paramter
+   组合起来 selection_ + . + paramter 才能构成真正的资源名.
+   然后获得具体资源.
+
+** Resource 资源
+   
+   主要包含如下成员:
+   
+   const SourceDescriptor *source_; 资源的资源(一般就是指命令行字符串)
+
+   std::string name_; 命令行的一个命令
+   std::string value_; 命令行命令的参数
+   
+** Parameter 
+   会派生很多参数性新类
+   主要是保存传进来的配置.
+   主要使用方式是 使用override(Configura c) 函数 从配置中取出对应的资源
+   Paramter对象 保存由对应的资源name
+   这样可以从Configuration中取出 name的值value
+*** 构造
+    构造时 将参数的标记, 描述都保存下来, 并且可以提供 标记的一个默认值
+    eg 
+    const ParameterString Application::paramConfig
+    ("config", "configuration file");
+    config 是标记, 用来在 configuration中找对应的资源用的
+    configuration file 是该条目的描述
+    没有提供默认值, 默认值 default_value_ = ""
+
+*** override ()
+    对一个配置c 调用 () , 表示从 配置中(配置中会保存含有"标记"的资源)
+    获得对应标记的资源(eg 对于 config 就会取出 recognize.config)
+    Value operator()(const class Configuration& c) const {
+	    return getValue(c);
+	}
+
+    
+    
+
+
+
+
+** CorpusVisitor
+   继承自
+   public Core::Component,  (继承自 Configuration)
+   public Bliss::CorpusVisitor
+   
+*** 构造
+    保存Configuration ,因为CorpusVisitor继承自 Component-Configuration
+    
+
+
+** OfflineRecognizer
+   继承自
+   public FeatureExtractor, 特征提取预处理器
+   public Recognizer  基本识别器
+
+
+*** 构造
+
+    Core::Component(c),
+
+
+    // 特征提取预处理
+    Precursor(c),
+    // 识别器, 构造先获得配置, 0化 识别器, 后面进行初始化.
+    Recognizer(c),
+   
+
+    acousticModelMode = 0x0 默认声学模型
+    initializeRecognizer(acousticModelMode)
+
+
+
+** CorpusProcessor
+   主要包含Core::XmlChannel channelTimer_;
+
+   主要就是构建XmlChannel, 应该是读取语料配置的xml 字符串.
+
+
+** DataExtractor
+   public CorpusProcessor
+   
+   
+
+** FeatureExtractor
+    继承自 DataExtractor
+    构造时 主要构造DataExtractor
+    
+
+
+
+
+** Recognizer
+   基本识别器
+
+   typedef Search::SearchAlgorithm::Traceback Traceback;
+   Core::Ref<const Bliss::Lexicon> lexicon_;
+   Core::Ref<Am::AcousticModel> acousticModel_;
+  
+   搜索算法, 主要部件
+   Search::SearchAlgorithm *recognizer_;
+   
+   构造时候 搜索算法器 置位0
+   需要使用
+   createRecognizer 创建真实的某个算法的 识别器.
+
+*** createRecognizer
+    recognizer_ = Search::Module::instance().createRecognizer(static_cast<Search::SearchType>(paramSearch(config)),select("recognizer"));
+    
+    搜索算法器 通过配置读取选择确定某个算法. 这里选择的是构建 WordCondition算法器
+    Search::WordConditionedTreeSearch
+
+** Search::WordConditionedTreeSearch
+   

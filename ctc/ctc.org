@@ -1,0 +1,241 @@
+
+* get_egs2.sh
+
+  ??
+  left_context = 0; 
+  right_context = 0;
+
+** nnet-ctc-get-egs 
+
+   foreach utt 
+
+   Processfile()
+   utt的全部帧 feat + labels 为输入
+   因为是CTC 模型 要求 labels.size * 2 < utt.frames
+   this_frames = utt.frames
+   tot_frames = left_context + this_frames + right_context
+   
+   结果 一个 Examples 中保存了:
+   1 input_frames == tot_frames
+   2 labels  == labels
+   这里并没有构建成为一个 NNet3 中的 多帧+left+right的结构
+   而是直接用 utt的所有frames + left + right 构建的 Example, 因为ctc 使用LSTM 可在时序上直接使用.
+   [left       ]
+   [utt.frames ]
+   [right      ]
+
+   
+
+* make_configs.py
+  
+  nodes.AddInputLayer() 构建输入层
+  1 feat_dim 就是 MFCC dim
+  2 splice_index[0] 保存的是 [0] 一个元素
+  
+  构建 ==> SpliceComponent 
+  1 input-dim = feat_dim
+  2 left = 0
+  3 right = 0 应该是
+  4 输出为 output_dim = (left+right+1) * feat_dim == > feat_dim
+  
+  
+  
+
+
+   
+   
+   
+   
+   
+
+  
+* TrainNnetSimple
+  NnetCtcExampleBackgroundReader new thread 读取minibatch个样本
+  每个Example 
+  1 num_frames [left + frames + right]
+  2 frames labels
+
+** GetNextMinibatch()
+   函数中通过 NnetCtcExampleBackgroundReader 构造过程中启动的ReadExample()线程
+   读取得到 formatted_examples_ 是一个特殊数据结构
+   通过一个变形算法 将原本Example保存的数据转化为如下形式.
+
+   将所有 Example数据 顺序排列
+   每个Example的数据 是按照chunk 顺序保存
+   每个chunk 保存 left cur right几部分, 顺序下来
+
+** ReadExample()
+   Example
+   data
+   [left       ]
+   [utt.frames ]
+   [utt.frames ]
+   [utt.frames ]
+   ...
+   [right      ]
+
+   label
+
+   utt.frames.labels
+
+
+
+   将 minibatch 个 Example 加入到 examples_ 等待被取走 进行一次训练
+   将 minibatch 个 Example 中的训练数据 都 ==> formatted_feats_
+   全部的minibatch的训练样本都加入到这个 formatted_feats中.
+   // formatted_feats 最终结果是
+   // [l1]
+   // [1 == l2]
+   // [r1 == 2]
+   // [l2 == 1]
+   // [2 == r1]
+   // [r2 == ]
+   // ... this_num_frames X examples
+   // []
+
+   最终得到的数据 =>>
+   examples_formatted
+   formatted_examples_
+
+   
+   
+
+** DoBackprob()
+   tot_logprob_this_phase += DoBackprop(
+   *nnet, 
+   examples,             //NnetCtcExample封装的数据
+   &examples_formatted,  //格式化好的数据
+   (delta_nnet == NULL) ? nnet : delta_nnet,
+   &minibatch_total_accuracy
+   
+   );
+
+
+    NnetCtcUpdater updater(nnet, nnet_to_update);
+    return updater.ComputeForMinibatch(
+
+    examples,
+    examples_formatted,
+    tot_accuracy
+
+    );
+
+*** ComputeForMinibatch 通过训练数据 进行训练.
+
+
+    分配formatted_data_ 大小的矩阵, 作为NNET输入.
+
+    获得组成formatted_data_的每个训练的样本
+    因为每个样本是按顺序排列在 formatted_data_中的 
+    所以需要根据每个样本的组成 定位每个样本的起点 
+    然后获得每个样本.
+    
+
+    int32 num_splice = 1 + nnet_.RightContext() + nnet_.LeftContext();
+
+    // 计算得到每个计算样本 位置.
+    nnet_.ComputeChunkInfo(
+    
+    每个样本长度 num_splice帧组成一个样本
+    num_splice,
+    总共样本数量.
+    forward_data_[0].NumRows() / num_splice,
+    计算过得 nnet中每层输入输出结构
+    &chunk_info_out_
+    
+    );
+        内部
+        内部通过 current_output_inds 
+        获得当前层的输入位置索引
+        (通过本层Context长度,以及本层输出位置索引计算), 
+        计算低一层的输入位置索引.
+        
+        因为一个样本 是有多个帧拼接组成的, 
+        
+        描述好每层的数据帧 需要情况, 就描述了数据在NNet中的流动结构.
+        
+    Propagate()
+        前传过程
+        根据前面的chunk_info_out_ 信息构建每层的输出数据
+        forward_data_[i]
+        forward_data_[i]根据chunk_info_out_ 构建矩阵大小.
+        
+        component.Propagate(
+        chunk_info_out_[c],     //本层输入结构
+        chunk_info_out_[c+1],   //本层输出结构
+        input,    //forward_data_[c]  本层输入数据
+        &output   //forward_data_[c+1]  本层输出数据
+        );
+        
+        根据 是否需要 求导数,  将每层的输入x 清空 或保留.
+
+
+    ComputeObjfAndDeriv
+        计算目标函数 以及 求导.
+        bool ans = ComputeObjfAndDeriv(
+        
+        data,          // NnetCtcExample vector
+        &tmp_deriv,    // 保存导数
+        &tot_objf,     // 目标函数值
+        tot_accuracy   // 准确率
+
+        );
+
+*** ComputeObjfAndDeriv
+    const CuMatrix<BaseFloat> &output(forward_data_[num_components]);
+    最终输出数据.
+    
+    // flat_labels 所有输出标签
+    // label_lengths 每个样本的输出标签数量()
+    // input_lengths 每个样本的输入帧总数(不包含上下文帧, 就是utt Length)
+    for (int32 m = 0; m < mini_batch; m++) {
+      flat_labels.insert(flat_labels.end(), data[m].labels.begin(),
+                         data[m].labels.end());
+      label_lengths[m] = data[m].labels.size();
+      input_lengths[m] = data[m].NumFrames() - ignore_frames;
+    }
+
+
+
+    compute_ctc_loss 
+        计算ctc 损失, 以及计算梯度
+        // nnet输出结果
+        output.Data(),
+        // 需要保存的残差.
+        deriv->Data(),
+        // 所有帧目标label
+        flat_labels.data(),
+        // 所有utt中的帧目标label数量(因为不同utt不同长度, 但是使用矩阵保存, 只能保存最长的)
+        label_lengths.data(),
+        // 所有utt 的帧数量
+        input_lengths.data(),
+        // num_pdf+1 所有label可能
+        alphabet_size,
+        // 48
+        mini_batch,
+        // 每个utt的误差?
+        costs.Data(),
+        // 计算导数需要的GPU空间
+        ctc_gpu_workspace,
+        // ctcOptions info;
+        info
+
+        
+        cost_and_grad 
+            计算损失以及梯度
+            1 softmax 得到最终输出概率
+            [frame1 prob0(blank) prob1 prob2 prob3 .... probnum_pdfs]
+            [frame1 prob0(blank) prob1 prob2 prob3 .... probnum_pdfs]
+            [frame1 prob0(blank) prob1 prob2 prob3 .... probnum_pdfs]
+            
+            
+            cost_and_grad_kernel
+                每个utt 计算损失 以及 梯度
+                
+
+
+        
+        
+   
+
+       
