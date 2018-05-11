@@ -1,0 +1,43 @@
+
+* EER equal error rate
+  等错误率
+  指的是两个错误率 在相等的一个点 -- FRR = FAR
+
+  错误拒绝率FRR（False Reject Rate）
+  错误接受率FAR（False Accept Rate）
+
+  Equal Error Rate , 
+  这个在说话人识别，说话人确认中最常用的评价标准，
+  是一种使 两种错误率相等的 错误率
+  错误接受率（nontarget_is_target / (target_is_target + nontarget_is_target)） 
+  错误拒绝率（target_is_nontarget / (target_is_nontarget + nontarget_is_nontarget)
+  然后这个阈值点可以作为实际使用阶段的固定的阈值。 
+
+  实际和混淆矩阵意思一样，计算式:
+
+  FRR = FN/(TP+FN)   
+  表示 正样本中 被错误识别为负样本的概率
+  FAR = FP/(TN+FP)
+  表示 负样本中 被错误识别为正样本的概率  
+  
+  参考: jinmingz
+  https://blog.csdn.net/zjm750617105/article/details/52558779
+  
+
+* DET 测试错误曲线
+  
+  DET(Detection Error Tradeoff )曲线是对二元分类系统误码率的曲线图，
+  绘制出错误拒绝率FRR（False Reject Rate）与错误接受率（False Accept Rate）之间随着判断阈值的变化而变化的曲线图。
+  现在DET曲线扩展到用于模式识别分类器性能的评价的一个指标之一。
+  
+  DET 曲线描述的是 以FRR 为x轴， FAR为y轴。
+  
+  具体计算:
+  
+
+  
+
+
+  参考: 鹊踏枝-码农
+  https://blog.csdn.net/u011501388/article/details/78334996
+  
