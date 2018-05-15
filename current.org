@@ -1,0 +1,21 @@
+* 20180515
+** lreOn test en-sox
+   en-sox 是 经过脚本处理 拷贝 LibriSpeech/dev-clean 下的 flac文件
+   后经过 sox flac -t wav file.wav 生成,
+   然后切分为 sox input.wav output.wav trim 0 5 : newfile : restart 
+   生成的 5s长度的 英文语种预料.
+   
+   准备脚本为 Librispeech2Language.sh 
+   
+   cp en-sox -rf Speechocean/   
+   然后修改训练脚本增加 en-sox 即可.
+
+** Factory analysis
+   因子分析
+
+
+** 线性变换 矩阵 特征值 特征向量的理解
+   1 孟岩老师 <理解矩阵>
+   https://blog.csdn.net/myan/article/details/647511
+
+   2 
