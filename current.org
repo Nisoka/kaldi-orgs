@@ -10,6 +10,7 @@
    cp en-sox -rf Speechocean/   
    然后修改训练脚本增加 en-sox 即可.
 
+
 ** Factory analysis
    因子分析
 

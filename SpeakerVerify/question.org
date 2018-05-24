@@ -1,0 +1,21 @@
+
+
+* utt2spk is not in sorted order or duplicate
+  这个问题不一定是 utt2spk 没有排序, 而是排序结果 在其他排序sort选项下 顺序不同
+  eg 下面这个情况 提示你 可以修改 将 spker-id 作为utt-id的前缀构建 utt-id
+  直接解决问题
+  
+  ! cat $data/utt2spk | sort -k2 | cmp - $data/utt2spk && \
+     echo "utt2spk is not in sorted order when sorted first on speaker-id " && \
+     echo "(fix this by making speaker-ids prefixes of utt-ids)" && exit 1;
+
+
+* 训练语料问题
+  训练语料 开始使用的 1m的语料进行训练, 平均每个语种 2h 但是这样的1m训练数据 对于
+  短时10s 以内的数据的验证效果并不好, 是不是需要修改训练数据, 修改为 10s以内数据
+  以尝试?
+  experiment 
+  1 train 2h 1m       test 1m/10s/4s
+  2 train 2h 10s      test 1m/10s/4s
+  3 train 4h 1m       test 1m/10s/4s
+  3 train 4h 10s      test 1m/10s/4s

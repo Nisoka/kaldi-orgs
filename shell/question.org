@@ -1,0 +1,25 @@
+
+* 算数计算
+  value=$[$value/2]
+
+* cmd="run.pl --mem 4G"
+  $cmd ${plda_ivec_dir}/log/compute_mean.log \
+      ivector-mean "ark:ivector-normalize-length scp:${plda_ivec_dir}/ivector.scp ark:- |" ${plda_ivec_dir}/mean.vec || exit 1;
+
+  
+** 参数
+   1 临时变量 eg JOB=1:10
+   $cmd JOB=1:$nj $dir/log/align.JOB.log
+
+   2 文件log
+   $cmd ${plda_ivec_dir}/log/compute_mean.log 
+   
+** cmd 只能处理一个程序, 不能通过管道处理两个程序
+   如果希望多个程序 顺序提供参数的使用方法 需要 向下面这样, 写成参数形式
+   $cmd ${plda_ivec_dir}/log/compute_mean.log \
+      ivector-mean "ark:ivector-normalize-length scp:${plda_ivec_dir}/ivector.scp ark:- |" ${plda_ivec_dir}/mean.vec || exit 1;
+   
+   下面这样的写法是不可行的, 这样就不能使用 run.pl
+   $cmd ${plda_ivec_dir}/log/compute_mean.log \
+      ivector-normalize-length scp:${plda_ivec_dir}/ivector.scp ark:- | \
+          ivector-mean ark:- ${plda_ivec_dir}/mean.vec || exit 1;
