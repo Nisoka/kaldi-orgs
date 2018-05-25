@@ -60,14 +60,25 @@ bool SplitStringToFloats(const std::string &full,
                          bool omit_empty_strings,
                          std::vector<double> *out);
 
+/**
+ * @brief SplitStringToVector
+ * @param full
+ * @param delim
+ * @param omit_empty_strings
+ * @param out
+ *  将string 以 delim 分隔符 切分为 string vector
+ */
 void SplitStringToVector(const std::string &full, const char *delim,
                          bool omit_empty_strings,
                          std::vector<std::string> *out) {
   size_t start = 0, found = 0, end = full.size();
   out->clear();
+  // 遍历查找delim(分隔符) 未找到 != std::string::npos
   while (found != std::string::npos) {
+    // 找到 start之后第一个 delim的位置
     found = full.find_first_of(delim, start);
     // start != end condition is for when the delimiter is at the end
+    // substr 切分string (l, r)
     if (!omit_empty_strings || (found != start && start != end))
       out->push_back(full.substr(start, found - start));
     start = found + 1;

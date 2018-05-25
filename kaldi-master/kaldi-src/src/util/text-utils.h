@@ -63,6 +63,8 @@ void JoinVectorToString(const std::vector<std::string> &vec_in,
                       You'll normally want this to be true if 'delim' consists
                       of spaces, and false otherwise.
   \param [out] out   The output list of integers.
+
+  将string 按 delim 分隔符 切分为 vector<int>
 */
 template<class I>
 bool SplitStringToIntegers(const std::string &full,
@@ -80,6 +82,7 @@ bool SplitStringToIntegers(const std::string &full,
   std::vector<std::string> split;
   SplitStringToVector(full, delim, omit_empty_strings, &split);
   out->resize(split.size());
+
   for (size_t i = 0; i < split.size(); i++) {
     const char *this_str = split[i].c_str();
     char *end = NULL;
