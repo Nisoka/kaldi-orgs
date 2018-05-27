@@ -39,30 +39,41 @@ if [ $# != 3 ]; then
   exit 1;
 fi
 
+# data/train    data/lang    exp/mono
 data=$1
 lang=$2
 dir=$3
 
+# <SPOKEN_NOISE> 的ID
 oov_sym=`cat $lang/oov.int` || exit 1;
 
 mkdir -p $dir/log
 echo $nj > $dir/num_jobs
 sdata=$data/split$nj;
+# 判断是否存在 data/train/splitnj, 并且 判断 data/train/feats.scp 是否比 目录splitnj时间更旧
+# 那么说明没有重新生成feats.scp , 因此不需要重新划分data/train/下的feats.scp
 [[ -d $sdata && $data/feats.scp -ot $sdata ]] || split_data.sh $data $nj || exit 1;
 
 cp $lang/phones.txt $dir || exit 1;
-
+# false, 不要标准化方差
 $norm_vars && cmvn_opts="--norm-vars=true $cmvn_opts"
 echo $cmvn_opts  > $dir/cmvn_opts # keep track of options to CMVN.
 
+# feats 1 经过cmvn 说话人均值方差归一化 2 add-deltas
 feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas ark:- ark:- |"
+# sed s/JOB/1/g  g尽可能多的 替换JOB 为 1
 example_feats="`echo $feats | sed s/JOB/1/g`";
 
 echo "$0: Initializing monophone system."
 
+# sets 全部phone 每个phone是一个 可共享GMM的集合(一般没有共享GMM)
 [ ! -f $lang/phones/sets.int ] && exit 1;
 shared_phones_opt="--shared-phones=$lang/phones/sets.int"
 
+
+#-------------------------------------------------
+# 初始化 mono模型的各个GMM参数
+#-------------------------------------------------
 if [ $stage -le -3 ]; then
   # Note: JOB=1 just uses the 1st part of the features-- we only need a subset anyway.
   if ! feat_dim=`feat-to-dim "$example_feats" - 2>/dev/null` || [ -z $feat_dim ]; then
@@ -71,8 +82,8 @@ if [ $stage -le -3 ]; then
     exit 1;
   fi
   $cmd JOB=1 $dir/log/init.log \
-    gmm-init-mono $shared_phones_opt "--train-feats=$feats subset-feats --n=10 ark:- ark:-|" $lang/topo $feat_dim \
-    $dir/0.mdl $dir/tree || exit 1;
+    gmm-init-mono $shared_phones_opt "--train-feats=$feats subset-feats --n=10 ark:- ark:-|" \
+                  $lang/topo $feat_dim $dir/0.mdl $dir/tree || exit 1;
 fi
 
 numgauss=`gmm-info --print-args=false $dir/0.mdl | grep gaussians | awk '{print $NF}'`

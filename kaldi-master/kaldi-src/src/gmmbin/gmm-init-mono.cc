@@ -41,6 +41,8 @@ void ReadSharedPhonesList(std::string rxfilename, std::vector<std::vector<int32>
       KALDI_ERR << "Bad line in shared phones list: " << line << " (reading "
                 << PrintableRxfilename(rxfilename) << ")";
     std::sort(list_out->rbegin()->begin(), list_out->rbegin()->end());
+
+    //check
     if (!IsSortedAndUniq(*(list_out->rbegin())))
       KALDI_ERR << "Bad line in shared phones list (repeated phone): " << line
                 << " (reading " << PrintableRxfilename(rxfilename) << ")";
@@ -86,6 +88,7 @@ int main(int argc, char *argv[]) {
     std::string model_filename = po.GetArg(3);
     std::string tree_filename = po.GetArg(4);
 
+    // MFCC特征的 全局方差转置  全局均值
     Vector<BaseFloat> glob_inv_var(dim);
     glob_inv_var.Set(1.0);
     Vector<BaseFloat> glob_mean(dim);
@@ -93,24 +96,30 @@ int main(int argc, char *argv[]) {
 
     if (train_feats != "") {
       double count = 0.0;
+      // 方差统计量 均值统计量
       Vector<double> var_stats(dim);
       Vector<double> mean_stats(dim);
       SequentialDoubleMatrixReader feat_reader(train_feats);
+      // utt MFCC mat[frames x dim]
       for (; !feat_reader.Done(); feat_reader.Next()) {
         const Matrix<double> &mat = feat_reader.Value();
         for (int32 i = 0; i < mat.NumRows(); i++) {
           count += 1.0;
+          // sum{xi^2}   sum{xi}
           var_stats.AddVec2(1.0, mat.Row(i));
           mean_stats.AddVec(1.0, mat.Row(i));
         }
       }
+
       if (count == 0) { KALDI_ERR << "no features were seen."; }
       var_stats.Scale(1.0/count);
       mean_stats.Scale(1.0/count);
+      // sum{xi^2} - meani^2
       var_stats.AddVec2(-1.0, mean_stats);
       if (var_stats.Min() <= 0.0)
         KALDI_ERR << "bad variance";
       var_stats.InvertElements();
+
       glob_inv_var.CopyFromVec(var_stats);
       glob_mean.CopyFromVec(mean_stats);
     }
@@ -120,12 +129,15 @@ int main(int argc, char *argv[]) {
     Input ki(topo_filename, &binary_in);
     topo.Read(ki.Stream(), binary_in);
 
+    // phones 向量 <phone1 phone2 ... >
     const std::vector<int32> &phones = topo.GetPhones();
 
-    std::vector<int32> phone2num_pdf_classes (1+phones.back());
+    // phone -> num_pdf_classes  phone 内pdf(state)可能的分类数(3个class)
+    std::vector<int32> phone2num_pdf_classes(1+phones.back());
     for (size_t i = 0; i < phones.size(); i++)
       phone2num_pdf_classes[phones[i]] = topo.NumPdfClasses(phones[i]);
 
+    // 上下文依赖树 -- 状态绑定决策树
     // Now the tree [not really a tree at this point]:
     ContextDependency *ctx_dep = NULL;
     if (shared_phones_rxfilename == "") {  // No sharing of phones: standard approach.

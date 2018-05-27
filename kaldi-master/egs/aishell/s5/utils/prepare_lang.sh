@@ -248,9 +248,10 @@ fi
 
 
 ##########################################################
-#　创建 data/lang/phones/ 下的 sets.txt roots.txt
-#  roots.txt 每个phone 是否需要共享GMM
-#　在此处 全部都是 share split
+#　创建 data/lang/phones/ 下的
+#   sets.txt  sil nonsil 的全部phone
+#   roots.txt 每个phone 是否需要共享GMM
+# 在此处 全部都是 share split
 # 创建 data/lang/phones/ 下的 silence nonsilence optional_silence context_indep extra_questions
 ##########################################################
 
