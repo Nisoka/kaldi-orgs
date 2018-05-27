@@ -330,9 +330,18 @@ MonophoneContextDependency(const std::vector<int32> phones,
   return new ContextDependency(N, P, pdf_map);
 }
 
+/**
+ * @brief MonophoneContextDependencyShared
+ * @param phone_sets
+ *     共享参数的phone, 这里保存所有phone的是否共享标记
+ * @param phone2num_pdf_classes
+ *     某个phone具有几个pdf(state)
+ * @return
+ */
 ContextDependency*
 MonophoneContextDependencyShared(const std::vector<std::vector<int32> > phone_sets,
                                  const std::vector<int32> phone2num_pdf_classes) {
+    //phone_sets 保存共享参数的phone? 但是参数不是应该是state的么?
   std::vector<bool> share_roots(phone_sets.size(), false);  // don't share roots.
   // N is context size, P = position of central phone (must be 0).
   int32 num_leaves = 0, P = 0, N = 1;

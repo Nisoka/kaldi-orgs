@@ -132,6 +132,7 @@ int main(int argc, char *argv[]) {
       ctx_dep = MonophoneContextDependency(phones, phone2num_pdf_classes);
     } else {
       std::vector<std::vector<int32> > shared_phones;
+      // 读取 sharedphone list
       ReadSharedPhonesList(shared_phones_rxfilename, &shared_phones);
       // ReadSharedPhonesList crashes on error.
       ctx_dep = MonophoneContextDependencyShared(shared_phones, phone2num_pdf_classes);
