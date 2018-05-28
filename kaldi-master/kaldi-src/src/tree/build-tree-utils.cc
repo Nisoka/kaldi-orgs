@@ -870,7 +870,9 @@ EventMap *GetStubMap(int32 P,
 
   {  // Checking inputs.
     KALDI_ASSERT(!phone_sets.empty() && share_roots.size() == phone_sets.size());
+
     std::set<int32> all_phones;
+
     for (size_t i = 0; i < phone_sets.size(); i++) {
       KALDI_ASSERT(IsSortedAndUniq(phone_sets[i]));
       KALDI_ASSERT(!phone_sets[i].empty());

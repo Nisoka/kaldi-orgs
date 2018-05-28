@@ -20,3 +20,13 @@
    https://blog.csdn.net/myan/article/details/647511
 
    2 
+
+
+
+
+
+* LDA 线性判别分析
+  
+  http://sebastianraschka.com/Articles/2014_python_lda.html
+
+  
