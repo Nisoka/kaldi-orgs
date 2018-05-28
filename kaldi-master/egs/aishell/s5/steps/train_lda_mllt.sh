@@ -97,11 +97,24 @@ if [ $stage -le -5 ]; then
   if [ -z "$use_lda_mat" ]; then
     echo "$0: Accumulating LDA statistics."
     rm $dir/lda.*.acc 2>/dev/null
+
+    # randprune 4.0
+    # splicedfeats apply-cmvn splice-feats
+
+    # ali-to-post 将ali.job.gz 映射为后验概率
+    #  内部实际alignment 是一些列的tid , 所以只对应一个pdf-id, 那么实际posterior 是每帧就一个pdf-id后验概率1.0
+    # weight-silence-post  将 对齐的posterior中状态属于silphonelist中的音素的状态
+    #  对应的后验概率设置为0, 其他可能状态概率 不变(但是实际上只有一个pdf-id)
+
+    # acc-lda   1 final.mdl(上一个训练后的模型结果)  2 splicedfeats 拼接后特征 3 帧后验概率(每帧的可能的pdf-id 的概率向量)
     $cmd JOB=1:$nj $dir/log/lda_acc.JOB.log \
     ali-to-post "ark:gunzip -c $alidir/ali.JOB.gz|" ark:- \| \
       weight-silence-post 0.0 $silphonelist $alidir/final.mdl ark:- ark:- \| \
       acc-lda --rand-prune=$randprune $alidir/final.mdl "$splicedfeats" ark,s,cs:- \
       $dir/lda.JOB.acc || exit 1;
+
+
+
     est-lda --write-full-matrix=$dir/full.mat --dim=$dim $dir/0.mat $dir/lda.*.acc \
       2>$dir/log/lda_est.log || exit 1;
     rm $dir/lda.*.acc

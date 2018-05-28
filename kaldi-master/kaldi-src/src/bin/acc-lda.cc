@@ -81,6 +81,7 @@ int main(int argc, char *argv[]) {
       const Posterior &post (posterior_reader.Value(utt));
       const Matrix<BaseFloat> &feats(feature_reader.Value());
 
+      // lda的目标是 分类为 NumPdfs 输入是feat
       if (lda.Dim() == 0)
         lda.Init(trans_model.NumPdfs(), feats.NumCols());
 
@@ -99,10 +100,13 @@ int main(int argc, char *argv[]) {
 
       Posterior pdf_post;
       ConvertPosteriorToPdfs(trans_model, post, &pdf_post);
+
+
       for (int32 i = 0; i < feats.NumRows(); i++) {
         SubVector<BaseFloat> feat(feats, i);
         for (size_t j = 0; j < pdf_post[i].size(); j++) {
           int32 pdf_id = pdf_post[i][j].first;
+          // 这个随机剪枝的门限是4.0, 那么绝对不可能超过这个门限啊!????????
           BaseFloat weight = RandPrune(pdf_post[i][j].second, rand_prune);
           if (weight != 0.0) {
             lda.Accumulate(feat, pdf_id, weight);

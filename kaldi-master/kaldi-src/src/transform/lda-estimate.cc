@@ -49,8 +49,11 @@ void LdaEstimate::Accumulate(const VectorBase<BaseFloat> &data,
 
   Vector<double> data_d(data);
 
+  // pdf-id 的整体后验概率
   zero_acc_(class_id) += weight;
+  // pdf-id的 MFCC * weight
   first_acc_.Row(class_id).AddVec(weight, data_d);
+  // 全局 += weight * MFCC * MFCC^T
   total_second_acc_.AddVec2(weight, data_d);
 }
 

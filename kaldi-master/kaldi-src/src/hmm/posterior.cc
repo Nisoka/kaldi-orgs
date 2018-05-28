@@ -318,18 +318,35 @@ void SortPosteriorByPdfs(const TransitionModel &tmodel,
     sort((*post)[i].begin(), (*post)[i].end(), compare);
   }
 }
-
+/**
+ * @brief ConvertPosteriorToPdfs
+ * @param tmodel
+ * @param post_in
+ *      utt vector-frames < vector-pdfs< pdf1 pdf2 .. >>
+ * @param post_out
+ *
+ *  去掉posterior_in 每帧中 pdf-id概率为0.0 的后验概率成员, 并将tid 变为pdf-id
+ *  <frame1<(tid, 0.0) (tid, 1.0) >   frame2 ... >
+ *  <frame1<(pdf-id, 1.0) >   frame2 ... >
+ *
+ *
+ */
 void ConvertPosteriorToPdfs(const TransitionModel &tmodel,
                             const Posterior &post_in,
                             Posterior *post_out) {
   post_out->clear();
   post_out->resize(post_in.size());
+
+  // frames
   for (size_t i = 0; i < post_out->size(); i++) {
+    // 每个frame对应的后验概率
     unordered_map<int32, BaseFloat> pdf_to_post;
+
     for (size_t j = 0; j < post_in[i].size(); j++) {
       int32 tid = post_in[i][j].first,
           pdf_id = tmodel.TransitionIdToPdf(tid);
       BaseFloat post = post_in[i][j].second;
+
       if (pdf_to_post.count(pdf_id) == 0)
         pdf_to_post[pdf_id] = post;
       else
@@ -371,18 +388,32 @@ void ConvertPosteriorToPhones(const TransitionModel &tmodel,
   }
 }
 
-
+/**
+ * @brief WeightSilencePost
+ * @param trans_model
+ *        转移模型, 用来识别某个帧 是否是静音
+ * @param silence_set
+ *        静音音素集合
+ * @param silence_scale
+ *        静音 权重拉伸因子
+ * @param post
+ *        utt 所有帧 后验概率向量
+ */
 void WeightSilencePost(const TransitionModel &trans_model,
                        const ConstIntegerSet<int32> &silence_set,
                        BaseFloat silence_scale,
                        Posterior *post) {
+  // frames
   for (size_t i = 0; i < post->size(); i++) {
     std::vector<std::pair<int32, BaseFloat> > this_post;
     this_post.reserve((*post)[i].size());
+    // 所有可能的pdf,
     for (size_t j = 0; j < (*post)[i].size(); j++) {
       int32 tid = (*post)[i][j].first,
           phone = trans_model.TransitionIdToPhone(tid);
       BaseFloat weight = (*post)[i][j].second;
+
+      // pdf 是否属于静音phone, 是就设置权重为0 写入this_post, 否则直接写权重到 this_post
       if (silence_set.count(phone) != 0) {  // is a silence.
         if (silence_scale != 0.0)
           this_post.push_back(std::make_pair(tid, weight*silence_scale));

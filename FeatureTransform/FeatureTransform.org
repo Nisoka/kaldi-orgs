@@ -1,0 +1,29 @@
+
+* Introduce
+  kaldi 当前支持 特征空间 模型空间 变换
+  特征空间爱你变换 使用的是固定统一的工具实现的(本质上特征空间变换就是一个矩阵)
+  
+  如下几个章节 是特征空间变换的共性原理
+  Applying global linear or affine feature transforms
+  Speaker-independent versus per-speaker versus per-utterance adaptation
+  Utterance-to-speaker and speaker-to-utterance maps
+  Composing transforms
+  Silence weighting when estimating transforms
+  
+  
+  与说话人无关的一些特征空间空间变换包括
+  Linear Discriminant Analysis (LDA) transforms
+  Frame splicing and Delta feature computation
+  Heteroscedastic Linear Discriminant Analysis (HLDA)
+  Global Semi-tied Covariance (STC) / Maximum Likelihood Linear Transform (MLLT) estimation
+  
+  应用于说话人自适应的全局变换包括如下:
+  Global CMLLR/fMLLR transforms
+  Linear VTLN (LVTLN)
+  Exponential Transform (ET)
+  Cepstral mean and variance normalization
+
+  后面我们介绍 回归树方法的变换
+
+  
+

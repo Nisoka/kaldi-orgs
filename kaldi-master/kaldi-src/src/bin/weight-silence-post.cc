@@ -81,6 +81,7 @@ int main(int argc, char *argv[]) {
     for (; !posterior_reader.Done(); posterior_reader.Next()) {
       num_posteriors++;
       // Posterior is vector<vector<pair<int32, BaseFloat> > >
+      //              utt-frames frame-posteriors
       Posterior post = posterior_reader.Value();
       // Posterior is vector<vector<pair<int32, BaseFloat> > >
       if (distribute)
