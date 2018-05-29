@@ -32,10 +32,14 @@ fi
 # Check that the arguments are all absolute pathnames.
 
 for dir in $*; do
-  case $dir in /*) ;; *)
-      echo "$0: all arguments must be absolute pathnames."; exit 1;
+    case $dir in
+        /*)
+        ;;
+        *)
+            echo "$0: all arguments must be absolute pathnames."; exit 1;
   esac
 done
+
 
 # First check we have the right things in there...
 #
@@ -46,8 +50,11 @@ for subdir in fe_03_p1_sph1  fe_03_p1_sph3  fe_03_p1_sph5  fe_03_p1_sph7 \
   fe_03_p2_sph1  fe_03_p2_sph3  fe_03_p2_sph5  fe_03_p2_sph7 fe_03_p1_sph2 \
   fe_03_p1_sph4  fe_03_p1_sph6  fe_03_p1_tran  fe_03_p2_sph2  fe_03_p2_sph4 \
   fe_03_p2_sph6  fe_03_p2_tran; do
+    
   found_subdir=false
   for dir in $*; do
+      # 如果是个目录, 则在 data/local/data/links 中创建同名链接
+      # 否则可能是个特殊目录, 需要使用对应目录 创建链接
     if [ -d $dir/$subdir ]; then
       found_subdir=true
       ln -s $dir/$subdir data/local/data/links
@@ -78,16 +85,21 @@ if [ ! -x $sph2pipe ]; then
    exit 1;
 fi
 
+
+
 # (1) Get transcripts in one file, and clean them up ..
 
 if [ $stage -le 0 ]; then
 
+  # tran 标注文件 > data/local/data/transcripts.flist
   find $links/fe_03_p1_tran/data $links/fe_03_p2_tran/data -name '*.txt'  > $tmpdir/transcripts.flist
 
+  # .sph 语音文件 > data/local/data/sph.flist
   for dir in fe_03_p{1,2}_sph{1,2,3,4,5,6,7}; do
     find $links/$dir/ -name '*.sph'
   done > $tmpdir/sph.flist
 
+  # fisher 语料 由 11699段语料  期望 .txt 与 .sph 相互对应
   n=`cat $tmpdir/transcripts.flist | wc -l`
   if [ $n -ne 11699 ]; then
     echo "Expected to find 11699 transcript files in the Fisher data, found $n"
@@ -100,17 +112,27 @@ if [ $stage -le 0 ]; then
   fi
 fi
 
+
+
+
+# 汇总转录标注 > $tmpdir/text.1 保存格式为
+#  uttid   text
+#  uttid:  call_id-side-start-end
+#          spkerid AB   start-end
+
+#  text:   对应转录文本
+
 if [ $stage -le 1 ]; then
   mkdir -p data/train_all_asr
 
 
-## fe_03_00004.sph
-## Transcpribed at the LDC
-#
-#7.38 8.78 A: an- so the topic is 
+  ## fe_03_00004.sph
+  ## Transcpribed at the LDC
+  #
+  #7.38 8.78 A: an- so the topic is 
 
   echo -n > $tmpdir/text.1 || exit 1;
-
+  
   perl -e ' 
    use File::Basename;
    ($tmpdir)=@ARGV;
@@ -141,7 +163,14 @@ if [ $stage -le 1 ]; then
      }
    }
    close(R); close(T) ' $tmpdir || exit 1;
+
 fi
+
+
+# 1 修改转录text.1 中的 无效音 为 noise 或者 laughter
+#     > data/train_all_asr/text
+# 2 创建 utt2spk 文件
+#     utt-id(spker-[AB]-start-end)   spker-[AB]
 
 if [ $stage -le 2 ]; then
   sort $tmpdir/text.1 | grep -v '((' | \
@@ -154,37 +183,55 @@ if [ $stage -le 2 ]; then
     sed 's:\[breath\]:[noise]:g' | \
     sed 's:\[lipsmack\]:[noise]:g' > $tmpdir/text.2
   cp $tmpdir/text.2 data/train_all_asr/text
+
+
+
+  
   # create segments file and utt2spk file...
   ! cat data/train_all_asr/text | perl -ane 'm:([^-]+)-([AB])-(\S+): || die "Bad line $_;"; print "$1-$2-$3 $1-$2\n"; ' > data/train_all_asr/utt2spk  \
-     && echo "Error producing utt2spk file" && exit 1;
-
+      && echo "Error producing utt2spk file" && exit 1;
+  
+  # 创建segments 文件  ?? 做什么用
   cat data/train_all_asr/text | perl -ane 'm:((\S+-[AB])-(\d+)-(\d+))\s: || die; $utt = $1; $reco = $2; $s = sprintf("%.2f", 0.01*$3);
                  $e = sprintf("%.2f", 0.01*$4); print "$utt $reco $s $e\n"; ' > data/train_all_asr/segments
 
   utils/utt2spk_to_spk2utt.pl <data/train_all_asr/utt2spk > data/train_all_asr/spk2utt
 fi
 
+
+# 生成wav.scp
+# wav.scp   uttid   sph2pipe- sph.path
 if [ $stage -le 3 ]; then
+
+    # 将sph.flist 中路径 装华为 局对路径 => sph_abs.flist
   for f in `cat $tmpdir/sph.flist`; do
     # convert to absolute path
     utils/make_absolute.sh $f
   done > $tmpdir/sph_abs.flist
-  
+
+
   cat $tmpdir/sph_abs.flist | perl -ane 'm:/([^/]+)\.sph$: || die "bad line $_; ";  print "$1 $_"; ' > $tmpdir/sph.scp
   cat $tmpdir/sph.scp | awk -v sph2pipe=$sph2pipe '{printf("%s-A %s -f wav -p -c 1 %s |\n", $1, sph2pipe, $2); 
     printf("%s-B %s -f wav -p -c 2 %s |\n", $1, sph2pipe, $2);}' | \
     sort -k1,1 -u  > data/train_all_asr/wav.scp || exit 1;
 fi
 
+
+
+# 生成 $links/fe_02_p1_sph{1,2,3,4,5,6,7} 下的 filetable.txt 中保存了 filename.sph gender
+# 通过过滤 spk2utt 找到 spk2gender
 if [ $stage -le 4 ]; then
-  # get the spk2gender information.  This is not a standard part of our
-  # file formats
-  # The files "filetable2fe_03_p2_sph1 fe_03_05852.sph ff
+    # get the spk2gender information.  This is not a standard part of our
+    # file formats
+    # The files "filetable2fe_03_p2_sph1 fe_03_05852.sph ff
+    
+
   cat $links/fe_03_p1_sph{1,2,3,4,5,6,7}/filetable.txt \
     $links/fe_03_p2_sph{1,2,3,4,5,6,7}/docs/filetable2.txt | \
   perl -ane 'm:^\S+ (\S+)\.sph ([fm])([fm]): || die "bad line $_;"; print "$1-A $2\n", "$1-B $3\n"; ' | \
    sort | uniq | utils/filter_scp.pl data/train_all_asr/spk2utt > data/train_all_asr/spk2gender
 
+  #  check and retry, nouse.
   if [ ! -s data/train_all_asr/spk2gender ]; then
     echo "It looks like our first try at getting the spk2gender info did not work."
     echo "(possibly older distribution?)  Trying something else."
@@ -195,6 +242,12 @@ if [ $stage -le 4 ]; then
   fi
 fi
 
+
+
+
+
+
+# 一般false 不考虑
 if [ ! -z "$calldata" ]; then # fix speaker IDs
   cat $links/fe_03_p{1,2}_tran/doc/*calldata.tbl > $tmpdir/combined-calldata.tbl
   local/fisher_fix_speakerid.pl $tmpdir/combined-calldata.tbl data/train_all_asr

@@ -117,7 +117,7 @@ silprob=false
 
 
 ##########################################################
-#　创建　创建 lexicon.txt   lexiconp.txt
+#　创建 lexicon.txt   lexiconp.txt
 #　每个词的 带概率的 发音情况
 ##########################################################
 
@@ -148,6 +148,9 @@ if ! utils/validate_dict_dir.pl $srcdir >&/dev/null; then
   exit 1;
 fi
 
+
+
+
 # phones.txt file provided, we will do some sanity check here.
 if [[ ! -z $phone_symbol_table ]]; then
   # Checks if we have position dependent phones
@@ -166,8 +169,6 @@ if [[ ! -z $phone_symbol_table ]]; then
 fi
 
 
-
-
 # In case there are extra word-level disambiguation symbols we need
 # to make sure that all symbols in the provided file are valid.
 if [ ! -z "$extra_word_disambig_syms" ]; then
@@ -176,6 +177,9 @@ if [ ! -z "$extra_word_disambig_syms" ]; then
     exit 1;
   fi
 fi
+
+
+
 
 
 ##########################################################
@@ -236,10 +240,6 @@ else
     awk '{for(n=1;n<=NF;n++) print $n; }' > $tmpdir/phones
   paste -d' ' $tmpdir/phones $tmpdir/phones > $tmpdir/phone_map.txt
 fi
-
-
-
-
 
 
 
@@ -339,11 +339,13 @@ else
   unk_opt=
 fi
 
+
+
+
 ##########################################################
 #　创建　data/lang/phones/disambig.txt ,
 #　创建 所有可能的消岐符号
 ##########################################################
-
 
 if "$silprob"; then
   ndisambig=$(utils/add_lex_disambig.pl $unk_opt --pron-probs --sil-probs $tmpdir/lexiconp_silprob.txt $tmpdir/lexiconp_silprob_disambig.txt)
@@ -351,6 +353,7 @@ else
   # 增加消歧符号 对tmpdir/lexiconp.txt 增加消岐符 tmpdir/lexiconp_disambig.txt
   ndisambig=$(utils/add_lex_disambig.pl $unk_opt --pron-probs $tmpdir/lexiconp.txt $tmpdir/lexiconp_disambig.txt)
 fi
+
 # 消岐符总数 固定增加1 目的增加 sil的消岐符
 ndisambig=$[$ndisambig+$num_extra_phone_disambig_syms]; # add (at least) one disambig symbol for silence in lexicon FST.
 echo $ndisambig > $tmpdir/lex_ndisambig

@@ -19,15 +19,30 @@ vaddir=`pwd`/mfcc
 trials_female=data/sre10_test_female/trials
 trials_male=data/sre10_test_male/trials
 trials=data/sre10_test/trials
+
+# dnn 模型
 nnet=exp/nnet2_online/nnet_ms_a/final.mdl
 
+
+# 训练DNN模型, 
 # Train a DNN on about 1800 hours of the english portion of Fisher.
 local/dnn/train_dnn.sh
 
+
+
+
+# -------------------------------------------------
+# 准备数据 
+# target: data/sre10_test/wav.scp utt2spk spk2utt
+#         data/sre10_train/wav.scp utt2spk spk2utt
+# -------------------------------------------------
 # Prepare the SRE 2010 evaluation data.
 local/make_sre_2010_test.pl /export/corpora5/SRE/SRE2010/eval/ data/
 local/make_sre_2010_train.pl /export/corpora5/SRE/SRE2010/eval/ data/
 
+# 准备sre05 sre08等sre2010之前的数据, 用于训练PLDA模型, 以及和SWB组合进行 UBM i-vector extractor的训练
+# target:  data/sre
+# 包含多个 sre训练数据集的信息文件汇总, 大量数据用于训练 UBM  IE等模型
 # Prepare a collection of NIST SRE data prior to 2010. This is
 # used to train the PLDA model and is also combined with SWB
 # for UBM and i-vector extractor training data.
@@ -43,6 +58,8 @@ local/make_swbd_cellular1.pl /export/corpora5/LDC/LDC2001S13 \
 local/make_swbd_cellular2.pl /export/corpora5/LDC/LDC2004S07 \
   data/swbd_cellular2_train
 
+#　组合数据，　用于　 ubm ie 等的训练
+#  swbd sre04 sre05 sre06 sre08 等数据 => data/train
 utils/combine_data.sh data/train \
   data/swbd_cellular1_train data/swbd_cellular2_train \
   data/swbd2_phase2_train data/swbd2_phase3_train data/sre
@@ -51,6 +68,15 @@ utils/copy_data_dir.sh data/train data/train_dnn
 utils/copy_data_dir.sh data/sre data/sre_dnn
 utils/copy_data_dir.sh data/sre10_train data/sre10_train_dnn
 utils/copy_data_dir.sh data/sre10_test data/sre10_test_dnn
+
+
+# -------------------------------------------------
+# 抽取特征
+# data/train
+# data/sre
+# data/sre10_train
+# data/sre10_test
+# -------------------------------------------------
 
 # Extract speaker recogntion features.
 steps/make_mfcc.sh --mfcc-config conf/mfcc.conf --nj 40 --cmd "$train_cmd" \
@@ -62,6 +88,9 @@ steps/make_mfcc.sh --mfcc-config conf/mfcc.conf --nj 40 --cmd "$train_cmd" \
 steps/make_mfcc.sh --mfcc-config conf/mfcc.conf --nj 40 --cmd "$train_cmd" \
   data/sre10_test exp/make_mfcc $mfccdir
 
+
+
+
 # Extract DNN features.
 steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --nj 40 \
   --cmd "$train_cmd" data/train_dnn exp/make_mfcc $mfccdir
@@ -72,10 +101,12 @@ steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --nj 40 \
 steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --nj 40 \
   --cmd "$train_cmd" data/sre10_test_dnn exp/make_mfcc $mfccdir
 
+
 for name in sre_dnn sre10_train_dnn sre10_test_dnn train_dnn sre \
   sre10_train sre10_test train; do
   utils/fix_data_dir.sh data/${name}
 done
+
 
 # Compute VAD decisions. These will be shared across both sets of features.
 sid/compute_vad_decision.sh --nj 40 --cmd "$train_cmd" \
@@ -102,28 +133,42 @@ utils/subset_data_dir.sh --utt-list data/train_dnn_32k/utt2spk \
   data/train data/train_32k
 utils/fix_data_dir.sh data/train_32k
 
+
+
+
+# 从DNN后验概率 生成一个 full-GMM 以及 spker recoginition特征???
+# 两者都可单独作为一个UBM, 或者在一个DNN-base系统 初始化IE
 # Initialize a full GMM from the DNN posteriors and speaker recognition
 # features. This can be used both alone, as a UBM, or to initialize the
 # i-vector extractor in a DNN-based system.
 sid/init_full_ubm_from_dnn.sh --cmd "$train_cmd --mem 15G" \
-  data/train_32k \
-  data/train_dnn_32k $nnet exp/full_ubm
+                              data/train_32k \
+                              data/train_dnn_32k \
+                              $nnet \
+                              exp/full_ubm
 
+# 只根据 有监督GMM训练 IE
 # Train an i-vector extractor based on just the supervised-GMM.
 sid/train_ivector_extractor.sh \
   --cmd "$train_cmd --mem 120G" \
   --ivector-dim 600 \
-  --num-iters 5 exp/full_ubm/final.ubm data/train \
+  --num-iters 5 \
+  exp/full_ubm/final.ubm \
+  data/train \
   exp/extractor_sup_gmm
 
+
+# 根据DNN-UBM 训练 IE
 # Train an i-vector extractor based on the DNN-UBM.
 sid/train_ivector_extractor_dnn.sh \
   --cmd "$train_cmd --mem 100G" --nnet-job-opt "--mem 4G" \
   --min-post 0.015 --ivector-dim 600 --num-iters 5 \
-  exp/full_ubm/final.ubm $nnet \
+  exp/full_ubm/final.ubm \
+  $nnet \
   data/train \
   data/train_dnn \
   exp/extractor_dnn
+
 
 # Extract i-vectors from the extractor with the sup-GMM UBM.
 sid/extract_ivectors.sh \
@@ -140,6 +185,7 @@ sid/extract_ivectors.sh \
   --cmd "$train_cmd --mem 12G" --nj 40 \
   exp/extractor_sup_gmm data/sre \
   exp/ivectors_sre_sup_gmm
+
 
 # Extract i-vectors using the extractor with the DNN-UBM.
 sid/extract_ivectors_dnn.sh \
@@ -166,6 +212,19 @@ sid/extract_ivectors_dnn.sh \
   data/sre_dnn \
   exp/ivectors_sre_dnn
 
+
+
+# ------------------------------------------------------------
+# 将
+#  train     data/sre
+#  enroll    data/sre10_train
+#  test      data/sre10_test
+
+#  train  enroll 按照male female 划分数据 (包括 wav.scp  utt2spk , ivector  spk_ivector等)
+#  test 当然只需要保留每一句的 utt-ivector 等待与其中的每个spk_ivector进行相似度比较,
+#       但是还是先进行了 gender 的划分, 这样的识别是不是有点不自动了?
+# 分割 ivector 为 male 和 female, 并计算ivector均值
+# ------------------------------------------------------------
 # Separate the i-vectors into male and female partitions and calculate
 # i-vector means used by the scoring scripts.
 local/scoring_common.sh data/sre data/sre10_train data/sre10_test \

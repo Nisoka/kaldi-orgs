@@ -22,6 +22,7 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.
 EOF
 fi
+
 parallel_opts="--gpu 1"
 num_threads=1
 minibatch_size=512
@@ -59,7 +60,11 @@ if [ $stage -le 6 ]; then
     --egs-dir "$common_egs_dir" \
     --pnorm-input-dim 3500 \
     --pnorm-output-dim 350 \
-    data/train_hires_asr data/lang exp/tri5a $dir  || exit 1;
+    
+    data/train_hires_asr \
+    data/lang \
+    exp/tri5a \
+    $dir  || exit 1;
 
 fi
 
