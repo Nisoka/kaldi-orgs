@@ -1,0 +1,7 @@
+
+
+VNC
+1 安装 sudo apt-get install vnc4server 
+2 剩下的看教程即可
+https://blog.csdn.net/chenjiehua123456789/article/details/75947825
+注意修改 ~/.vnc/xstartup文件, 以及 每个用户自己一个 :n 会话
