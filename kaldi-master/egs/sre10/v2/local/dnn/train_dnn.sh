@@ -11,6 +11,13 @@
 mfccdir=`pwd`/mfcc
 set -e
 
+# --------------------------------------------------------
+# Fisher corpora的DNN ASR识别系统
+# 得到DNN模型, 识别MFCC => pdf-id的后验概率模型
+# ---------------------------------------------------------
+
+
+
 # ---------------------------------------------------------
 # 准备数据
 
@@ -62,7 +69,7 @@ local/dnn/fisher_prepare_dict.sh
 utils/prepare_lang.sh data/local/dict "<unk>" data/local/lang data/lang
 
 # ---------------------------------------------------------
-# 生成训练语言模型
+# 训练语言模型
 # data/local/lm/3gram-mincount/lm_unpruned.gz
 # ---------------------------------------------------------
 local/dnn/fisher_train_lms.sh

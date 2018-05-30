@@ -19,7 +19,6 @@ vaddir=`pwd`/mfcc
 trials_female=data/sre10_test_female/trials
 trials_male=data/sre10_test_male/trials
 trials=data/sre10_test/trials
-
 # dnn 模型
 nnet=exp/nnet2_online/nnet_ms_a/final.mdl
 

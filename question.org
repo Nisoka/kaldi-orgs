@@ -1,0 +1,19 @@
+* GMM 密度估计 
+  估计 state(pdf) 的概率分布函数, 计算某帧mfcc为某个pdf的后验概率 p(pdf-id | mfcc)
+  
+* 因子分析
+  ivector 原理 计算推导过程 C实现
+  如果通过 utt 计算出TV空间因子ivector
+  
+* 特征空间变换
+* 模型空间变换
+
+* apply-cmvn
+* pca 降维
+
+
+
+* stanford 吴恩达
+
+  http://nbviewer.jupyter.org/github/zlotus/notes-LSJU-machine-learning/blob/master/ReadMe.ipynb
+
