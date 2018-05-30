@@ -2,6 +2,22 @@
 #
 # Copyright 2014  David Snyder  Daniel Povey
 # Apache 2.0.
+
+# -------------------------------------------------------------------
+# in:
+# srcdir language  outdir
+
+# out:
+# outdir= data/ldc_code_{dev evltest train}
+# print WAV "$uttId"," sph2pipe -f wav -p -c $channel $wave |\n";
+# print SPKR "$uttId"," $spkr","\n";
+# print LANG "$uttId"," $lang\n";
+# print GNDR "$spkr $g\n";
+# -------------------------------------------------------------------
+
+
+
+
 use File::Basename;
 
 if (@ARGV != 3) {
@@ -43,6 +59,7 @@ foreach $set ('devtest', 'evltest', 'train') {
 
   close(WAVLIST) || die;
 
+  # outdir= data/ldc_code_dev evltest train
   $out_dir = $out_base_dir . "/" . $ldc_code . '_' . $set;
   if (system("mkdir -p $out_dir") != 0) {
     die "Error making directory $out_dir"; 

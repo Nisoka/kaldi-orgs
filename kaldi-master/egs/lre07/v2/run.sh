@@ -18,11 +18,26 @@ languages=local/general_lr_closed_set_langs.txt
 
 nnet=exp/nnet2_online/nnet_ms_a/final.mdl
 
-
+# --------------------------------------------------------
+# 训练DNN 生成final.mdl, 用于生成MFCC 的 pdf-id 后验概率
+# 训练声学模型, 用于描述语音特征空间, 但是只训练了英语的空间.
+# --------------------------------------------------------
 # Train a DNN on about 1800 hours of the english portion of Fisher.
 local/dnn/train_dnn.sh
 
+
+
+# --------------------------------------------------------
+# 生成各自目录的LDC名字的输出 语料信息文件 wav.scp utt2spk utt2lang spk2gender
+# out:
+# data/sre08_train_${case}_${gender}
+# print WAV "$uttId"," sph2pipe -f wav -p -c $channel $wave |\n";
+# print SPKR "$uttId"," $spkr","\n";
+# print LANG "$uttId"," $lang\n";
+# print GNDR "$spkr $g\n";
+# --------------------------------------------------------
 data_root=/export/corpora/LDC
+
 # Training data sources
 local/make_sre_2008_train.pl $data_root/LDC2011S05 data
 local/make_callfriend.pl $data_root/LDC96S60 vietnamese data
@@ -43,15 +58,30 @@ local/make_lre05.pl $data_root/LDC/LDC2008S05 data
 local/make_lre07_train.pl $data_root/LDC2009S05 data
 local/make_lre09.pl /export/corpora5/NIST/LRE/LRE2009/eval data
 
+# --------------------------------------------------------
+# 生成测试数据的 语料信息
 # Make the evaluation data set. We're concentrating on the General Language
 # Recognition Closet-Set evaluation, so we remove the dialects and filter
 # out the unknown languages used in the open-set evaluation.
+
+# open(WAV, ">$dir/wav.scp") || die "Failed opening output file $out_dir/wav.scp";
+# open(UTT2SPK, ">$dir/utt2spk") || die "Failed opening output file $dir/utt2spk";
+# open(SPK2UTT, ">$dir/spk2utt") || die "Failed opening output file $dir/spk2utt";
+# open(UTT2LANG, ">$dir/utt2lang") || die "Failed opening output file $dir/utt2lang";
+# open(DUR3, ">$dir/3sec") || die "Failed opening output file $dir/3sec";
+# open(DUR10, ">$dir/10sec") || die "Failed opening output file $dir/10sec";
+# open(DUR30, ">$dir/30sec") || die "Failed opening output file $dir/30sec";
+# --------------------------------------------------------# --------------------------------------------------------
 local/make_lre07.pl $data_root/LDC2009S04 data/lre07_all
 
 cp -r data/lre07_all data/lre07
+
+# 过滤语言, 去掉不存在的语种的 utt2lang
 utils/filter_scp.pl -f 2 $languages <(lid/remove_dialect.pl data/lre07_all/utt2lang) \
   > data/lre07/utt2lang
+
 utils/fix_data_dir.sh data/lre07
+
 
 src_list="data/sre08_train_10sec_female \
   data/sre08_train_10sec_male data/sre08_train_3conv_female \
@@ -60,11 +90,15 @@ src_list="data/sre08_train_10sec_female \
   data/sre08_train_short2_female data/ldc96* data/lid05d1 \
   data/lid05e1 data/lid96d1 data/lid96e1 data/lre03 \
   data/ldc2009* data/lre09"
+
 # Remove any spk2gender files that we have: since not all data
 # sources have this info, it will cause problems with combine_data.sh
 for d in $src_list; do rm -f $d/spk2gender 2>/dev/null; done
 
+# 组合src_list 的语料
 utils/combine_data.sh data/train_unsplit $src_list
+
+
 
 # original utt2lang will remain in data/train_unsplit/.backup/utt2lang.
 utils/apply_map.pl -f 2 --permissive local/lang_map.txt  < data/train_unsplit/utt2lang  2>/dev/null > foo

@@ -5,6 +5,21 @@
 # Apache 2.0.
 # Usage: make_sre_2008_train.pl <path to LDC2011S05> <Path to root level output dir>
 
+# -------------------------------------------------------------------
+# in:
+# srcdir  outdir
+# language is in the fileinfo
+
+# out:
+# outdir/sre08_train_${case}_${gender}
+# print WAV "$uttId"," sph2pipe -f wav -p -c $channel $wave |\n";
+# print SPKR "$uttId"," $spkr","\n";
+# print LANG "$uttId"," $lang\n";
+# print GNDR "$spkr $g\n";
+# -------------------------------------------------------------------
+
+
+
 if (@ARGV != 2) {
   print STDERR "Usage: $0 <path-to-LDC2011S05> <path-to-output>\n";
   print STDERR "e.g. $0 /export/corpora5/LDC/LDC2011S05 data\n";
@@ -18,12 +33,25 @@ if (system("mkdir -p $tmp_dir") != 0) {
   die "Error making directory $tmp_dir"; 
 }
 
+# *.sph > data/tmp/sph.list
 if (system("find $db_base -name '*.sph' > $tmp_dir/sph.list") != 0) {
   die "Error getting list of sph files";
 }
 
+
+# < sph.list
 open(WAVLIST, "<", "$tmp_dir/sph.list") or die "cannot open wav list";
 
+
+# sph.list -- path/wavname.sph
+
+# chomp($x) 将$x 结尾换行\n去掉, 返回结果字数(一般无用)
+#           结果$x 返回无结尾\n 的字符串
+# $_  默认输入和模式匹配内容。
+# @A  表示数组
+# $#A 表示长度-1?
+# s/\.sph$//  删除掉结尾的.sph ($ 表示结尾)
+# %wav 是哈希表, 访问时 使用$wav{key}
 while(<WAVLIST>) {
   chomp;
   $sph = $_;
@@ -34,9 +62,12 @@ while(<WAVLIST>) {
   $wav{$raw_basename} = $sph;
 }
 
+# . 表示连接两个字符串
 $cfile3=$db_base . "/docs/NIST_SRE08_header_info.all.train.csv";
 @cflist = ($cfile3);
 
+
+# speechtype,language,segment.sph
 
 foreach $cf (@cflist) {
     open(SEGKEY, "<", $cf) or die "Cannot open $cf";
@@ -56,20 +87,34 @@ foreach $cf (@cflist) {
     close(SEGKEY);
 }
 
+
+# out:
+# data/sre08_train_10sec_m/
+
 @gender_list=("male","female");
 foreach $gender (@gender_list) {
+    # m f
   $g = substr($gender, 0, 1);
   @case_list=("10sec","3conv","8conv","short2");
+
   foreach $case (@case_list) {
+
     $out_dir = "$out_base_dir/sre08_train_${case}_${gender}";
     mkdir "$out_dir";
+
+    # srcdir/data/train/male/10sec.trn
     $casefile = $db_base."/data/train/".$gender."/".$case.".trn";
     open(CF, "<", $casefile)  or die "cannot open $casefile";
+    
     open(GNDR,">", "$out_dir/spk2gender") or die "Could not open the output file $out_dir/spk2gender";
     open(SPKR,">", "$out_dir/utt2spk") or die "Could not open the output file $out_dir/utt2spk";
     open(WAV,">", "$out_dir/wav.scp") or die "Could not open the output file $out_dir/wav.scp";
     open(LANG,">","$out_dir/utt2lang") or die "Could not open $out_dir/utt2lang";
+    
     #open(CHAN,">","$out_dir/utt2chan") or die "Could not open $out_dir/utt2chan";
+
+    # side -- channel A:1 B:2
+    # 读取每句的标注trn     spker   wavname.sph:side[AB]:1,wav2,wav3
     while(<CF>) {
       chomp;
       $line = $_;
@@ -90,10 +135,16 @@ foreach $gender (@gender_list) {
         } else {
           die "unknown channel $side\n";
         }
+
+        # spker = spker_sre08
         $spkr = "$A[0]_sre08";
+        # uttid = spker-wavname_[AB]
         $uttId = $spkr . "-" . $raw_basename . "_" . $side; # prefix language-number to utt-id to ensure sorted order.
+        # wave = /path/wavename.sph
         $wave = $wav{$raw_basename};
+        # lang = lang 
         $lang = $lang{$channel,$raw_basename};
+        
         if ($wave && -e $wave && defined $lang) {
           print WAV "$uttId"," sph2pipe -f wav -p -c $channel $wave |\n";
           print SPKR "$uttId"," $spkr","\n";
