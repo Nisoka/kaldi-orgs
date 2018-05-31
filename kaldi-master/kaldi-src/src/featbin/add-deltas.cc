@@ -50,6 +50,7 @@ int main(int argc, char *argv[]) {
     SequentialBaseFloatMatrixReader feat_reader(rspecifier);
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
+      // utt mfcc [frames X 13]
       const Matrix<BaseFloat> &feats  = feat_reader.Value();
 
       if (feats.NumRows() == 0) {
@@ -63,8 +64,10 @@ int main(int argc, char *argv[]) {
                     << " is smaller than truncation dimension.";
         SubMatrix<BaseFloat> feats_sub(feats, 0, feats.NumRows(), 0, truncate);
         ComputeDeltas(opts, feats_sub, &new_feats);
-      } else
+      } else{
+        // 计算deltamfcc 构成新特征 生成与opts配置相关的特征
         ComputeDeltas(opts, feats, &new_feats);
+      }
       feat_writer.Write(key, new_feats);
     }
     return 0;

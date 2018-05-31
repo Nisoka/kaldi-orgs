@@ -1,0 +1,37 @@
+
+
+* mfcc 特征读取
+  MFCC
+  copy-feats  ark:raw_mfcc_pitch_dev.6.ark   ark,t:-
+  mfcc 特征是13维特征
+
+  delta mfcc
+  add-deltas --delta-window=3 --delta-order=2 ark:mfcc/raw_mfcc_test.1.ark ark:test.ark
+  拼接MFCC delta 特征 得到 39维特征
+
+
+
+* gmm
+  DiagGmm
+  gmm-global-copy
+  
+
+
+  GMM-HMM mdl
+  gmm-copy  
+
+  
+  FullGmm
+  fgmm-global-copy
+
+
+  gselect 
+  // 这里只计算 gselect的统计量, 更新时 也是有针对的更新这些分量
+  // 原理 
+  //    认为每帧都实际上都用gselect这些分量描述即可, 认为其他分量对本帧的描述 是噪声, 
+  //    所以 每帧 只更新所属类别的那些 gauss_k s, 更加符合 某个样本是从某一个分量采样得到的原理
+  // 理解
+  //    acousitc model 某一个pdf-id的GMM 描述了pdf-id的多种可能性, 其中一些分量描述一种可能
+  //    UBM   认为全部数据是通过GMM描述, 但是具体到每帧 实际上是有其中gselect这些分量描述的.
+
+

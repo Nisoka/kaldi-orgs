@@ -109,8 +109,12 @@ int main(int argc, char *argv[]) {
               gmm.GaussianSelectionPreselect(mat.Row(i), preselect[i],
                                              num_gselect, &(gselect[i]));
       } else { // No "preselect" [i.e. no existing gselect]: simple case.
-        tot_like_this_file =
-            gmm.GaussianSelection(mat, num_gselect, &gselect);
+          // gselect 保存 每帧 最佳的几个高斯分量id 最能描述每帧情况的几个分量
+          // frame1 [  k_id, k_id .. k_id30 ]
+          // frame2 [  k_id, k_id .. k_id30 ]
+          // frame3 [  k_id, k_id .. k_id30 ]
+          tot_like_this_file =
+              gmm.GaussianSelection(mat, num_gselect, &gselect);
       }
       
       // 保存 utt frames 最大的30个高斯分量

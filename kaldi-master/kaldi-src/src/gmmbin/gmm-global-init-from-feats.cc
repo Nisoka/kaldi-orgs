@@ -27,6 +27,9 @@
 
 namespace kaldi {
 
+// 初始化GMM参数
+// 1 方差 设置为全局方差
+// 2 means 设置为随机选择的 一帧MFCC.
 // We initialize the GMM parameters by setting the variance to the global
 // variance of the features, and the means to distinct randomly chosen frames.
 void InitGmmFromRandomFrames(const Matrix<BaseFloat> &feats, DiagGmm *gmm) {
@@ -59,18 +62,20 @@ void InitGmmFromRandomFrames(const Matrix<BaseFloat> &feats, DiagGmm *gmm) {
   DiagGmmNormal gmm_normal(*gmm);
 
   std::set<int32> used_frames;
+  // 每个高斯分量 设置参数
   for (int32 g = 0; g < num_gauss; g++) {
-      //随机帧
+    //随机帧
     int32 random_frame = RandInt(0, num_frames - 1);
     while (used_frames.count(random_frame) != 0)
       random_frame = RandInt(0, num_frames - 1);
-    // cache 随机帧
+
+    // cache 随机帧, 以后不在选取同一帧作为某个分量的均值
     used_frames.insert(random_frame);
     //分量权重, 设置为平均
     gmm_normal.weights_(g) = 1.0 / num_gauss;
     // mean 直接拷贝
     gmm_normal.means_.Row(g).CopyFromVec(feats.Row(random_frame));
-    // variance 直接cp
+    // variance 方差(因为是对角的, 所以不计算协方差) 直接cp
     gmm_normal.vars_.Row(g).CopyFromVec(var);
   }
 
@@ -92,6 +97,7 @@ void TrainOneIter(const Matrix<BaseFloat> &feats,
   frame_weights.Set(1.0);
 
   double tot_like;
+  // 多线程计算 logGauss(xi)
   tot_like = gmm_acc.AccumulateFromDiagMultiThreaded(*gmm, feats, frame_weights,
                                                      num_threads);
 
@@ -101,6 +107,7 @@ void TrainOneIter(const Matrix<BaseFloat> &feats,
             << feats.NumRows() << " frames.";
   
   BaseFloat objf_change, count;
+  // 更新公式
   MleDiagGmmUpdate(gmm_opts, gmm_acc, kGmmAll, gmm, &objf_change, &count);
 
   KALDI_LOG << "Objective-function change on iteration " << iter << " was "
@@ -204,10 +211,11 @@ int main(int argc, char *argv[]) {
                 << " input frames = " << percent << "%.";
     }
 
+    // 高斯分量数
     if (num_gauss_init <= 0 || num_gauss_init > num_gauss)
       num_gauss_init = num_gauss;
     
-    //构造 diag GMM -- UBM模型, 初始化为num_gauss_init个分量
+    //构造 diag GMM -- UBM模型, 初始化为num_gauss_init个分量 [num_gauss & feat-dim]
     DiagGmm gmm(num_gauss_init, dim);
     
     KALDI_LOG << "Initializing GMM means from random frames to "
@@ -220,10 +228,11 @@ int main(int argc, char *argv[]) {
     int32 cur_num_gauss = num_gauss_init,
         gauss_inc = (num_gauss - num_gauss_init) / (num_iters / 2);
         
-    // 迭代训练
+    // 迭代训练 GMM gconst_  mean_invvars_ inv_vars_
     for (int32 iter = 0; iter < num_iters; iter++) {
       TrainOneIter(feats, gmm_opts, iter, num_threads, &gmm);
 
+      // 逐渐划分混合数
       int32 next_num_gauss = std::min(num_gauss, cur_num_gauss + gauss_inc);
       if (next_num_gauss > gmm.NumGauss()) {
         KALDI_LOG << "Splitting to " << next_num_gauss << " Gaussians.";

@@ -26,7 +26,21 @@
 #include "nnet2/train-nnet.h"
 #include "nnet2/am-nnet.h"
 
-
+/**
+ * @brief main
+ * @param argc
+ * @param argv
+ * @return
+ *    nnet计算
+ *    每个file(包含多个utt的特征)的所有帧mfcc特征, 进行nnet前向传播计算,
+ *    因为nnet 是训练作为声学模型, 所以这里计算得到  对应每个pdf-id 的可能概率
+ *    (当然其中概率最大值认为值最可能的 pdf-id)
+ *    mfcc  => pdf-1 posterior
+ *          => pdf-2 posterior
+ *          => pdf-3 posterior
+ *          => pdf-4 posterior
+ *          => pdf-cnt posterior
+ */
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
@@ -80,6 +94,7 @@ int main(int argc, char *argv[]) {
         features_rspecifier = po.GetArg(2),
         features_or_loglikes_wspecifier = po.GetArg(3);
 
+    // final.mdl 中包括 HMM转移模型, 和 声学模型(可以是GMM , 也可以是 DNN)
     TransitionModel trans_model;
     AmNnet am_nnet;
     {
@@ -93,19 +108,26 @@ int main(int argc, char *argv[]) {
 
     int64 num_done = 0, num_frames = 0;
 
+    // 先验概率
     Vector<BaseFloat> inv_priors(am_nnet.Priors());
     KALDI_ASSERT(inv_priors.Dim() == am_nnet.NumPdfs() &&
                  "Priors in neural network not set up.");
     inv_priors.ApplyPow(-1.0);
 
+
+
     SequentialBaseFloatMatrixReader feature_reader(features_rspecifier);
     BaseFloatMatrixWriter writer(features_or_loglikes_wspecifier);
-
+    // foreach feature
     for (; !feature_reader.Done();  feature_reader.Next()) {
       std::string utt = feature_reader.Key();
       const Matrix<BaseFloat> &feats  = feature_reader.Value();
 
-      int32 output_frames = feats.NumRows(), output_dim = nnet.OutputDim();
+      int32
+          // DNN 输入特征维度
+          output_frames = feats.NumRows(),
+          // DNN 输出维度 pdf-id 总数  表示某个mfcc 为某个pdf-id的概率
+          output_dim = nnet.OutputDim();
       if (!pad_input)
         output_frames -= nnet.LeftContext() + nnet.RightContext();
       if (output_frames <= 0) {
@@ -114,16 +136,24 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
+      // --------------------------------------
+      // 批量计算 utt 所有frames  输出 [frames x pdf-cnt]
+      // --------------------------------------
+
       Matrix<BaseFloat> output(output_frames, output_dim);
       if (chunk_size > 0 && chunk_size < feats.NumRows()) {
         NnetComputationChunked(nnet, feats, chunk_size, &output);
-      } else {
+      }
+      // normal case:
+      //   计算每帧后验概率 => output
+      else {
         CuMatrix<BaseFloat> cu_feats(feats);
         CuMatrix<BaseFloat> cu_output(output);
         NnetComputation(nnet, cu_feats, pad_input, &cu_output);
         output.CopyFromMat(cu_output);
       }
 
+      // false
       if (divide_by_priors) {
         output.MulColsVec(inv_priors); // scales each column by the corresponding element
         // of inv_priors.
@@ -138,10 +168,13 @@ int main(int argc, char *argv[]) {
         }
       }
 
+      // true
       if (apply_log) {
+        // 经过 下限处理, 取log
         output.ApplyFloor(1.0e-20);
         output.ApplyLog();
       }
+
       writer.Write(utt, output);
       num_frames += feats.NumRows();
       num_done++;

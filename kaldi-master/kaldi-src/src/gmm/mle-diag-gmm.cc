@@ -137,17 +137,41 @@ void AccumDiagGmm::Scale(BaseFloat f, GmmFlagsType flags) {
   if (flags & kGmmVariances) variance_accumulator_.Scale(d);
 }
 
+/**
+ * @brief AccumDiagGmm::AccumulateForComponent
+ * @param data
+ *        xi
+ * @param comp_index
+ *        高斯分量-id --- k
+ * @param weight
+ *        weight  --- 占有率 r_jk
+ *
+ *  EM 更新 a_k  u_k  delta_k  不仅需要r_jk 占有率, 还需要
+ *          u_k      == r_jk*xi
+ *          delta_k  == r_jk*(xi-u_k)^2
+ *          a_k      == sum_i{r_jk}
+ */
 void AccumDiagGmm::AccumulateForComponent(const VectorBase<BaseFloat> &data,
                                           int32 comp_index, BaseFloat weight) {
   if (flags_ & kGmmMeans)
     KALDI_ASSERT(data.Dim() == Dim());
+
   double wt = static_cast<double>(weight);
   KALDI_ASSERT(comp_index < NumGauss());
+
+  // For  a_k   sum{r_jk}
   // accumulate
   occupancy_(comp_index) += wt;
+
   if (flags_ & kGmmMeans) {
     Vector<double> data_d(data);  // Copy with type-conversion
+
+    // For u_k
+    // 更新 mean u_k的统计量   r_jk * xi
     mean_accumulator_.Row(comp_index).AddVec(wt, data_d);
+
+    // For delta_k
+    // 更新 detla variance的统计量 r_jk*(xi - u_k)^2
     if (flags_ & kGmmVariances) {
       data_d.ApplyPow(2.0);
       variance_accumulator_.Row(comp_index).AddVec(wt, data_d);
@@ -191,7 +215,13 @@ void AccumDiagGmm::AccumulateFromPosteriors(
     }
   }
 }
-
+/**
+ * @brief AccumDiagGmm::AccumulateFromDiag
+ * @param gmm
+ * @param data
+ * @param frame_posterior
+ * @return
+ */
 BaseFloat AccumDiagGmm::AccumulateFromDiag(const DiagGmm &gmm,
                                            const VectorBase<BaseFloat> &data,
                                            BaseFloat frame_posterior) {
@@ -199,11 +229,15 @@ BaseFloat AccumDiagGmm::AccumulateFromDiag(const DiagGmm &gmm,
   KALDI_ASSERT(gmm.Dim() == Dim());
   KALDI_ASSERT(static_cast<int32>(data.Dim()) == Dim());
 
-  //每个分量的 后验概率
+  //每个Gauss_k分量的 后验概率
   Vector<BaseFloat> posteriors(NumGauss());
+
+  // 每个 Gauss_k分量的后验概率,
   BaseFloat log_like = gmm.ComponentPosteriors(data, &posteriors);
+  // 帧权重, 无用 一般就是1
   posteriors.Scale(frame_posterior);
 
+  // EM 算法 更新 a_k u_k  delta_k 公式 的一些累计统计量
   AccumulateFromPosteriors(data, posteriors);
   return log_like;
 }
@@ -283,7 +317,23 @@ BaseFloat MlObjective(const DiagGmm &gmm,
   return obj;
 }
 
-// 极大似然估计更新GMM
+/**
+ * @brief MleDiagGmmUpdate
+ * @param config
+ * @param diag_gmm_acc
+ * @param flags
+ * @param gmm
+ * @param obj_change_out
+ * @param count_out
+ * @param floored_elements_out
+ * @param floored_gaussians_out
+ * @param removed_gaussians_out
+ *
+ * EM 算法更新公式   a_k  u_k  delta_k  利用diag_gmm_acc统计累积量 进行更新
+ *          u_k      == r_jk*xi
+ *          delta_k  == r_jk*(xi-u_k)^2
+ *          a_k      == sum_i{r_jk}
+ */
 void MleDiagGmmUpdate(const MleDiagGmmOptions &config,
                       const AccumDiagGmm &diag_gmm_acc,
                       GmmFlagsType flags,
@@ -390,12 +440,14 @@ void MleDiagGmmUpdate(const MleDiagGmmOptions &config,
     }
   }
 
-  // 将mean 等 保存到 gmm中,
+  // 将更新好的 mean_invvars  inv_vars_ 保存进入gmm中即可
   // copy to natural representation according to flags
   ngmm.CopyToDiagGmm(gmm, flags);
 
-  //用新的mean  variance更新gconst_
+  //用新的mean_invvars_  inv_vars 更新gconst_
   gmm->ComputeGconsts();  // or MlObjective will fail.
+
+
   // 计算目标函数
   BaseFloat obj_new = MlObjective(*gmm, diag_gmm_acc);
 
@@ -532,10 +584,12 @@ class AccumulateMultiThreadedClass: public MultiThreadable {
     double tot_weight = 0.0;
 
     for (int32 t = block_start; t < block_end; t++) {
-      tot_like_ += frame_weights_(t) *
-          accum_.AccumulateFromDiag(diag_gmm_, data_.Row(t), frame_weights_(t));
+      tot_like_ +=
+          frame_weights_(t) * accum_.AccumulateFromDiag(diag_gmm_, data_.Row(t), frame_weights_(t));
+      //  1.0   *                     gconst_ mean_invvars_ inv_vars   xi
       tot_weight += frame_weights_(t);
     }
+
     KALDI_VLOG(3) << "Thread " << thread_id_ << " saw average likeliood/frame "
                   << (tot_like_ / tot_weight) << " over " << tot_weight
                   << " (weighted) frames.";
@@ -558,7 +612,15 @@ class AccumulateMultiThreadedClass: public MultiThreadable {
   double tot_like_;
 };
 
-
+/**
+ * @brief AccumDiagGmm::AccumulateFromDiagMultiThreaded
+ * @param gmm
+ * @param data
+ * @param frame_weights
+ * @param num_threads
+ * @return
+ *    多线程 更新 占有率 r_jk
+ */
 BaseFloat AccumDiagGmm::AccumulateFromDiagMultiThreaded(
     const DiagGmm &gmm,
     const MatrixBase<BaseFloat> &data,

@@ -114,18 +114,32 @@ int main(int argc, char *argv[]) {
           continue;
         }
         
+        // foreach frame
         for (int32 i = 0; i < file_frames; i++) {
+          // 没有weights weight=1.0
           BaseFloat weight = (weights.Dim() != 0) ? weights(i) : 1.0;
           if (weight == 0.0) continue;
+
           file_weight += weight;
+
+          // feats   gselect<30>
           SubVector<BaseFloat> data(mat, i);
           const std::vector<int32> &this_gselect = gselect[i];
+
           int32 gselect_size = this_gselect.size();
           KALDI_ASSERT(gselect_size > 0);
           Vector<BaseFloat> loglikes;
+          // 计算每个gselect分量的 logGauss_k(xi)值 共30个
           gmm.LogLikelihoodsPreselect(data, this_gselect, &loglikes);
+          // 应用softmax 得到 每个高斯分量对xi的占有率 r_ik
           file_like += weight * loglikes.ApplySoftMax();
           loglikes.Scale(weight);
+
+          // 这里只计算 gselect的统计量, 说明到时候更新 也是有针对的更新这些分量
+          // 原理的意思是 认为每帧都实际上都用gselect这些分量描述即可, 认为其他分量对本帧的描述
+          // 是噪声, 所以 每帧 只更新所属类别的那些 gauss_k s, 更加符合
+          // 某个样本是从某一个分量采样得到的原理
+          // 计算EM 更新公式的一些统计量
           for (int32 j = 0; j < loglikes.Dim(); j++)
             gmm_accs.AccumulateForComponent(data, this_gselect[j], loglikes(j));
         }

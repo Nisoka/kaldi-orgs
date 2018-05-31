@@ -116,7 +116,7 @@ void DiagGmm::CopyFromFullGmm(const FullGmm &fullgmm) {
 }
 
 
-// 计算响应度
+// 计算响应度rjk 需要的 logGauss 的常数部分
 int32 DiagGmm::ComputeGconsts() {
   int32 num_mix = NumGauss();
   int32 dim = Dim();
@@ -155,13 +155,24 @@ int32 DiagGmm::ComputeGconsts() {
       // Want to make sure the answer becomes -inf in the end, not NaN.
       if (gc > 0) gc = -gc;
     }
+    // logGauss() 的常数部分
     gconsts_(mix) = gc;
   }
 
   valid_gconsts_ = true;
   return num_bad;
 }
-
+/**
+ * @brief DiagGmm::Split
+ * @param target_components
+ *        目标混合分量 数量
+ * @param perturb_factor
+ *        0.1  扰动因子
+ * @param history
+ *
+ *
+ *
+ */
 void DiagGmm::Split(int32 target_components, float perturb_factor,
                     std::vector<int32> *history) {
   if (target_components < NumGauss() || NumGauss() == 0) {
@@ -174,8 +185,12 @@ void DiagGmm::Split(int32 target_components, float perturb_factor,
   }
 
   int32 current_components = NumGauss(), dim = Dim();
+
+  // 拷贝副本
   DiagGmm *tmp = new DiagGmm;
   tmp->CopyFromDiagGmm(*this);  // so we have copies of matrices
+
+  // 对DiagGmm 扩大分量数目
   // First do the resize:
   weights_.Resize(target_components);
   weights_.Range(0, current_components).CopyFromVec(tmp->weights_);
@@ -188,8 +203,11 @@ void DiagGmm::Split(int32 target_components, float perturb_factor,
 
   delete tmp;
 
+
+  // 逐个增加高斯分量, (add 分量的权重从原本所有分两种最大权重 分一半)
   // future work(arnab): Use a priority queue instead?
   while (current_components < target_components) {
+    // 选择当前最大权重 分量 对该分量进行划分
     BaseFloat max_weight = weights_(0);
     int32 max_idx = 0;
     for (int32 i = 1; i < current_components; i++) {
@@ -203,9 +221,11 @@ void DiagGmm::Split(int32 target_components, float perturb_factor,
     if (history != NULL)
       history->push_back(max_idx);
 
+    // 将最大权重分量的 权重 分半, 将其中一半分给 新创建的分量
     weights_(max_idx) /= 2;
     weights_(current_components) = weights_(max_idx);
     Vector<BaseFloat> rand_vec(dim);
+    // 计算一个随机向量
     for (int32 i = 0; i < dim; i++) {
       rand_vec(i) = RandGauss() * std::sqrt(inv_vars_(max_idx, i));
       // note, this looks wrong but is really right because it's the
@@ -219,6 +239,8 @@ void DiagGmm::Split(int32 target_components, float perturb_factor,
     means_invvars_.Row(max_idx).AddVec(-perturb_factor, rand_vec);
     current_components++;
   }
+
+  // 重新计算gconsts_
   ComputeGconsts();
 }
 
@@ -536,6 +558,19 @@ BaseFloat DiagGmm::LogLikelihood(const VectorBase<BaseFloat> &data) const {
   return log_sum;
 }
 
+/**
+ * @brief DiagGmm::LogLikelihoods
+ * @param data
+ *        xi
+ * @param loglikes
+ *        输出 每个高斯分量的 log(Gauss_k(xi)) 对数似然值
+ *
+ *      logGauss_k(xi) 的计算 经过化简
+ *      =  gconsts_ + means * inv(vars) * data - 0.5 * inv(vars) * data_sq
+ *
+ *      后面经过 softmax(logGauss_k(xi)) 就能得到 每个分量的响应度 r_jk
+ *
+ */
 void DiagGmm::LogLikelihoods(const VectorBase<BaseFloat> &data,
                              Vector<BaseFloat> *loglikes) const {
   loglikes->Resize(gconsts_.Dim(), kUndefined);
@@ -546,6 +581,8 @@ void DiagGmm::LogLikelihoods(const VectorBase<BaseFloat> &data,
   }
   Vector<BaseFloat> data_sq(data);
   data_sq.ApplyPow(2.0);
+
+  // logGuass_k(xi) 公式
 
   // loglikes +=  means * inv(vars) * data.
   loglikes->AddMatVec(1.0, means_invvars_, kNoTrans, data, 1.0);
@@ -581,7 +618,17 @@ void DiagGmm::LogLikelihoods(const MatrixBase<BaseFloat> &data,
 }
 
 
-
+/**
+ * @brief DiagGmm::LogLikelihoodsPreselect
+ * @param data
+ *        feats数据 xi
+ * @param indices
+ *        gselect 的前30 个 高斯分量id
+ * @param loglikes
+ *
+ *
+ *      计算每个gselect分量的 logGauss_k(xi)值
+ */
 void DiagGmm::LogLikelihoodsPreselect(const VectorBase<BaseFloat> &data,
                                       const std::vector<int32> &indices,
                                       Vector<BaseFloat> *loglikes) const {
@@ -589,8 +636,11 @@ void DiagGmm::LogLikelihoodsPreselect(const VectorBase<BaseFloat> &data,
   Vector<BaseFloat> data_sq(data);
   data_sq.ApplyPow(2.0);
 
+  // loglike 保存 每个gselect分量的 logGauss_k(xi)值
   int32 num_indices = static_cast<int32>(indices.size());
   loglikes->Resize(num_indices, kUndefined);
+
+  // 是连续的? 太特殊了, 一般不可能
   if (indices.back() + 1 - indices.front() == num_indices) {
     // A special (but common) case when the indices form a contiguous range.
     int32 start_idx = indices.front();
@@ -603,20 +653,34 @@ void DiagGmm::LogLikelihoodsPreselect(const VectorBase<BaseFloat> &data,
                                       0, Dim());
     // loglikes += -0.5 * inv(vars) * data_sq.
     loglikes->AddMatVec(-0.5, inv_vars_sub, kNoTrans, data_sq, 1.0);
-  } else {
+
+  }
+  //Common case
+  else {
+    // 计算每个高斯分量的 logGauss_k(xi)
     for (int32 i = 0; i < num_indices; i++) {
-      int32 idx = indices[i];  // The Gaussian index.
-      BaseFloat this_loglike =
-          gconsts_(idx) + VecVec(means_invvars_.Row(idx), data)
-          - 0.5*VecVec(inv_vars_.Row(idx), data_sq);
-      (*loglikes)(i) = this_loglike;
+
+        int32 idx = indices[i];  // The Gaussian index.
+        BaseFloat this_loglike =
+            gconsts_(idx) + VecVec(means_invvars_.Row(idx), data)
+            - 0.5*VecVec(inv_vars_.Row(idx), data_sq);
+        (*loglikes)(i) = this_loglike;
     }
   }
 }
 
 
 
+
+
 // Gets likelihood of data given this. Also provides per-Gaussian posteriors.
+/**
+ * @brief DiagGmm::ComponentPosteriors
+ * @param data
+ * @param posterior
+ * @return
+ *    通过 logGauss(xi) 经过softmax 计算得到 r_jk 后验概率
+ */
 BaseFloat DiagGmm::ComponentPosteriors(const VectorBase<BaseFloat> &data,
                                        Vector<BaseFloat> *posterior) const {
   if (!valid_gconsts_)
@@ -627,7 +691,9 @@ BaseFloat DiagGmm::ComponentPosteriors(const VectorBase<BaseFloat> &data,
   // 计算数据的对数似然
   Vector<BaseFloat> loglikes;
   LogLikelihoods(data, &loglikes);
+  // loglikes 经过 softmax 之后  就是响应度 vector<r_k r_k >
   BaseFloat log_sum = loglikes.ApplySoftMax();
+
   if (KALDI_ISNAN(log_sum) || KALDI_ISINF(log_sum))
     KALDI_ERR << "Invalid answer (overflow or invalid variances/features?)";
   // 后验概率 posterior,
@@ -821,9 +887,16 @@ BaseFloat DiagGmm::GaussianSelection(const VectorBase<BaseFloat> &data,
   return tot_loglike;
 }
 
-// data utt的全部数据
-// num_gselect 需要选择多少个高斯分量
-//
+
+/**
+ * @brief DiagGmm::GaussianSelection
+ * @param data
+ * @param num_gselect
+ * @param output
+ * @return
+ *  data utt的全部数据
+    num_gselect 需要选择多少个高斯分量(这里取了30 算是比较小得了)
+ */
 BaseFloat DiagGmm::GaussianSelection(const MatrixBase<BaseFloat> &data,
                                      int32 num_gselect,
                                      std::vector<std::vector<int32> > *output) const {
@@ -856,7 +929,7 @@ BaseFloat DiagGmm::GaussianSelection(const MatrixBase<BaseFloat> &data,
   }
   
   KALDI_ASSERT(num_frames != 0);
-  // 每帧数据 对每一个高斯分量的概率
+  // 每帧数据 对每一个高斯分量的 概率 vector< p_k(xi) p_k(xi) >
   Matrix<BaseFloat> loglikes_mat(num_frames, num_gauss, kUndefined);
   // 每个高斯分量的 log(ak*N(u, theta))  对数似然概率
   this->LogLikelihoods(data, &loglikes_mat);
@@ -885,6 +958,7 @@ BaseFloat DiagGmm::GaussianSelection(const MatrixBase<BaseFloat> &data,
     std::vector<std::pair<BaseFloat, int32> > pairs;
 
 
+    // pari< logGauss_k(xi), k-id >
     for (int32 p = 0; p < num_gauss; p++) {
       if (loglikes(p) >= thresh) {
         pairs.push_back(std::make_pair(loglikes(p), p));
@@ -892,10 +966,13 @@ BaseFloat DiagGmm::GaussianSelection(const MatrixBase<BaseFloat> &data,
     }
     std::sort(pairs.begin(), pairs.end(),
               std::greater<std::pair<BaseFloat, int32> >());
+
+
     std::vector<int32> &this_output = (*output)[i];
     for (int32 j = 0;
          j < num_gselect && j < static_cast<int32>(pairs.size());
          j++) {
+      // 将高斯分量分量id k_id  => output, 没保存logGauss_k(xi) 值
       this_output.push_back(pairs[j].second);
       tot_loglike = LogAdd(tot_loglike, pairs[j].first);
     }

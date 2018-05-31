@@ -25,7 +25,12 @@
 #include "hmm/hmm-utils.h"
 #include "hmm/posterior.h"
 
-/* Convert a matrix of log-probabilities 
+
+/**
+ *
+ * 将 log-probabilities 的矩阵 转化为后验概率
+ *
+ * Convert a matrix of log-probabilities
    to something of type Posterior, i.e. for each utterance, a
    vector<vector<pair<int32, BaseFloat> > >, which is a sparse representation
    of the probabilities.
@@ -72,13 +77,18 @@ int main(int argc, char *argv[]) {
     SequentialBaseFloatMatrixReader logprob_reader(logprob_rspecifier);
     PosteriorWriter posterior_writer(posteriors_wspecifier);
 
+    // foreach utt logprob mat
     for (; !logprob_reader.Done(); logprob_reader.Next()) {
       num_done++;
       const Matrix<BaseFloat> &logprobs = logprob_reader.Value();
+
       // Posterior is vector<vector<pair<int32, BaseFloat> > >
       Posterior post(logprobs.NumRows());
+      // foreach utt frames
       for (int32 i = 0; i < logprobs.NumRows(); i++) {
         SubVector<BaseFloat> row(logprobs, i);
+        // 将 logprob , 应用exp 得到 prob, 就是后验概率 posterior
+        //  post[frame-i].push(pair<pdf-id, posterior>)
         for (int32 j = 0; j < row.Dim(); j++) {
           BaseFloat p = Exp(row(j));
           if (p >= min_post) {

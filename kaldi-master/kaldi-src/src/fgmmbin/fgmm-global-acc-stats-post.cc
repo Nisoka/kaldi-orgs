@@ -28,7 +28,13 @@
 #include "gmm/mle-full-gmm.h"
 #include "hmm/posterior.h"
 
-
+/**
+ * @brief main
+ * @param argc
+ * @param argv
+ * @return
+ *     从后验概率 和 特征  计算一个 fullGMM
+ */
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
@@ -62,6 +68,8 @@ int main(int argc, char *argv[]) {
         feature_rspecifier = po.GetArg(3),
         accs_wxfilename = po.GetArg(4);
 
+    //!  pdf-cnt 作为高斯分量混合数, 这样GMM 的每个分量就具有声学意义
+    //!  每个高斯分量都是一个声学状态
     int32 num_components = atoi(po.GetArg(2).c_str());
 
     AccumFullGmm fgmm_accs;
@@ -73,6 +81,7 @@ int main(int argc, char *argv[]) {
     RandomAccessBaseFloatVectorReader weights_reader(weights_rspecifier);
     int32 num_done = 0, num_err = 0;
 
+    // foreach utt
     for (; !post_reader.Done(); post_reader.Next()) {
       std::string key = post_reader.Key();
       Posterior post = post_reader.Value();
@@ -82,6 +91,7 @@ int main(int argc, char *argv[]) {
         num_err++;
         continue;
       }
+      // utt feat-mat
       const Matrix<BaseFloat> &mat = feature_reader.Value(key);
       int32 file_frames = mat.NumRows();
 
@@ -119,16 +129,19 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
+      // foreach frames ------
       for (int32 i = 0; i < file_frames; i++) {
         BaseFloat weight = (weights.Dim() != 0) ? weights(i) : 1.0;
         if (weight == 0.0) continue;
         file_weight += weight;
         SubVector<BaseFloat> data(mat, i);
+
         ScalePosterior(weight, &post);
         file_like += TotalPosterior(post);
+
+        // 计算 EM 更新公式的 a_k  u_k  delta_k 的统计量
         for (int32 j = 0; j < post[i].size(); j++)
-          fgmm_accs.AccumulateForComponent(data, post[i][j].first,
-            post[i][j].second);
+          fgmm_accs.AccumulateForComponent(data, post[i][j].first, post[i][j].second);
       }
 
       KALDI_VLOG(2) << "File '" << key << "': Average likelihood = "

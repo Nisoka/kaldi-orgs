@@ -93,7 +93,20 @@ void AccumFullGmm::Scale(BaseFloat f, GmmFlagsType flags) {
   }
 }
 
-
+/**
+ * @brief AccumFullGmm::AccumulateForComponent
+ * @param data
+ *        xi
+ * @param comp_index
+ *        高斯分量 id       j
+ * @param weight
+ *        高斯分量 后验概率  r_jk
+ *
+ *  EM 更新 a_k  u_k  delta_k  不仅需要r_jk 占有率, 还需要
+ *          u_k      == r_jk*xi
+ *          delta_k  == r_jk*(xi-u_k)^2
+ *          a_k      == sum_i{r_jk}
+ */
 void AccumFullGmm::AccumulateForComponent(
     const VectorBase<BaseFloat> &data, int32 comp_index, BaseFloat weight) {
 
@@ -102,11 +115,17 @@ void AccumFullGmm::AccumulateForComponent(
   double wt = static_cast<double>(weight);
 
   // 通过响应度 更新统计量
-  // accumulate
+  // For  a_k   sum{r_jk}
   occupancy_(comp_index) += wt;
+
   if (flags_ & kGmmMeans) {
     Vector<double> data_d(data);  // Copy with type-conversion
+    // For u_k
+    // 更新 mean u_k的统计量   r_jk * xi
     mean_accumulator_.Row(comp_index).AddVec(wt, data_d);
+
+    // For delta_k
+    // 更新 detla variance的统计量 r_jk*(xi - u_k)^2
     if (flags_ & kGmmVariances) {
       covariance_accumulator_[comp_index].AddVec2(wt, data_d);
     }

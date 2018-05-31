@@ -69,14 +69,23 @@ DeltaFeatures::DeltaFeatures(const DeltaFeaturesOptions &opts): opts_(opts) {
     // or something like that. "window" is a parameter specifying delta-window
     // width which is actually 2*window + 1.
     KALDI_ASSERT(window != 0);
-    int32 prev_offset = (static_cast<int32>(prev_scales.Dim()-1))/2,
+    int32
+        // 第一阶时 0   第二阶时 3
+        prev_offset = (static_cast<int32>(prev_scales.Dim()-1))/2,
+        //    3          6
         cur_offset = prev_offset + window;
+
+    // cur_scales = 1+6(7)      7+6(13)
     cur_scales.Resize(prev_scales.Dim() + 2*window);  // also zeros it.
 
     BaseFloat normalizer = 0.0;
+    // -3 ~ 3
     for (int32 j = -window; j <= window; j++) {
+      // 越靠近当前帧 保留的数据值越大
       normalizer += j*j;
+      // k=0, prev_offset=0    k= -3 ~ 3
       for (int32 k = -prev_offset; k <= prev_offset; k++) {
+        // cur_scales[-3+3, -2+3, ... 6] = -3*1
         cur_scales(j+k+cur_offset) +=
             static_cast<BaseFloat>(j) * prev_scales(k+prev_offset);
       }
@@ -93,17 +102,24 @@ void DeltaFeatures::Process(const MatrixBase<BaseFloat> &input_feats,
       feat_dim = input_feats.NumCols();
   KALDI_ASSERT(static_cast<int32>(output_frame->Dim()) == feat_dim * (opts_.order+1));
   output_frame->SetZero();
+  // opts_.order = 2, 每一阶特征计算
   for (int32 i = 0; i <= opts_.order; i++) {
+
     const Vector<BaseFloat> &scales = scales_[i];
     int32 max_offset = (scales.Dim() - 1) / 2;
+    //out_feat 中保存每一阶的特征
     SubVector<BaseFloat> output(*output_frame, i*feat_dim, feat_dim);
+    // 一开始是0阶特征就是(0-0) 所以就是mfcc本身
     for (int32 j = -max_offset; j <= max_offset; j++) {
-      // if asked to read
+      // 帧偏移位置
       int32 offset_frame = frame + j;
       if (offset_frame < 0) offset_frame = 0;
       else if (offset_frame >= num_frames)
         offset_frame = num_frames - 1;
+      // 选择拉伸因子 scale
       BaseFloat scale = scales(j + max_offset);
+      // 没有差分计算, 直接就是各帧的拉伸因子*帧MFCC
+      // *this = *this + alpha * rv
       if (scale != 0.0)
         output.AddVec(scale, input_feats.Row(offset_frame));
     }
@@ -160,12 +176,17 @@ void ShiftedDeltaFeatures::Process(const MatrixBase<BaseFloat> &input_feats,
 void ComputeDeltas(const DeltaFeaturesOptions &delta_opts,
                    const MatrixBase<BaseFloat> &input_features,
                    Matrix<BaseFloat> *output_features) {
+
+  // out_feat [frames X 13*(order+1)]
   output_features->Resize(input_features.NumRows(),
                           input_features.NumCols()
                           *(delta_opts.order + 1));
+
   DeltaFeatures delta(delta_opts);
   for (int32 r = 0; r < static_cast<int32>(input_features.NumRows()); r++) {
+    // out_feat 当前帧 地址
     SubVector<BaseFloat> row(*output_features, r);
+    //
     delta.Process(input_features, r, &row);
   }
 }
