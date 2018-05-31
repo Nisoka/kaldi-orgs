@@ -16,6 +16,13 @@
 # limitations under the License.
 
 
+# ----------------------------------------------------------------------
+# in:
+#    id_list 作为过滤源  first field 是utt-id
+#    scp     待过滤的文件, 其中n-th field 是utt-id, 选择其中在 utt-id 中存在的 utt-id 
+#            -f n 指定 域
+#    
+# ----------------------------------------------------------------------
 # This script takes a list of utterance-ids or any file whose first field
 # of each line is an utterance-id, and filters an scp
 # file (or any file whose "n-th" field is an utterance id), printing
@@ -34,11 +41,14 @@ do {
     shift @ARGV;
     $shifted=1;
   }
+
+  # 获得 n-th 
   if ($ARGV[0] eq "-f") {
     $field = $ARGV[1];
     shift @ARGV; shift @ARGV;
     $shifted=1
   }
+  
 } while ($shifted);
 
 if(@ARGV < 1 || @ARGV > 2) {
@@ -53,8 +63,10 @@ if(@ARGV < 1 || @ARGV > 2) {
 }
 
 
+# 第一个参数是 id_list
 $idlist = shift @ARGV;
 open(F, "<$idlist") || die "Could not open id-list file $idlist";
+# seen{id} = 1 id_list 中的id 视为可见
 while(<F>) {
   @A = split;
   @A>=1 || die "Invalid id-list file line $_";
@@ -70,6 +82,7 @@ if ($field == 1) { # Treat this as special case, since it is common.
     }
   }
 } else {
+    # 选择scp 文件中 n-th域, 如果 seen{n-th} == 1 则print
   while(<>) {
     @A = split;
     @A > 0 || die "Invalid scp file line $_";
