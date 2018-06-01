@@ -1,6 +1,29 @@
 
+* $()
+  $() 与 `` 等价, 表示执行内部内容
+
 * 算数计算
+  1 
   value=$[$value/2]
+  2 
+  value=$(($value/2))
+  
+  3
+  valur=`expr $value \/ 2`
+  expr 不能执行浮点数计算
+
+  浮点数计算方法
+  4
+  bc 计算器
+  result=$(echo "300*2.0" | bc)
+
+  5 
+  awk 里面直接执行C 语言代码
+  result=$(awk 'BEGIN{print 7.01*5-4.01 }')
+
+  6 取整数 直接awk即可
+  echo $var | awk '{print int($0)}'
+  
 
 * cmd="run.pl --mem 4G"
   $cmd ${plda_ivec_dir}/log/compute_mean.log \
