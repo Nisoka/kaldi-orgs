@@ -37,6 +37,11 @@ std::ostream & operator <<(std::ostream & out, const PackedMatrix<Real>& M);
 /// @{
 
 /// @brief Packed matrix: base class for triangular and symmetric matrices.
+/// 三角矩阵  num_rows_ 保存行数  data_ 保存顺序数据
+/// //size = r(r+1)/2  == 三角矩阵元素总数
+/// [ x  x  x ]
+/// [    x  x ]
+/// [       x ]     3x3 的三角矩阵 元素总数为 3x(3+1)/2
 template<typename Real> class PackedMatrix {
   friend class CuPackedMatrix<Real>;
  public:
@@ -161,6 +166,7 @@ template<typename Real> class PackedMatrix {
   // Will only be called from this class or derived classes.
   void AddPacked(const Real alpha, const PackedMatrix<Real>& M);
   Real *data_;
+  // num_rows_ 保存行数,( 三角矩阵, 一定是 方阵的半部分)
   MatrixIndexT num_rows_;
   //MatrixIndexT stride_;
  private:

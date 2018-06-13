@@ -96,11 +96,14 @@ void DiagGmm::CopyFromDiagGmm(const DiagGmm &diaggmm) {
 void DiagGmm::CopyFromFullGmm(const FullGmm &fullgmm) {
   int32 num_comp = fullgmm.NumGauss(), dim = fullgmm.Dim();
   Resize(num_comp, dim);
+  //gconsts_  log高斯分量的对数 常量部分
   gconsts_.CopyFromVec(fullgmm.gconsts());
   weights_.CopyFromVec(fullgmm.weights());
+
   Matrix<BaseFloat> means(num_comp, dim);
   fullgmm.GetMeans(&means);
   int32 ncomp = NumGauss();
+
   for (int32 mix = 0; mix < ncomp; mix++) {
     SpMatrix<double> covar(dim);
     covar.CopyFromSp(fullgmm.inv_covars()[mix]);
@@ -575,6 +578,13 @@ void DiagGmm::LogLikelihoods(const VectorBase<BaseFloat> &data,
                              Vector<BaseFloat> *loglikes) const {
   loglikes->Resize(gconsts_.Dim(), kUndefined);
   loglikes->CopyFromVec(gconsts_);
+  // 维度应该是拼接后的MFCC维度, 正常是 8 x MFCC = DIM
+  // 当mfcc.conf 中
+  //      --num-ceps = 7 时 数据 data.Dim() = 56  (8 x 7)
+  //      --num-ceps = 13 时 数据 data.Dim() = 104  (8 x 13)
+  //    在这里发生过错误, 一开始 选择--num-ceps 为默认值13,
+  //    后来修改了 --num-ceps=7 没有注意, 结果出错了. 训练的UBM维度是 104(8x13)
+  //    但是修改后 得到的 拼接MFCC 维度是 56(8x7)
   if (data.Dim() != Dim()) {
     KALDI_ERR << "DiagGmm::ComponentLogLikelihood, dimension "
               << "mismatch " << data.Dim() << " vs. "<< Dim();

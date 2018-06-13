@@ -4,6 +4,14 @@
 #             2014  David Snyder
 # Apache 2.0.
 
+# 训练i-vector extractor, 注意三个并行化级别
+# 1 num_thread  2 num_process 3 nj
+# 1 每个job 会分为 num_process* num_thread, 然后在内存中sums 这些统计量
+#  建议参数:
+#  threads 设置为(4 或者 机器核心数 中较小的) 因为要加锁并行, 所以一个process不能超过4个thread
+#  process 设置为 虚拟核 / threads, 如果16虚拟核那么, thread=4, process就设置为 16/4 = 4
+#       注意如果内存较紧张, 这个程序 each process uses about 5G, 所以要小心配置 num_jobs
+#  nj      可以随意设置 如 10 20, 但是如果设置的过多, 1 在累计统计量时 ,会很慢 2 可能内存不足
 # This script trains the i-vector extractor.  Note: there are 3 separate levels
 # of parallelization: num_threads, num_processes, and num_jobs.  This may seem a
 # bit excessive.  It has to do with minimizing memory usage and disk I/O,
@@ -24,11 +32,15 @@
 #    may want more jobs, though.
 
 # Begin configuration section.
+# 划分多job 运行数, 但是实际上每个job 会包含多个process(其他程序默认都没有num_process)
+# 真实的threads 就是是 nj*num_processes*num_threads
+# 数据被划分为  nj* num_processes 块.
 nj=10   # this is the number of separate queue jobs we run, but each one
         # contains num_processes sub-jobs.. the real number of threads we
         # run is nj * num_processes * num_threads, and the number of
         # separate pieces of data is nj * num_processes.
 num_threads=4
+# 每个job 运行 num_processes 个进程, 每个进程 跑 num-threads 个线程
 num_processes=4 # each job runs this many processes, each with --num-threads threads
 cmd="run.pl"
 stage=-4
@@ -70,18 +82,20 @@ if [ $# != 3 ]; then
   exit 1;
 fi
 
-fgmm_model=$1
-data=$2
-dir=$3
+fgmm_model=$1         # fgmm 模型 (ubm)
+data=$2               # data/train
+dir=$3                # exp/extracotr_2048
 
 for f in $fgmm_model $data/feats.scp ; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 
 # Set various variables.
+# nj_full = nj* num_processes
 mkdir -p $dir/log
 nj_full=$[$nj*$num_processes]
 sdata=$data/split$nj_full;
+# 这个程序 是否可以不按照 spker 进行划分, 这样的话 直接跑lang 为 spker 也能加快速度了.
 utils/split_data.sh $data $nj_full || exit 1;
 
 parallel_opts="--num-threads $[$num_threads*$num_processes]"
@@ -103,6 +117,7 @@ fi
 
 if [ $stage -le -1 ]; then
   echo $nj_full > $dir/num_jobs
+  # 计算gaussian 选择
   echo "$0: doing Gaussian selection and posterior computation"
   $cmd JOB=1:$nj_full $dir/log/gselect.JOB.log \
     gmm-gselect --n=$num_gselect $dir/final.dubm "$feats" ark:- \| \

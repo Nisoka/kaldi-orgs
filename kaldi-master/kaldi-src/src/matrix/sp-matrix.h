@@ -36,6 +36,7 @@ template<typename Real> class SpMatrix;
 
 /**
  * @brief Packed symetric matrix class
+ * 对角矩阵?
 */
 template<typename Real>
 class SpMatrix : public PackedMatrix<Real> {

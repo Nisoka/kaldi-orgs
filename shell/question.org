@@ -1,6 +1,54 @@
 
+
+** function
+   [function] fun1 [()]
+   {
+       echo "hello"
+   }
+   不知道为什么 需要时用 #!/bin/bash
+
+   
+** find
+   find . -name "filename"
+
+
+** grep
+   grep "string" filename
+   
+   grep "string" . -R  <==> grep "string"
+
+
+* compare
+  比较两个字符串是否相等的办法是： 
+  if [ "$test"x = "test"x ]; then 
+  
+  这里的关键有几点： 
+  1 使用单个等号 
+  2 注意到等号两边各有一个空格：这是unix shell的要求 
+  3 注意到"$test"x最后的x，这是特意安排的，因为当$test为空的时候，上面的表达式就变成了x = testx，显然是不相等的。
+  而如果没有这个x，表达式就会报错：[: =: unary operator expected 
+  
+
+  二元比较操作符,比较变量或者比较数字.注意数字与字符串的区别. 
+  
+  整数比较 
+  -eq 等于,如:if [ "$a" -eq "$b" ] 
+  -ne 不等于,如:if [ "$a" -ne "$b" ] 
+  -gt 大于,如:if [ "$a" -gt "$b" ] 
+  -ge 大于等于,如:if [ "$a" -ge "$b" ] 
+  -lt 小于,如:if [ "$a" -lt "$b" ] 
+  -le 小于等于,如:if [ "$a" -le "$b" ] 
+  大于(需要双括号),如:(("$a" > "$b")) 
+  >= 大于等于(需要双括号),如:(("$a" >= "$b")) 
+  
+  https://www.cnblogs.com/wangkongming/p/4221503.html
+
+
+
+
 * $()
   $() 与 `` 等价, 表示执行内部内容
+
 
 * 算数计算
   1 
@@ -24,11 +72,37 @@
   6 取整数 直接awk即可
   echo $var | awk '{print int($0)}'
   
+** 数学计算
+   https://blog.csdn.net/zwx19921215/article/details/21098391
+
+   S=3(xy)+4x2+5y+6
+
+   t=`expr $1 ** $2`                        #用expr改变运算顺序，求x的y次方。
+   
+   t=$[t*3]                               #t乘以3。
+   
+   s=$[s+t]                               #结果相加。
+   
+   t=$[$1**2]                             #求x的平方。
+   
+   t=$[t*4]                               #结果乘以4。
+   
+   s=$[s+t]                               #结果相加。
+   
+   t=`expr $2 * 5`                          #求5y的值。
+   
+   s=$[s+t]                               #结果相加。
+   
+   s=$[s+6]                               #结果加上6。
+   
+   echo$s                                #输出结果。
+   
+   echo$((a%b))                          #取余
+
 
 * cmd="run.pl --mem 4G"
   $cmd ${plda_ivec_dir}/log/compute_mean.log \
       ivector-mean "ark:ivector-normalize-length scp:${plda_ivec_dir}/ivector.scp ark:- |" ${plda_ivec_dir}/mean.vec || exit 1;
-
   
 ** 参数
    1 临时变量 eg JOB=1:10
@@ -46,3 +120,44 @@
    $cmd ${plda_ivec_dir}/log/compute_mean.log \
       ivector-normalize-length scp:${plda_ivec_dir}/ivector.scp ark:- | \
           ivector-mean ark:- ${plda_ivec_dir}/mean.vec || exit 1;
+
+
+* 字典
+  declare -A  map 
+  定义一个 字典对象
+  以及简单字符串截取
+  https://blog.csdn.net/u014297722/article/details/54601660?utm_source=itdadao&utm_medium=referral
+
+  
+
+* 字符串处理
+  https://www.cnblogs.com/gaochsh/p/6901809.html
+** suffix
+   basename  example.tar.gz  .tar.gz
+   # => example 
+   
+   FILE="example.tar.gz"
+   
+   echo "${FILE%%.*}"
+   # => example
+   
+   echo "${FILE%.*}"
+   # => example.tar
+   
+   echo "${FILE#*.}"
+   # => tar.gz
+   
+   echo "${FILE##*.}"
+   # => gz
+   
+   # 在bash中可以这么写
+   filename=$(basename "$fullfile")
+   extension="${filename##*.}"
+   filename="${filename%.*}"
+   
+
+* 正则表达式
+  ls 不能使用正则表达式, 如果希望 列出符合正则表达式的文件名
+  需要使用其他能够使用正则表达式的 工具, eg grep
+  `ls $destdir/$fbasename*.wav | grep "$fbasename[0-9]\{3\}.wav"`
+  如果直接使用 ls $destdir/$fbasename[0-9]\{3\}.wav  是不实现期望的, 因为 ls 不能使用正则表达式.

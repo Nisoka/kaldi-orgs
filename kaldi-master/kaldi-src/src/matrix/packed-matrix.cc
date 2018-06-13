@@ -59,6 +59,10 @@ inline void PackedMatrix<Real>::Init(MatrixIndexT r) {
     data_ = 0;
     return;
   }
+  //size = r(r+1)/2  == 三角矩阵元素总数
+  // [ x  x  x ]
+  // [    x  x ]
+  // [       x ]     3x3 的三角矩阵 元素总数为 3x(3+1)/2
   size_t size = ((static_cast<size_t>(r) * static_cast<size_t>(r + 1)) / 2);
 
   if (static_cast<size_t>(static_cast<MatrixIndexT>(size)) != size) {
@@ -69,6 +73,8 @@ inline void PackedMatrix<Real>::Init(MatrixIndexT r) {
   void *data;  // aligned memory block
   void *temp;
 
+  // 申请空间, 顺序数组
+  // num_rows_ 保存行数,( 三角矩阵, 一定是 方阵的半部分)
   if ((data = KALDI_MEMALIGN(16, size * sizeof(Real), &temp)) != NULL) {
     this->data_ = static_cast<Real *> (data);
     this->num_rows_ = r;

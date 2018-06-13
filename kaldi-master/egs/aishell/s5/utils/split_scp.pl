@@ -16,19 +16,25 @@ use warnings; #sed replacement for -w perl parameter
 # limitations under the License.
 
 
-
+# 这个脚本用来 split .scp 文件,
 # This program splits up any kind of .scp or archive-type file.
+# 如果没指定　utt2spk 选项，　会工作在任何ｔｅｘｔ文件，　并等价划分为　numsplit
 # If there is no utt2spk option it will work on any text  file and
-# will split it up with an approximately equal number of lines in
+# will split it up with an approximately(大约) equal number of lines in
 # each but.
+#　使用--utt2spk 选项　会工作在 具有utt-id 作为开始字段的文件
 # With the --utt2spk option it will work on anything that has the
 # utterance-id as the first entry on each line; the utt2spk file is
 # of the form "utterance speaker" (on each line).
+# 会将文件划分成等大小的块, 如果你使用utt2spk选项, 他会确保这些块 与 spker 边界相符合.
+# 这种情况下, 如果块比spker多, 一些chunk会为empty, 并且打印错误信息, 并exit退出.
+# (这就是错误情况, 如果块数量 > spker 数量
 # It splits it into equal size chunks as far as it can.  If you use the utt2spk
 # option it will make sure these chunks coincide with speaker boundaries.  In
 # this case, if there are more chunks than speakers (and in some other
 # circumstances), some of the resulting chunks will be empty and it will print
 # an error message and exit with nonzero status.
+#
 # You will normally call this like:
 # split_scp.pl scp scp.1 scp.2 scp.3 ...
 # or
@@ -54,6 +60,8 @@ for ($x = 1; $x <= 2 && @ARGV > 0; $x++) {
             die "Invalid num-jobs and job-id: $num_jobs and $job_id";
         }
     }
+    # 第一个参数是　－－utt2spk=utt2spk  然后去除utt2spk 赋值给
+    # utt2spk_file = utt2spk
     if ($ARGV[0] =~ "--utt2spk=(.+)") {
         $utt2spk_file=$1;
         shift;
@@ -66,8 +74,16 @@ if(($num_jobs == 0 && @ARGV < 2) || ($num_jobs > 0 && (@ARGV < 1 || @ARGV > 2)))
         " ... where 0 <= job-id < num-jobs.";
 }
 
+
+
+# split_scp.pl [--utt2spk=<utt2spk_file>] in.scp out1.scp out2.scp ...
+# 使用方式 此时 @ARGV = in.scp out1.scp out2.scp
+# shift @ARGV 取出 第一个 in.scp
+# $inscp = in.scp
+# @OUTPUTS = out1.scp out2.scp ...
 $error = 0;
 $inscp = shift @ARGV;
+# 如果没有多 jobs 则进行单线程划分,
 if ($num_jobs == 0) { # without -j option
     @OUTPUTS = @ARGV;
 } else {
@@ -81,15 +97,26 @@ if ($num_jobs == 0) { # without -j option
     }
 }
 
+
+
+
 if ($utt2spk_file ne "") {  # We have the --utt2spk option...
+    # 将文件打开 写入到 U中
     open(U, "<$utt2spk_file") || die "Failed to open utt2spk file $utt2spk_file";
+    # while(<U>) 逐行读取
     while(<U>) {
+        # 划分行为 utt spker
         @A = split;
         @A == 2 || die "Bad line $_ in utt2spk file $utt2spk_file";
         ($u,$s) = @A;
+        # utt2spker[utt] = spker
         $utt2spk{$u} = $s;
     }
+
+    # inscp
+    #     utt  some.
     open(I, "<$inscp") || die "Opening input scp file $inscp";
+    # 声明数组
     @spkrs = ();
     while(<I>) {
         @A = split;
@@ -97,35 +124,55 @@ if ($utt2spk_file ne "") {  # We have the --utt2spk option...
         $u = $A[0];
         $s = $utt2spk{$u};
         if(!defined $s) { die "No such utterance $u in utt2spk file $utt2spk_file"; }
+        # 1 将spker 加入到 @spkrs
+        # 2 spk_count{spker} = 0
+          # spk_count  保存 inscp 有多少某个spker的utt
+        # 3 spk_data{spker} = []
+          # spk_data  保存 inscp 有多少某个spker的utt
         if(!defined $spk_count{$s}) {
             push @spkrs, $s;
             $spk_count{$s} = 0;
             $spk_data{$s} = [];  # ref to new empty array.
         }
+
+        # spker 保存的utt总数
         $spk_count{$s}++;
+        # spker 包含的 utt some
+        # "$_" 默认的输入, 当前输入就是 <I>
         push @{$spk_data{$s}}, $_;
     }
+
+
     # Now split as equally as possible ..
     # First allocate spks to files by allocating an approximately
     # equal number of speakers.
     $numspks = @spkrs;  # number of speakers.
     $numscps = @OUTPUTS; # number of output files.
+
+    # 如果划分太多了 > numspker . 那么直接出错.
     if ($numspks < $numscps) {
       die "Refusing to split data because number of speakers $numspks is less " .
           "than the number of output .scp files $numscps";
     }
+    # 构造每个划分的数组
     for($scpidx = 0; $scpidx < $numscps; $scpidx++) {
         $scparray[$scpidx] = []; # [] is array reference.
     }
+
+    # 每个spker 计算应该被划分到的 scpidx
     for ($spkidx = 0; $spkidx < $numspks; $spkidx++) {
         $scpidx = int(($spkidx*$numscps) / $numspks);
+        # 该spker
         $spk = $spkrs[$spkidx];
+        # scpidx 中 保存对应被划分到其中的 spker
         push @{$scparray[$scpidx]}, $spk;
+        # scpidx 保存的utt总数 就应该是 所有属于其的 spker 的utt总数 和 .
         $scpcount[$scpidx] += $spk_count{$spk};
     }
 
     # Now will try to reassign beginning + ending speakers
     # to different scp's and see if it gets more balanced.
+    # 拟合参数 找到最好的划分方法
     # Suppose objf we're minimizing is sum_i (num utts in scp[i] - average)^2.
     # We can show that if considering changing just 2 scp's, we minimize
     # this by minimizing the squared difference in sizes.  This is

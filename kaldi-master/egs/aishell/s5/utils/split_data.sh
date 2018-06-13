@@ -21,6 +21,12 @@ if [ "$1" == "--per-utt" ]; then
   shift
 fi
 
+# Usage:
+# 1 在 indir 下创建 split50 的目录, 下面保存 1 2 .. 50等划分目录
+# 2 --per-utt 选项
+# 3 脚本在发现 indir/split50 比 indir更新时, 不会进行处理
+# 4 默认情况下 按照每个spker进行划分, 每个spker 只存在在一个split中, 所以默认情况下,
+#      nj 数量 不能超过spker数量, 不然spker 太少不够分 出错.
 if [ $# != 2 ]; then
   echo "Usage: $0 [--per-utt] <data-dir> <num-to-split>"
   echo "E.g.: $0 data/train 50"
@@ -33,8 +39,8 @@ if [ $# != 2 ]; then
   exit 1
 fi
 
-data=$1
-numsplit=$2
+data=$1        #indir
+numsplit=$2    #split cnt
 
 if ! [ "$numsplit" -gt 0 ]; then
   echo "Invalid num-split argument $numsplit";
@@ -58,10 +64,12 @@ texts=""
 nu=`cat $data/utt2spk | wc -l`
 nf=`cat $data/feats.scp 2>/dev/null | wc -l`
 nt=`cat $data/text 2>/dev/null | wc -l` # take it as zero if no such file
+# 如果 utt2spk != feats.scp , prepares不对, 需要fix_data_dir.sh
 if [ -f $data/feats.scp ] && [ $nu -ne $nf ]; then
   echo "** split_data.sh: warning, #lines is (utt2spk,feats.scp) is ($nu,$nf); you can "
   echo "**  use utils/fix_data_dir.sh $data to fix this."
 fi
+
 if [ -f $data/text ] && [ $nu -ne $nt ]; then
   echo "** split_data.sh: warning, #lines is (utt2spk,text) is ($nu,$nt); you can "
   echo "** use utils/fix_data_dir.sh to fix this."
@@ -93,6 +101,7 @@ if ! $need_to_split; then
   exit 0;
 fi
 
+# 生成 numsplit目录下的$n/utt2spk
 utt2spks=$(for n in `seq $numsplit`; do echo $data/split${numsplit}${utt}/$n/utt2spk; done)
 
 directories=$(for n in `seq $numsplit`; do echo $data/split${numsplit}${utt}/$n; done)
@@ -108,7 +117,10 @@ fi
 which lockfile >&/dev/null && lockfile -l 60 $data/.split_lock
 trap 'rm -f $data/.split_lock' EXIT HUP INT PIPE TERM
 
+
+# utt2spk 划分
 utils/split_scp.pl $utt2spk_opt $data/utt2spk $utt2spks || exit 1
+
 
 for n in `seq $numsplit`; do
   dsn=$data/split${numsplit}${utt}/$n
@@ -121,9 +133,13 @@ if [ ! -f $data/segments ]; then
                          # indexed per utt.
 fi
 
+
+# 根据 划分好的 utt2spk, 划分 feats.scp utt2lang wav.scp 等等
 # split some things that are indexed by utterance.
 for f in feats.scp text vad.scp utt2lang $maybe_wav_scp utt2dur utt2num_frames; do
   if [ -f $data/$f ]; then
+    # 这里可以并行进行划分 Split 因为包含了多个 job目录, 每个目录都并行执行
+    #使用　job参数 进行多线程
     utils/filter_scps.pl JOB=1:$numsplit \
       $data/split${numsplit}${utt}/JOB/utt2spk $data/$f $data/split${numsplit}${utt}/JOB/$f || exit 1;
   fi
