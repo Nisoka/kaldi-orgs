@@ -1,0 +1,57 @@
+
+#+TITLE: 论文阅读 Eigenvoice Modeling With Sparse Training Data
+
+
+\begin{equation}  
+M(s) = M_0 + Vy
+\end{equation}  
+
+* MAXIMUM LIKELIHOOD FORMULATIONS OF THE ESTIMATION PROBLEM
+估计问题的 最大似然函数目标函数
+\begin{equation}  
+\prod\limits_{s}P_{V,\Sigma}\big( X(s) \big)
+\end{equation}  
+
+
+\begin{equation}  
+\displaystyle \prod\limits_{s} \max\limits_{y} P_{HMM}\big(X(s)|M_0 + Vy, \Sigma \big)\tag{1}\label{1}
+\end{equation}  
+
+其中s 代表每个spker
+但是这里 以y 为条件的条件概率似然, 我们需要后续对y 进行积分, 之后才作为 最大似然目标函数
+
+这里总数 是一个 P_HMM 概率, 是因为 每个隐变量就是 每个混合组件, 显变量是 观测值X_t, 因此这个就是个HMM模型, 最终求解方式就是 BW算法
+
+*2 Steps Iter*
+1.
+  对每个spker s 使用当前的 V \Sigma 找到  使 (1) 条件似然达到最大的 y(s)
+\begin{equation}  
+y(s) = \arg \max\limits_{y} P_{HMM}\big( X(x) | M_0 + Vy, \Sigma \big)
+\end{equation}  
+
+2.
+  反向, 在利用估计出来的 y(s) 更新V \Sigma, 通过极大似然 (1)
+\begin{equation}  
+\displaystyle \prod\limits_{i}^n P_{HMM}\big(X(s)|M_0 + Vy(s), \Sigma \big)
+\end{equation}     
+
+
+论文中有
+- Proposition 1
+- Proposition 2
+- Proposition 3
+
+  公式 (4)
+\begin{equation}  
+\sum\limits_{s} N(s) V E[y(s)y^*(s)] = \sum\limits_{s} S_x(s)E[y^*(s)]\tag{4}
+\end{equation}  
+  公式 (5)
+\begin{equation}  
+\Sigma_c = \frac{1}{n_c}\Big( \sum\limits_{s} S_{XX^*_{,c}(s) - M_c}\Big)\tag{5}
+\end{equation}    
+
+  公式 (5) 表明, \Sigma 主要相关量 为 n_c = \sum_s N_c(s), 说明, n_c 是与spker是否为lang 无关的, M_c又是UBM c 分量均值\\
+  因此 对于\Sigma 来说 与 是否以lang 为说话人进行语种识别, 没有效果, 剩下的就看V的计算是否与 spker有关.
+
+  
+

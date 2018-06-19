@@ -266,11 +266,16 @@ int main(){
 
 
 * 公式
+
+org-mode 中使用的公式 是 mathjex, 兼容latex语法
   \begin{equation}  
   \sum\limits_{i=1}^n(单项评分_i * 权重)  
   \end{equation}  
 
   \sum\limits_{i=1}^n(单项评分_i * 权重)
+
+
+  https://www.zybuluo.com/knight/note/96093
 
 * 快捷键
 ** 折叠
