@@ -161,3 +161,6 @@
   需要使用其他能够使用正则表达式的 工具, eg grep
   `ls $destdir/$fbasename*.wav | grep "$fbasename[0-9]\{3\}.wav"`
   如果直接使用 ls $destdir/$fbasename[0-9]\{3\}.wav  是不实现期望的, 因为 ls 不能使用正则表达式.
+
+* 字符串转数组
+https://www.cnblogs.com/chengmo/archive/2010/09/30/1839632.html
