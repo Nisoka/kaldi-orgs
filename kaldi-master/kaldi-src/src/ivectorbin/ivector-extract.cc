@@ -47,11 +47,14 @@ class IvectorExtractTask {
                                              extractor_.FeatDim(),
                                              need_2nd_order_stats);
 
+    // 累计统计量
     utt_stats.AccStats(feats_, posterior_);
 
     ivector_.Resize(extractor_.IvectorDim());
     ivector_(0) = extractor_.PriorOffset();
 
+    // 如果需要 ivector的协方差矩阵, 只需要 GetIvectorDistribution 输出最后一个参数即可.
+    // SpMatrix<double> quadratic(IvectorDim());
     if (tot_auxf_change_ != NULL) {
       double old_auxf = extractor_.GetAuxf(utt_stats, ivector_);
       extractor_.GetIvectorDistribution(utt_stats, &ivector_, NULL);
@@ -76,6 +79,7 @@ class IvectorExtractTask {
     ivector_(0) -= extractor_.PriorOffset();
     KALDI_VLOG(2) << "Ivector norm for utterance " << utt_
                   << " was " << ivector_.Norm(2.0);
+    //写Key Value 到文件.
     writer_->Write(utt_, Vector<BaseFloat>(ivector_));
   }
  private:

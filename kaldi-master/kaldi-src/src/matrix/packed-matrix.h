@@ -41,7 +41,11 @@ std::ostream & operator <<(std::ostream & out, const PackedMatrix<Real>& M);
 /// //size = r(r+1)/2  == 三角矩阵元素总数
 /// [ x  x  x ]
 /// [    x  x ]
-/// [       x ]     3x3 的三角矩阵 元素总数为 3x(3+1)/2
+/// [       x ]     3x3 的三角矩阵 元素总数为 3x(3+1)/2, 但是这样保存的数据 不能直接通过行列计算
+/// 这里保存的是 下对角矩阵
+/// [ x       ]
+/// [ x  x    ]
+/// [ x  x  x ]  可以通过 data_ + (r*(r+1))/2 + c 得到元素
 template<typename Real> class PackedMatrix {
   friend class CuPackedMatrix<Real>;
  public:

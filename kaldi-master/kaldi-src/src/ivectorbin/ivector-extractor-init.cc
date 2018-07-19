@@ -36,6 +36,7 @@ int main(int argc, char *argv[]) {
         " ivector-extractor-init 4.fgmm 0.ie\n";
 
     bool binary = true;
+    //ivector 200, use_weight true, num_iter 6
     IvectorExtractorOptions ivector_opts;
     ParseOptions po(usage);
     po.Register("binary", &binary, "Write output in binary mode");

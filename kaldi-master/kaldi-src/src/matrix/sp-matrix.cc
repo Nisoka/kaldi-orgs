@@ -167,6 +167,9 @@ void SpMatrix<Real>::CopyFromMat(const MatrixBase<Real> &M,
   }
 }
 
+/**
+ * 求迹, 对角元素之和, 注意 SpMatrix 保存的是下对角矩阵. 因为是对称阵
+ */
 template<typename Real>
 Real SpMatrix<Real>::Trace() const {
   const Real *data = this->data_;

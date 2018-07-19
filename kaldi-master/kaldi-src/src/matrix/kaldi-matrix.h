@@ -39,6 +39,7 @@ Real TraceMatMat(const MatrixBase<Real> &A, const MatrixBase<Real> &B,
 /// \addtogroup matrix_group
 /// @{
 
+/// https://blog.csdn.net/u013677156/article/details/79202271/
 /// Base class which provides matrix operations not involving resizing
 /// or allocation.   Classes Matrix and SubMatrix inherit from it and take care
 /// of allocation and resizing.

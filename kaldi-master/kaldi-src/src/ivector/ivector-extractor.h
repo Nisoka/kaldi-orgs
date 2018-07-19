@@ -98,7 +98,7 @@ class IvectorExtractorUtteranceStats {
  protected:
   friend class IvectorExtractor;
   friend class IvectorExtractorStats;
-  // 0 阶统计量 总和的后验概率(sum P(z|x))
+  // 0 阶统计量
   Vector<double> gamma_; // zeroth-order stats (summed posteriors), dimension [I]
   // 1 阶统计量
   Matrix<double> X_; // first-order stats, dimension [I][D]

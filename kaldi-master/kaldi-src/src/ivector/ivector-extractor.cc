@@ -1,4 +1,4 @@
-.// ivector/ivector-extractor.cc
+// ivector/ivector-extractor.cc
 
 // Copyright 2013     Daniel Povey
 //           2015     David Snyder
@@ -71,7 +71,9 @@ void IvectorExtractor::GetIvectorDistribution(
     SpMatrix<double> quadratic(IvectorDim());
 
     GetIvectorDistMean(utt_stats, &linear, &quadratic);
+    // ivector 的协方差矩阵部分 + I, 得到 协方差矩阵.
     GetIvectorDistPrior(utt_stats, &linear, &quadratic);
+    // 计算协方差矩阵L, 以及最终获得ivector.
     if (var != NULL) {
       var->CopyFromSp(quadratic);
       var->Invert(); // now it's a variance.
@@ -136,7 +138,8 @@ void IvectorExtractor::GetIvectorDistribution(
   }
 }
 
-
+//inverse 求逆
+//transpose 转置
 IvectorExtractor::IvectorExtractor(
     const IvectorExtractorOptions &opts,
     const FullGmm &fgmm) {
@@ -147,6 +150,7 @@ IvectorExtractor::IvectorExtractor(
 
   // 每个高斯分量 的inv 协方差矩阵, 开始直接来自 inv_var
   // ==> Sigma_inv_[i] 保存了第i个高斯分量的 协方差矩阵的逆矩阵
+  // C x F x F
   for (int32 i = 0; i < fgmm.NumGauss(); i++) {
     const SpMatrix<BaseFloat> &inv_var = fgmm.inv_covars()[i];
     Sigma_inv_[i].Resize(inv_var.NumRows());
@@ -166,6 +170,8 @@ IvectorExtractor::IvectorExtractor(
   prior_offset_ = 100.0; // hardwired for now.  Must be nonzero.
   gmm_means.Scale(1.0 / prior_offset_);
 
+  // m_s = m_0 + T * w_ij + \Sigma
+  // T --- M_  --- CxFxR
   // 每个高斯分量一个 Matrix, 是low rank (减秩变换矩阵)的 降维变换矩阵
   M_.resize(num_gauss);
   // 保存每个高斯分量的
@@ -214,6 +220,8 @@ void IvectorExtractor::ComputeDerivedVars() {
     // the gconsts don't contain any weight-related terms.
   }
 
+  // U_ 是个矩阵, 实际上保存的是多个矩阵, 每行都保存的一个对称阵的下对角线元素.
+  // U_ = C x ivec_dim x ivec_dim
   // 保存 U_i = M_i^T \Sigma_i^{-1}
   U_.Resize(NumGauss(), IvectorDim() * (IvectorDim() + 1) / 2);
 
@@ -239,21 +247,27 @@ void IvectorExtractor::ComputeDerivedVars() {
 
 void IvectorExtractor::ComputeDerivedVars(int32 i) {
 
-  //计算每个分量的 推导统计量  100 维度
+  // R x R
   SpMatrix<double> temp_U(IvectorDim());
 
-  //  100x100 = 100x91 x 91x91 x 91x100
-  // temp_U = M_i^T Sigma_i^{-1} M_i
+  // temp_U += M_i^T Sigma_i^{-1} M_i
+  //    RxF * FxF * FxR  ==> RxR,
   temp_U.AddMat2Sp(1.0, M_[i], kTrans, Sigma_inv_[i], 0.0);
   // 拷贝数据, 长度为 IvectorDim() * (IvectorDim() + 1) / 2
   SubVector<double> temp_U_vec(temp_U.Data(), IvectorDim() * (IvectorDim() + 1) / 2);
 
-  //为什么只保留这些数据呢? 每个高斯分量对应的U_i 到底保存的是是什么
+  ///在乘以0阶统计量, 最终是ivector的协方差对角阵 L
   U_.Row(i).CopyFromVec(temp_U_vec);
 
 
+  // 保存的是计算ivector的部分,
+  // Sigma_inv_M_ = Sigma_inv_ * M_
+  // CxFxR        = CxFxF      * F*R
   Sigma_inv_M_[i].Resize(FeatDim(), IvectorDim());
-//  this <-- beta*this + alpha*SpA*B.
+
+
+  //  this <-- beta*this + alpha*SpA*B.
+  ///在乘以1阶统计量, 就得到 <w_ij | O_i>
   Sigma_inv_M_[i].AddSpMat(1.0, Sigma_inv_[i], M_[i], kNoTrans, 0.0);
 }
 
@@ -305,16 +319,23 @@ void IvectorExtractor::GetIvectorDistMean(
     double gamma = utt_stats.gamma_(i);
 
     if (gamma != 0.0) {
-        // 1 阶统计量 Fc'
+      /// L * Sigma_inv_M_ 乘以1阶统计量 得到 ivector
+      // 1 阶统计量 Fc'
       SubVector<double> x(utt_stats.X_, i); // == \gamma(i) \m_i
       // next line: a += \gamma_i \M_i^T \Sigma_i^{-1} \m_i
       // Sigma_inv_M_ = M_i^T Sigma_i^{-1}
       // utt_stats.X_ = gamma_i m_i = Nc Xt
+      /// linear 再左成 L 就得到 ivector
       linear->AddMatVec(1.0, Sigma_inv_M_[i], kTrans, x, 1.0);
     }
   }
+
+
   SubVector<double> q_vec(quadratic->Data(), IvectorDim()*(IvectorDim()+1)/2);
+
+  /// I + U_乘以0阶统计量, 得到ivector协方差 L
   // q_vec = U_^T Nc
+  /// 再左+I, 就得到L了.
   q_vec.AddMatVec(1.0, U_, kTrans, utt_stats.gamma_, 1.0);
 }
 
@@ -843,16 +864,22 @@ void IvectorExtractor::Read(std::istream &is, bool binary) {
   ComputeDerivedVars();
 }
 
-
+/**
+ * @brief IvectorExtractorUtteranceStats::AccStats
+ * @param feats
+ * @param post
+ * 累计计算 0 1 2 阶统计量
+ */
 void IvectorExtractorUtteranceStats::AccStats(
     const MatrixBase<BaseFloat> &feats,
     const Posterior &post) {
 
   typedef std::vector<std::pair<int32, BaseFloat> > VecType;
 
-  int32 num_frames = feats.NumRows(),
-      num_gauss = X_.NumRows(),
-      feat_dim = feats.NumCols();
+  int32
+      num_frames = feats.NumRows(),   //帧总数, 计算对齐数量
+      num_gauss = X_.NumRows(),      //1阶统计量 Fc
+      feat_dim = feats.NumCols();    //特征维度 F
 
   KALDI_ASSERT(X_.NumCols() == feat_dim);
   KALDI_ASSERT(feats.NumRows() == static_cast<int32>(post.size()));
@@ -863,7 +890,9 @@ void IvectorExtractorUtteranceStats::AccStats(
   //foreach frame
   for (int32 t = 0; t < num_frames; t++) {
 
+    //特征 O_t
     SubVector<BaseFloat> frame(feats, t);
+    //当前帧 对齐UBM分量 后验概率
     const VecType &this_post(post[t]);
 
     if (update_variance) {
@@ -874,6 +903,7 @@ void IvectorExtractorUtteranceStats::AccStats(
     for (VecType::const_iterator iter = this_post.begin();
          iter != this_post.end(); ++iter) {
 
+      // gauss index
       int32 i = iter->first; // Gaussian index.
       KALDI_ASSERT(i >= 0 && i < num_gauss &&
                    "Out-of-range Gaussian (mismatched posteriors?)");

@@ -46,19 +46,23 @@ class CovarianceStats {
     within_covar->AddSp(-1.0, between_covar_);
     within_covar->Scale(1.0 / num_utt_);
   }
+
   void AccStats(const Matrix<double> &utts_of_this_spk) {
     int32 num_utts = utts_of_this_spk.NumRows();
-    //cov = SUM{(x-u)^T (x-u)}
+    //total_covar = SUM_N{ (w_i - u)(w_i - u)^T}
+    //            = SUM_C{ SUM_Nc{(w_i - u)(w_i - u)^T} }
     tot_covar_.AddMat2(1.0, utts_of_this_spk, kTrans, 1.0);
-    // Dim = ivector.dim.
-    // spk_average = 1/N_l * SUM{(x-u)}
+
     Vector<double> spk_average(Dim());
+    // spk_average = 1/Nc * SUM_Nc{ (wi - u) } = 1/Nc * SUM_Nc{ (u_c - u)}
+    //  ---> quantion to the (u_c - u)
     spk_average.AddRowSumMat(1.0 / num_utts, utts_of_this_spk);
-    //Sb = 1/N SUM{ N_l * (x-u) (x-u)^T }
+    // Sb = SUM_C { Nc * (u_c - u)(u_c - u)^T}
     between_covar_.AddVec2(num_utts, spk_average);
     num_utt_ += num_utts;
     num_spk_ += 1;
   }
+
   /// Will return Empty() if the within-class covariance matrix would be zero.
   bool SingularTotCovar() { return (num_utt_ < Dim()); }
   bool Empty() { return (num_utt_ - num_spk_ == 0); }
@@ -95,29 +99,24 @@ void ComputeNormalizingTransform(const SpMatrix<Real> &covar,
   proj->CopyFromTp(C, kNoTrans);  // set "proj" to C^{-1}.
 }
 
-void ComputeLdaTransform(
+void ComputeBccAndWcc(
     const std::map<std::string, Vector<BaseFloat> *> &utt2ivector,
-    const std::map<std::string, std::vector<std::string> > &spk2utt,
-    BaseFloat total_covariance_factor,
-    MatrixBase<BaseFloat> *lda_out) {
-
+    const std::map<std::string, std::vector<std::string> > &cluster2utt,
+    SpMatrix<double> *Bcc,
+    SpMatrix<double> *Wcc) {
   KALDI_ASSERT(!utt2ivector.empty());
-  // 线性变换 lda_out [lda-dim][ivector-dim]
   int32 lda_dim = lda_out->NumRows(), dim = lda_out->NumCols();
-
   KALDI_ASSERT(dim == utt2ivector.begin()->second->Dim());
   KALDI_ASSERT(lda_dim > 0 && lda_dim <= dim);
 
   CovarianceStats stats(dim);
 
-  //Classes
   std::map<std::string, std::vector<std::string> >::const_iterator iter;
-  for (iter = spk2utt.begin(); iter != spk2utt.end(); ++iter) {
+  for (iter = cluster2utt.begin(); iter != cluster2utt.end(); ++iter) {
     const std::vector<std::string> &uttlist = iter->second;
     KALDI_ASSERT(!uttlist.empty());
 
     int32 N = uttlist.size(); // number of utterances.
-    // spk iter 's all ivectors
     Matrix<double> utts_of_this_spk(N, dim);
     for (int32 n = 0; n < N; n++) {
       std::string utt = uttlist[n];
@@ -125,8 +124,6 @@ void ComputeLdaTransform(
       utts_of_this_spk.Row(n).CopyFromVec(
           *(utt2ivector.find(utt)->second));
     }
-
-    //add spk iter's ivectors to stats
     stats.AccStats(utts_of_this_spk);
   }
 
@@ -140,65 +137,27 @@ void ComputeLdaTransform(
   stats.GetTotalCovar(&total_covar);
   SpMatrix<double> within_covar;
   stats.GetWithinCovar(&within_covar);
-
-
-  //total_covariance_factor = 0.0
-  SpMatrix<double> mat_to_normalize(dim);
-  mat_to_normalize.AddSp(total_covariance_factor, total_covar);
-  mat_to_normalize.AddSp(1.0 - total_covariance_factor, within_covar);
-
-  Matrix<double> T(dim, dim);
-  ComputeNormalizingTransform(mat_to_normalize, &T);
+  Wcc->CopyFromSp(within_covar);
 
   SpMatrix<double> between_covar(total_covar);
   between_covar.AddSp(-1.0, within_covar);
-
-  //beta*this  +  1.0 * T * between_covar * T^T
-  SpMatrix<double> between_covar_proj(dim);
-  between_covar_proj.AddMat2Sp(1.0, T, kNoTrans, between_covar, 0.0);
-
-  //特征值特征向量?
-  Matrix<double> U(dim, dim);
-  Vector<double> s(dim);
-  between_covar_proj.Eig(&s, &U);
-  bool sort_on_absolute_value = false; // any negative ones will go last (they
-                                       // shouldn't exist anyway so doesn't
-                                       // really matter)
-  SortSvd(&s, &U, static_cast<Matrix<double>*>(NULL),
-          sort_on_absolute_value);
-
-  KALDI_LOG << "Singular values of between-class covariance after projecting "
-            << "with interpolated [total/within] covariance with a weight of "
-            << total_covariance_factor << " on the total covariance, are: " << s;
-
-  // U^T is the transform that will diagonalize the between-class covariance.
-  // U_part is just the part of U that corresponds to the kept dimensions.
-  SubMatrix<double> U_part(U, 0, dim, 0, lda_dim);
-
-  // We first transform by T and then by U_part^T.  This means T
-  // goes on the right.
-  Matrix<double> temp(lda_dim, dim);
-  temp.AddMatMat(1.0, U_part, kTrans, T, kNoTrans, 0.0);
-  lda_out->CopyFromMat(temp);
+  Bcc->CopyFromSp(between_covar);
 }
 
 void ComputeAndSubtractMean(
     std::map<std::string, Vector<BaseFloat> *> utt2ivector,
     Vector<BaseFloat> *mean_out) {
-
   int32 dim = utt2ivector.begin()->second->Dim();
   size_t num_ivectors = utt2ivector.size();
   Vector<double> mean(dim);
   std::map<std::string, Vector<BaseFloat> *>::iterator iter;
-
-  // mean = sum{1/N * ivector}
   for (iter = utt2ivector.begin(); iter != utt2ivector.end(); ++iter)
     mean.AddVec(1.0 / num_ivectors, *(iter->second));
-
   mean_out->Resize(dim);
-  mean_out->CopyFromVec(mean);
 
-  //ivector - mean
+  // mean_out -- u
+  // utt2ivector -- utt - ivector-u
+  mean_out->CopyFromVec(mean);
   for (iter = utt2ivector.begin(); iter != utt2ivector.end(); ++iter)
     iter->second->AddVec(-1.0, *mean_out);
 }
@@ -212,53 +171,49 @@ int main(int argc, char *argv[]) {
   typedef kaldi::int32 int32;
   try {
     const char *usage =
-        "Compute an LDA matrix for iVector system.  Reads in iVectors per utterance,\n"
-        "and an utt2spk file which it uses to help work out the within-speaker and\n"
-        "between-speaker covariance matrices.  Outputs an LDA projection to a\n"
-        "specified dimension.  By default it will normalize so that the projected\n"
+        "Compute the Cluster Sbcc and Swcc covariances.This can be add to the LDA Sbc,\n"
+        "the file utt2cluster which use to work out the within cluster and between cluster\n"
+        "covariance matrices.  \n"
+        "and Outputs the Sbcc Swcc , then Combine with the LDA\n"
+        "But LDA by default will normalize so that the projected\n"
         "within-class covariance is unit, but if you set --normalize-total-covariance\n"
         "to true, it will normalize the total covariance.\n"
-        "Note: the transform we produce is actually an affine transform which will\n"
-        "also set the global mean to zero.\n"
-        "\n"
-        "Usage:  ivector-compute-lda [options] <ivector-rspecifier> <utt2spk-rspecifier> "
+        "So there is a question how to compute a curect Covariance"
+        "Usage:  ivector-cluster-cov [options] <ivector-rspecifier> <utt2clustere-rspecifier> "
         "<lda-matrix-out>\n"
         "e.g.: \n"
         " ivector-compute-lda ark:ivectors.ark ark:utt2spk lda.mat\n";
 
     ParseOptions po(usage);
 
-    int32 lda_dim = 100; // Dimension we reduce to
     BaseFloat total_covariance_factor = 0.0;
-    bool binary = true;
+    bool binary = false;
 
-    po.Register("dim", &lda_dim, "Dimension we keep with the LDA transform");
     po.Register("total-covariance-factor", &total_covariance_factor,
                 "If this is 0.0 we normalize to make the within-class covariance "
                 "unit; if 1.0, the total covariance; if between, we normalize "
                 "an interpolated matrix.");
-    po.Register("binary", &binary, "Write output in binary mode");
-
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 3) {
+    if (po.NumArgs() != 4) {
       po.PrintUsage();
       exit(1);
     }
 
-    std::string ivector_rspecifier = po.GetArg(1),
-        utt2spk_rspecifier = po.GetArg(2),
-        lda_wxfilename = po.GetArg(3);
+    std::string
+        ivector_rspecifier = po.GetArg(1),
+        utt2cluster_rspecifier = po.GetArg(2),
+        bcc_wxfilename = po.GetArg(3),
+        wcc_wxfilename = po.GetArg(4);
 
     int32 num_done = 0, num_err = 0, dim = 0;
 
     SequentialBaseFloatVectorReader ivector_reader(ivector_rspecifier);
-    RandomAccessTokenReader utt2spk_reader(utt2spk_rspecifier);
+    RandomAccessTokenReader utt2cluster_reader(utt2cluster_rspecifier);
 
     std::map<std::string, Vector<BaseFloat> *> utt2ivector;
-    std::map<std::string, std::vector<std::string> > spk2utt;
+    std::map<std::string, std::vector<std::string> > cluster2utt;
 
-    // Compute the spk2utt utt2ivector, get spk class's ivectors .
     for (; !ivector_reader.Done(); ivector_reader.Next()) {
       std::string utt = ivector_reader.Key();
       const Vector<BaseFloat> &ivector = ivector_reader.Value();
@@ -268,20 +223,20 @@ int main(int argc, char *argv[]) {
         num_err++;
         continue;
       }
-      if (!utt2spk_reader.HasKey(utt)) {
+      if (!utt2cluster_reader.HasKey(utt)) {
         KALDI_WARN << "utt2spk has no entry for utterance " << utt
                    << ", skipping it.";
         num_err++;
         continue;
       }
-      std::string spk = utt2spk_reader.Value(utt);
+      std::string cluster = utt2cluster_reader.Value(utt);
       utt2ivector[utt] = new Vector<BaseFloat>(ivector);
       if (dim == 0) {
         dim = ivector.Dim();
       } else {
         KALDI_ASSERT(dim == ivector.Dim() && "iVector dimension mismatch");
       }
-      spk2utt[spk].push_back(utt);
+      cluster2utt[cluster].push_back(utt);
       num_done++;
     }
 
@@ -294,35 +249,22 @@ int main(int argc, char *argv[]) {
       KALDI_LOG << "Computing within-class covariance.";
     }
 
-
-    // 计算 然后 减去均值.
     Vector<BaseFloat> mean;
     ComputeAndSubtractMean(utt2ivector, &mean);
     KALDI_LOG << "2-norm of iVector mean is " << mean.Norm(2.0);
 
 
-    //LDA Mat [LDA-DIM][IVECTOR+1]
-    Matrix<BaseFloat> lda_mat(lda_dim, dim + 1); // LDA matrix without the offset term.
-    //                                        0-LDA-DIM row, and 0-dim cols
-    SubMatrix<BaseFloat> linear_part(lda_mat, 0, lda_dim, 0, dim);
+    SpMatrix<double> Bcc(dim), Wcc(dim);
+    ComputeBccAndWcc(utt2ivector,
+                     cluster2utt,
+                     &Bcc,
+                     &Wcc);
 
-    ComputeLdaTransform(utt2ivector,
-                        spk2utt,
-                        total_covariance_factor,
-                        &linear_part);
 
-    Vector<BaseFloat> offset(lda_dim);
+    WriteKaldiObject(Bcc, bcc_wxfilename, binary);
+    WriteKaldiObject(Wcc, wcc_wxfilename, binary);
 
-    offset.AddMatVec(-1.0, linear_part, kNoTrans, mean, 0.0);
-    lda_mat.CopyColFromVec(offset, dim); // add mean-offset to transform
 
-    KALDI_VLOG(2) << "2-norm of transformed iVector mean is "
-                  << offset.Norm(2.0);
-
-    WriteKaldiObject(lda_mat, lda_wxfilename, binary);
-
-    KALDI_LOG << "Wrote LDA transform to "
-              << PrintableWxfilename(lda_wxfilename);
 
     std::map<std::string, Vector<BaseFloat> *>::iterator iter;
     for (iter = utt2ivector.begin(); iter != utt2ivector.end(); ++iter)
