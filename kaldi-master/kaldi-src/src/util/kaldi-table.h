@@ -217,7 +217,7 @@ struct  RspecifierOptions {
 };
 
 enum RspecifierType  {
-  kNoRspecifier,      //不是一个可读取的文件
+  kNoRspecifier,      //不是一个序列读取的文件
   kArchiveRspecifier,
   kScriptRspecifier
 };

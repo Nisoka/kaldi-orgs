@@ -66,12 +66,17 @@ int main(int argc, char *argv[]) {
         posteriors_rspecifier = po.GetArg(3),
         map_am_wspecifier = po.GetArg(4);
 
+    //GMM 需要更新的参数 标记
     GmmFlagsType update_flags = StringToGmmFlags(update_flags_str);
 
+    // 帧对齐的后验概率?? 这个对于一个GMM 是什么意义呢?
     RandomAccessPosteriorReader posteriors_reader(posteriors_rspecifier);
+    // MAP 自适应后得到的 DiagGMM.
     MapAmDiagGmmWriter map_am_writer(map_am_wspecifier);
 
+    // 所有tid GMM.
     AmDiagGmm am_gmm;
+    // TransitionModel 包含 转移Topology, 和 所有 tid的GMM.
     TransitionModel trans_model;
     {
       bool binary;
@@ -164,7 +169,9 @@ int main(int argc, char *argv[]) {
         std::string utt = feature_reader.Key();
         AmDiagGmm copy_am_gmm;
         copy_am_gmm.CopyFromAmDiagGmm(am_gmm);
+        // 累计统计量?
         AccumAmDiagGmm map_accs;
+        // 按照AmDiagGmm中每个GMM 保存累计统计量.
         map_accs.Init(am_gmm, update_flags);
         map_accs.SetZero(update_flags);
 
@@ -186,11 +193,15 @@ int main(int argc, char *argv[]) {
         num_done++;
         BaseFloat file_like = 0.0, file_t = 0.0;
         Posterior pdf_posterior;
+        // 将 tid 概率 转化为对应 pdfid.
         ConvertPosteriorToPdfs(trans_model, posterior, &pdf_posterior);
+        //frames
         for ( size_t i = 0; i < posterior.size(); i++ ) {
+          // frame 可能的所有 pdf, 以及对应 后验概率, 即当前帧 由 该pdf激发的概率
           for ( size_t j = 0; j < pdf_posterior[i].size(); j++ ) {
             int32 pdf_id = pdf_posterior[i][j].first;
             BaseFloat prob = pdf_posterior[i][j].second;
+            // 当前帧 对 pdf-id 的统计量
             file_like += map_accs.AccumulateForGmm(copy_am_gmm,feats.Row(i),
                                                    pdf_id, prob);
             file_t += prob;
@@ -206,6 +217,8 @@ int main(int argc, char *argv[]) {
 
         // MAP
         BaseFloat utt_objf_change = 0.0, utt_frames = 0.0;
+        // map_accs: 统计量
+        // copy_am_gmm: 需要更新的GMM
         MapAmDiagGmmUpdate(map_config, map_accs, update_flags, &copy_am_gmm,
                            &utt_objf_change, &utt_frames);
         KALDI_LOG << "For utterance " << utt << ", objective function change "

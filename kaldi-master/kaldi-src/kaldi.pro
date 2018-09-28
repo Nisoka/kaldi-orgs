@@ -851,7 +851,11 @@ SOURCES += main.cpp \
     src/util/stl-utils-test.cc \
     src/util/text-utils-test.cc \
     src/util/text-utils.cc \
-    main.cpp
+    main.cpp \
+    src/bin/est-pca-n-first-eigenvectors.cc \
+    src/bin/subspace-of-covs.cc \
+    src/bin/combine-subspace.cc \
+    src/bin/est-fastdopca.cc
 
 HEADERS += \
     src/base/io-funcs-inl.h \

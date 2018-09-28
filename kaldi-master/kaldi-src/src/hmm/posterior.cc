@@ -340,19 +340,24 @@ void ConvertPosteriorToPdfs(const TransitionModel &tmodel,
   // frames
   for (size_t i = 0; i < post_out->size(); i++) {
     // 每个frame对应的后验概率
-    unordered_map<int32, BaseFloat> pdf_to_post;
+    unordered_map<int32, BaseFloat> pdf_to_post;.
 
+    // 该 FRAME 的 posterior vector
     for (size_t j = 0; j < post_in[i].size(); j++) {
       int32 tid = post_in[i][j].first,
           pdf_id = tmodel.TransitionIdToPdf(tid);
       BaseFloat post = post_in[i][j].second;
 
+      // 每一帧后验概率, 转化为 pdf 概率累计统计.
       if (pdf_to_post.count(pdf_id) == 0)
         pdf_to_post[pdf_id] = post;
       else
         pdf_to_post[pdf_id] += post;
     }
+    // 当前帧 pdf 概率分布, tid 是确定每个转移id , pdf 是绑定的tid 共享的GMM.
     (*post_out)[i].reserve(pdf_to_post.size());
+
+    // 最终只保存每帧 <pdf, prob> st prob > 0.
     for (unordered_map<int32, BaseFloat>::const_iterator iter =
              pdf_to_post.begin(); iter != pdf_to_post.end(); ++iter) {
       if (iter->second != 0.0)

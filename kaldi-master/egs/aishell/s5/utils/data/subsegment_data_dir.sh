@@ -50,8 +50,8 @@ fi
 
 export LC_ALL=C
 
-srcdir=$1
-subsegments=$2
+srcdir=$1                       # src data/segments wav.scp ...
+subsegments=$2                  # segments file
 
 add_subsegment_text=false
 if [ $# -eq 4 ]; then
@@ -65,7 +65,7 @@ if [ $# -eq 4 ]; then
   fi
 
 else
-  dir=$3
+  dir=$3                        # out data --- segment the src data to segment utts.
 fi
 
 for f in "$subsegments" "$srcdir/utt2spk"; do
@@ -75,9 +75,11 @@ for f in "$subsegments" "$srcdir/utt2spk"; do
   fi
 done
 
+
 if ! mkdir -p $dir; then
   echo "$0: failed to create directory $dir"
 fi
+
 
 if $add_subsegment_text; then
   if ! cmp <(awk '{print $1}' <$subsegments)  <(awk '{print $1}' <$new_text); then
@@ -86,7 +88,10 @@ if $add_subsegment_text; then
   fi
 fi
 
+
+
 # create the utt2spk in $dir
+# check segments file
 if ! awk '{if (NF != 4 || !($4 > $3)) { print("Bad line: " $0); exit(1) } }' <$subsegments; then
   echo "$0: failed checking subsegments file $subsegments"
   exit 1
@@ -116,11 +121,14 @@ fi
 
 if [ -f $srcdir/segments ]; then
   # we have to map the segments file.
-  # What's going on below is a little subtle.
+    # What's going on below is a little subtle. 如下的方法有些巧妙.
+    
   # $srcdir/segments has lines like: <old-utt-id> <recording-id> <start-time> <end-time>
-  # and $subsegments has lines like: <new-utt-id> <old-utt-id> <start-time> <end-time>
+    # and $subsegments has lines like: <new-utt-id> <old-utt-id> <start-time> <end-time>
+    
   # The apply-map command replaces <old-utt-id> [the 2nd field of $subsegments]
-  # with <recording-id> <start-time> <end-time>.
+    # with <recording-id> <start-time> <end-time>.
+    
   # so after that first command we have lines like
   # <new-utt-id> <recording-id> <start-time-of-old-utt-within-recording> <end-time-old-utt-within-recording> \
   #   <start-time-of-new-utt-within-old-utt> <end-time-of-new-utt-within-old-utt>

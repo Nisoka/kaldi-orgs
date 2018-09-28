@@ -1,0 +1,29 @@
+digraph GMMSVM{
+    // Inter-dataset variablity compensation (IDVC)
+    rankdir = TB; //指定绘图的方向 (LR从左到右绘制) //定义竖直节点
+    node[shape=Mrecord, width=.1, height=.1];
+
+    Feature[label="MFCC 13 deltas"]
+    clean_data -> train[label="Balance data"]
+
+    // stage 1
+    train -> UBM[label="UBM Merge or UBM Single"]
+
+
+    // stage 2
+    train ->  train_supervectors[label="UBM Map"]
+    train_supervectors -> train_processed_supervectors[label="Preprocess LDA and length normal "]
+
+    // stage 3
+    test -> test_supervectors[label="UBM Map"]
+    test_supervectors -> test_processed_supervectors[label="Preprocess"]
+
+
+    // stage 4
+    train_processed_supervectors -> SVM[label="SVM with linear kernel or other kenerls?"]
+    SVM[label="SVM | linear kernel(becasue the lda) | other kenerls"]
+    test_processed_supervectors -> result[label="SVM Classify"]
+    result[label="utt result | class1 score | class2 score"]
+    
+    
+}

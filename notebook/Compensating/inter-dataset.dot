@@ -1,0 +1,42 @@
+digraph IDVC{
+    // Inter-dataset variablity compensation (IDVC)
+    rankdir = LR; //指定绘图的方向 (LR从左到右绘制) //定义竖直节点
+    node[shape=Mrecord, width=.1, height=.1];
+
+    IVExtractor -> TrainDataIvectors
+
+    TrainDataIvectors -> Partion
+    Partion -> subsets[label="at least 2 parts"]
+    subsets[label=" <s1> subset ivectors 1 | <s2> subset ivectors 2 | ..."]
+
+    subsets:s1 -> PLDA_1
+    subsets:s2 -> PLDA_2
+
+    PLDA_1 -> s1_plda_parameters -> JoinSubSpace
+    PLDA_2 -> s2_plda_parameters -> JoinSubSpace
+
+    s1_plda_parameters[label="u, B, W for s1"]
+    s2_plda_parameters[label="u, B, W for s2"]
+
+    TrainDataIvectors -> newTrainIvectors[label="remove subspace"]
+    JoinSubSpace -> newTrainIvectors
+
+    newTrainIvectors -> PLDA[label="Train a PLDA"]
+
+    testIvectors -> newTestIvectors[label="remove subspace"]
+    JoinSubSpace -> newTestIvectors
+
+    newTestIvectors -> PLDA[label="PLDA Scores"]
+
+
+    question -> subspace1[label="what a subspace like? "]
+    // subspace is a set of vector, R^N's subspace is m x vector[dim = n]
+    question -> subspace2[label="how to get a subspace"]
+    
+    question -> subspace3[label="vector how to remove subspace"]
+    // PCA find the best direct-vector, then the ivector find the projected-iv on the direct-vec,
+    // then the ivector - projected-iv
+
+    SubSpaceS -> PCA[label="PCA compute"]
+    PCA -> eigenvectors[label="N best"]
+}

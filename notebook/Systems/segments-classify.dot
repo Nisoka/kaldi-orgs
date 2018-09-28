@@ -1,0 +1,33 @@
+digraph segments{
+    // Inter-dataset variablity compensation (IDVC)
+    rankdir = TB; //指定绘图的方向 (LR从左到右绘制) //定义竖直节点
+    node[shape=Mrecord, width=.1, height=.1];
+
+    // TrainData 可以分成segment 之后提取ivector, 然后训练Classifier
+    // 或者直接训练Classifier
+    // TestData  分成多个segment(通过vad检测截取为segment), 每个提取ivector, 进行classify,
+    // 然后得分 按segment取平均, 得到 result, 会不会效果好一些?
+    // 因为要进行Segment分段, 好像不能使用BNF? 或者只能自己提取BNF,来使用VAD检测方法进行segment 分割,
+    // 
+    Feature[label="MFCC VAD SEGEMTNS"]
+    clean_data -> train[label="Balance data, Augment data, WILL BIG"]
+
+    // stage 1
+    train -> BNFXSystemDNN[label="LSTM + embeding layers + softmax"]
+
+    // stage 2
+    train -> train_xvectors[label="BNFXSystemDNN embedings Map"]
+    train_xvectors -> train_processed_xvectors[label="Preprocess LDA and length normal"]
+
+    // stage 3
+    test -> test_xvectors[label="BNFXSystemDNN embedings Map"]
+    test_xvectors -> test_processed_xvectors[label="Preprocess"]
+
+    // Classify
+    train_processed_xvectors -> SVM[label="SVM with linear kernel or other kenerls?"]
+    SVM[label="SVM | linear kernel(becasue the lda) | other kenerls"]
+
+
+    test_processed_xvectors -> result[label="SVM Classify"]
+    result[label="utt result | class1 score | class2 score"]
+}

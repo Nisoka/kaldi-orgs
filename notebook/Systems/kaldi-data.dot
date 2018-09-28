@@ -1,0 +1,13 @@
+digraph kaldidata{
+    // Inter-dataset variablity compensation (IDVC)
+    rankdir = TB; //指定绘图的方向 (LR从左到右绘制) //定义竖直节点
+    node[shape=Mrecord, width=.1, height=.1];
+
+    WAVDATA -> wavscp[label="easy wavname wavpath"]
+    WAVDATA -> utt2spk[label="easy wavname spker(spkerinfo)"]
+    WAVDATA -> utt2lang[label="easy wavname lang(langinfo)"]
+    wavscp -> featsscp[label="make mfcc[pitch] | make BNF"]
+    featsscp -> utt2num_frames[label="copy feats"]
+    utt2num_frames -> rec2dur[label="* frame shift"]
+    
+}

@@ -41,9 +41,13 @@ AccumAmDiagGmm::~AccumAmDiagGmm() {
 void AccumAmDiagGmm::Init(const AmDiagGmm &model,
                               GmmFlagsType flags) {
   DeletePointers(&gmm_accumulators_);  // in case was non-empty when called.
+  // 模型总共pdf个数, 每个tid 一个 AccumDiagGmm 统计量.
   gmm_accumulators_.resize(model.NumPdfs(), NULL);
+
   for (int32 i = 0; i < model.NumPdfs(); i++) {
+      // 保存 gauss 数量, 和更新标记.
     gmm_accumulators_[i] = new AccumDiagGmm();
+    // GetPdf(i)  获得第i个GMM.
     gmm_accumulators_[i]->Resize(model.GetPdf(i), flags);
   }
 }
@@ -65,11 +69,19 @@ void AccumAmDiagGmm::SetZero(GmmFlagsType flags) {
     gmm_accumulators_[i]->SetZero(flags);
   }
 }
-
+/**
+ * @brief AccumAmDiagGmm::AccumulateForGmm
+ * @param model   所有 pdf GMM( N个Gauss )
+ * @param data    某帧 MFCC
+ * @param gmm_index   当前更新GMM
+ * @param weight      当前更新GMM的后验概率
+ * @return
+ */
 BaseFloat AccumAmDiagGmm::AccumulateForGmm(
     const AmDiagGmm &model, const VectorBase<BaseFloat> &data,
     int32 gmm_index, BaseFloat weight) {
   KALDI_ASSERT(static_cast<size_t>(gmm_index) < gmm_accumulators_.size());
+  // 某个GMM的更新统计量.
   BaseFloat log_like =
       gmm_accumulators_[gmm_index]->AccumulateFromDiag(model.GetPdf(gmm_index),
                                                        data, weight);
@@ -234,6 +246,7 @@ void MleAmDiagGmmUpdate (const MleDiagGmmOptions &config,
 }
 
 
+// Max a posterior 最大后验估计更新 GMM
 void MapAmDiagGmmUpdate (const MapDiagGmmOptions &config,
                          const AccumAmDiagGmm &am_diag_gmm_acc,
                          GmmFlagsType flags,
@@ -244,11 +257,15 @@ void MapAmDiagGmmUpdate (const MapDiagGmmOptions &config,
                am_diag_gmm_acc.NumAccs() == am_gmm->NumPdfs());
   if (obj_change_out != NULL) *obj_change_out = 0.0;
   if (count_out != NULL) *count_out = 0.0;
+
   BaseFloat tmp_obj_change, tmp_count;
   BaseFloat *p_obj = (obj_change_out != NULL) ? &tmp_obj_change : NULL,
       *p_count   = (count_out != NULL) ? &tmp_count : NULL;
 
+  // am_diag_gmm_acc 所有GMM的 更新统计量( GMM内每个gauss 的 a(k), u(k x dim), v(k x dimxdim))
+  // 更新每个 GMM.
   for (int32 i = 0; i < am_diag_gmm_acc.NumAccs(); i++) {
+    //更新 GMM i
     MapDiagGmmUpdate(config, am_diag_gmm_acc.GetAcc(i), flags,
                      &(am_gmm->GetPdf(i)), p_obj, p_count);
 

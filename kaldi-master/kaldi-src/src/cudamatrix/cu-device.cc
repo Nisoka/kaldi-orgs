@@ -21,7 +21,7 @@
 // limitations under the License.
 
 
-
+#define  HAVE_CUDA  1
 #if HAVE_CUDA == 1
 
 #include <cublas_v2.h>

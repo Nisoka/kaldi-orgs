@@ -12,6 +12,16 @@ use warnings; #sed replacement for -w perl parameter
 # ../steps/resegment_data.sh), followed by ali-to-phones --per-frame=true and
 # then mapping phones to these classes 0, 1 and 2.
 #
+# 算法如下:
+# 1 找到连续的12 vad标记(非静音), 作为一个单独的连续序列, 这就叫一个原始segment
+# 2 当多个segments间的静音比率少于 $silence_proportion时, 在每个segment左右都增加一个silence帧.
+# 3 合并多个segments:
+#   计算一个segments间的边界列表, 然后根据静音帧数量排序, 然后按最小顺序排序合并.
+# 4 分割那些过长的 segments
+# 5 移除那些无效的音频帧.
+#   最终每个音频utt 会被分割为多个 segment, 得到如下的文件, sw0-20348-A
+#   sw0-20348-A-00124-00298 sw0-20348-A 1.24 2.98
+
 # The algorithm is as follows:
 #  (1) Find contiguous sequences of classes 1 or 2 (i.e. speech and/or noise), with e.g.
 #      "1 1 1 2 2" counted as a single contiguous sequence.  Each such sequence is an

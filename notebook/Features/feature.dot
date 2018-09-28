@@ -1,0 +1,10 @@
+digraph featureProcessing{
+    rankdir = LR; //指定绘图的方向 (LR从左到右绘制) //定义竖直节点
+    node[shape=Mrecord, width=.1, height=.1];
+    
+    dataPerturb -> perturbMethods
+    perturbMethods[label="speed 5way | augment | ..."]
+    perturbMethods -> MFCC
+    perturbMethods -> BNF
+    
+}

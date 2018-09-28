@@ -122,8 +122,11 @@ void AccumDiagGmm::Resize(int32 num_comp, int32 dim, GmmFlagsType flags) {
 void AccumDiagGmm::SetZero(GmmFlagsType flags) {
   if (flags & ~flags_)
     KALDI_ERR << "Flags in argument do not match the active accumulators";
+  // occupancy_ 占有率, r_jk
   if (flags & kGmmWeights) occupancy_.SetZero();
+  // mean_accumulator_ 均值统计量
   if (flags & kGmmMeans) mean_accumulator_.SetZero();
+  // variance_accumulator_ 协方差统计量
   if (flags & kGmmVariances) variance_accumulator_.SetZero();
 }
 
@@ -198,15 +201,17 @@ void AccumDiagGmm::AccumulateFromPosteriors(
   if (flags_ & kGmmMeans)
     KALDI_ASSERT(static_cast<int32>(data.Dim()) == Dim());
   KALDI_ASSERT(static_cast<int32>(posteriors.Dim()) == NumGauss());
+
   Vector<double> post_d(posteriors);  // Copy with type-conversion
 
-  // 响应度  post_d 就是响应度 sum_n{r_jk}  形成每个分量的响应度向量
+  // 响应度  post_d 就是响应度 r_jk  形成每个分量的响应度向量
   occupancy_.AddVec(1.0, post_d);
 
   if (flags_ & kGmmMeans) {
-      // 计算mean 更新式 分子 mean_k = sum_n{post_k * data}
+    // 计算mean 更新式 分子 mean_k = sum_N{r_jk * data}/ sum_N{r_jk}
     Vector<double> data_d(data);  // Copy with type-conversion
     mean_accumulator_.AddVecVec(1.0, post_d, data_d);
+
     // 计算variance 更新式 分子 variance_k = sum_n{post_k * (data - mean)^2}
     // 但是这里没有 data-mean的操作 ??
     if (flags_ & kGmmVariances) {
@@ -217,9 +222,9 @@ void AccumDiagGmm::AccumulateFromPosteriors(
 }
 /**
  * @brief AccumDiagGmm::AccumulateFromDiag
- * @param gmm
- * @param data
- * @param frame_posterior
+ * @param gmm   某个GMM.
+ * @param data   某帧MFCC
+ * @param frame_posterior   当前GMM的后仰概率.
  * @return
  */
 BaseFloat AccumDiagGmm::AccumulateFromDiag(const DiagGmm &gmm,
@@ -229,15 +234,17 @@ BaseFloat AccumDiagGmm::AccumulateFromDiag(const DiagGmm &gmm,
   KALDI_ASSERT(gmm.Dim() == Dim());
   KALDI_ASSERT(static_cast<int32>(data.Dim()) == Dim());
 
-  //每个Gauss_k分量的 后验概率
+  // 每个 Gauss_k分量的后验概率, 即 分量响应度 r_jk
   Vector<BaseFloat> posteriors(NumGauss());
 
-  // 每个 Gauss_k分量的后验概率,
+  // 每个 Gauss_k分量的后验概率, 即 分量响应度 r_jk
   BaseFloat log_like = gmm.ComponentPosteriors(data, &posteriors);
-  // 帧权重, 无用 一般就是1
+  // 帧 对于当年前GMM的后验概率, 作为更新多个GMM的权重.
   posteriors.Scale(frame_posterior);
 
-  // EM 算法 更新 a_k u_k  delta_k 公式 的一些累计统计量
+  // data : MFCC
+  // posteriors: 占有率r_jk 第j帧 对于GMM中第k分量的响应度.
+  // EM 算法 更新GMM中的 权重 a_k, 均值 u_k, 协方差矩阵 delta_k 公式 的一些累计统计量
   AccumulateFromPosteriors(data, posteriors);
   return log_like;
 }
@@ -297,6 +304,12 @@ AccumDiagGmm::AccumDiagGmm(const AccumDiagGmm &other)
       mean_accumulator_(other.mean_accumulator_),
       variance_accumulator_(other.variance_accumulator_) {}
 
+/**
+ * @brief MlObjective  GMM 对 diag_gmm_acc统计量的似然值.
+ * @param gmm
+ * @param diag_gmm_acc
+ * @return
+ */
 BaseFloat MlObjective(const DiagGmm &gmm,
                       const AccumDiagGmm &diag_gmm_acc) {
   GmmFlagsType acc_flags = diag_gmm_acc.Flags();
@@ -308,7 +321,7 @@ BaseFloat MlObjective(const DiagGmm &gmm,
   Matrix<BaseFloat> variance_accs_bf(diag_gmm_acc.variance_accumulator());
 
 
-  // 占有率 sum_n{r_jk} * 对应分量的gconst_k
+  // 占有率 r_jk * 对应分量的gconst_k
   BaseFloat obj = VecVec(occ_bf, gmm.gconsts());
   if (acc_flags & kGmmMeans)
     obj += TraceMatMat(mean_accs_bf, gmm.means_invvars(), kTrans);
@@ -478,7 +491,15 @@ void AccumDiagGmm::Add(double scale, const AccumDiagGmm &acc) {
     variance_accumulator_.AddMat(scale, acc.variance_accumulator_);
 }
 
-
+/**
+ * @brief MapDiagGmmUpdate  更新 GMM 的 k个Gasuss分量( a u v)
+ * @param config
+ * @param diag_gmm_acc   GMM的每个 Gauss 的更新统计量
+ * @param flags
+ * @param gmm            GMM模型.
+ * @param obj_change_out
+ * @param count_out
+ */
 void MapDiagGmmUpdate(const MapDiagGmmOptions &config,
                       const AccumDiagGmm &diag_gmm_acc,
                       GmmFlagsType flags,
@@ -494,19 +515,25 @@ void MapDiagGmmUpdate(const MapDiagGmmOptions &config,
                diag_gmm_acc.Dim() == gmm->Dim());
 
   int32 num_gauss = gmm->NumGauss();
+
+  // 统计学习方法 标准计算流程, 当时 MAP 和 MLE 还是有区别的.
+  // 占有率之和.
   double occ_sum = diag_gmm_acc.occupancy().Sum();
 
   // remember the old objective function value
   gmm->ComputeGconsts();
+  // 当前最大似然估计 目标函数 似然值.
   BaseFloat obj_old = MlObjective(*gmm, diag_gmm_acc);
 
   // allocate the gmm in normal representation; all parameters of this will be
   // updated, but only the flagged ones will be transferred back to gmm
   DiagGmmNormal ngmm(*gmm);
 
+  // 每个Gaussion分量
   for (int32 i = 0; i < num_gauss; i++) {
     double occ = diag_gmm_acc.occupancy()(i);
 
+    // MAP 过程: 具体参看 Speaker Verification Using Adapted Gaussian Mixture Models
     // First update the weight.  The weight_tau is a tau for the
     // whole state.
     ngmm.weights_(i) = (occ + ngmm.weights_(i) * config.weight_tau) /

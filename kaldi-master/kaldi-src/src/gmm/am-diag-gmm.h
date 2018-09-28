@@ -79,7 +79,9 @@ class AmDiagGmm {
   int32 Dim() const {
     return (densities_.size() > 0)? densities_[0]->Dim() : 0;
   }
+  // Pdf 是 tid, 总共 GMM 数量.
   int32 NumPdfs() const { return densities_.size(); }
+  // NumGauss() 是 总共 Gauss 数量 = Sum( 每个Pdf GMM 内高斯数量 )
   int32 NumGauss() const;
   int32 NumGaussInPdf(int32 pdf_index) const;
 

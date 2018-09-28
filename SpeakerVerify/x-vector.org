@@ -1,0 +1,5 @@
+* x-vector kaldi egs
+1 extractor x-vectors
+sre08/v1/sid/nnet3/xvector/extract_xvectors.sh
+2 trains
+callhome_diarization/v1/local/xvector/tuning/run_xvector_1a.sh 

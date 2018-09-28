@@ -590,6 +590,7 @@ BaseFloat FullGmm::LogLikelihood(const VectorBase<BaseFloat> &data) const {
 
 void FullGmm::LogLikelihoods(const VectorBase<BaseFloat> &data,
                              Vector<BaseFloat> *loglikes) const {
+
   loglikes->Resize(gconsts_.Dim(), kUndefined);
   loglikes->CopyFromVec(gconsts_);
   int32 dim = Dim();
@@ -723,7 +724,9 @@ BaseFloat FullGmm::ComponentPosteriors(const VectorBase<BaseFloat> &data,
                                        VectorBase<BaseFloat> *posterior) const {
   if (posterior == NULL) KALDI_ERR << "NULL pointer passed as return argument.";
   Vector<BaseFloat> loglikes;
+  // log likelihoods 保存的是每个分量的 对数似然函数, 经过softmax 就可以得到响应度.
   LogLikelihoods(data, &loglikes);
+  // 经过 softmax 之后得到的是 r_jk, 可以用来更新 数据了
   BaseFloat log_sum = loglikes.ApplySoftMax();
   if (KALDI_ISNAN(log_sum) || KALDI_ISINF(log_sum))
     KALDI_ERR << "Invalid answer (overflow or invalid variances/features?)";

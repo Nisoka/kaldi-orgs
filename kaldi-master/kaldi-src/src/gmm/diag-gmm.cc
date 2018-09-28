@@ -706,7 +706,8 @@ BaseFloat DiagGmm::ComponentPosteriors(const VectorBase<BaseFloat> &data,
 
   if (KALDI_ISNAN(log_sum) || KALDI_ISINF(log_sum))
     KALDI_ERR << "Invalid answer (overflow or invalid variances/features?)";
-  // 后验概率 posterior,
+
+  //该GMM内每个gauss 后验概率 posterior
   if (posterior->Dim() != loglikes.Dim())
     posterior->Resize(loglikes.Dim());
   posterior->CopyFromVec(loglikes);

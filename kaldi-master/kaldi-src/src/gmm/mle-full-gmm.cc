@@ -150,6 +150,7 @@ void AccumFullGmm::AccumulateFromPosteriors(
       mean_accumulator_.AddVecVec(1.0, post_d, data_d);
     } else {
       for (int32 i = 0; i < post_d.Dim(); i++)
+        // 对数似然 * data
         if (post_d(i) != 0.0)
           mean_accumulator_.Row(i).AddVec(post_d(i), data_d);
     }
@@ -168,6 +169,7 @@ BaseFloat AccumFullGmm::AccumulateFromFull(const FullGmm &gmm,
   KALDI_ASSERT(gmm.NumGauss() == NumGauss());
   KALDI_ASSERT(gmm.Dim() == Dim());
 
+  // 高斯分量512, 每个的对数似然函数 -- log( wi * N(x; u, sigma) )
   Vector<BaseFloat> component_posterior(NumGauss());
 
   BaseFloat log_like = gmm.ComponentPosteriors(data, &component_posterior);

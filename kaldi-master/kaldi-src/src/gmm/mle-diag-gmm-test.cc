@@ -33,8 +33,7 @@ void TestComponentAcc(const DiagGmm &gmm, const Matrix<BaseFloat> &feats) {
   // Initialize estimators
   est_atonce.Resize(gmm.NumGauss(), gmm.Dim(), kGmmAll);
   est_atonce.SetZero(kGmmAll);
-  est_compwise.Resize(gmm.NumGauss(),
-      gmm.Dim(), kGmmAll);
+  est_compwise.Resize(gmm.NumGauss(), gmm.Dim(), kGmmAll);
   est_compwise.SetZero(kGmmAll);
 
   // accumulate estimators
