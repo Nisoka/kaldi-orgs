@@ -1,13 +1,28 @@
 #!/bin/bash
 #
+
 # This script generates examples for multilingual training of neural network
 # using separate input egs dir per language as input.
+
 # This scripts produces 3 sets of files --
 # egs.*.scp, egs.output.*.ark, egs.weight.*.ark
 #
+
+# combine the multi lang's egs.*.ark to  merged egs.*.scp.
+# egs.*.scp is a map :
+#   eg-name-1 /path/lang1/egs.n.ark:xxxxx  ; identify that the eg-name-1 belong to lang1
+#   eg-name-2 /path/lang3/egs.n.ark:xxxxx  ; identify that the eg-name-2 belong to lang3
 # egs.*.scp are the SCP files of the training examples.
+
+
+#   eg-name-1 0.3  ; the lang1's weight
+#   eg-name-2 0.4  ; the lang3's weight
 # egs.weight.*.ark map from the key of the example to the language-specific
 # weight of that example.
+
+# ----------------------------------------------------------
+#   eg-name-1 output-0 ; when use the eg-n(belong lang1) eg train the nnet, change the output-0 as output node.
+#   eg-name-2 output-2 ; when use the eg-n(belong lang2) eg train the nnet, change the output-2 as output node.
 # egs.output.*.ark map from the key of the example to the name of
 # the output-node in the neural net for that specific language, e.g.
 # 'output-2'.
@@ -37,6 +52,7 @@ num_langs=$1
 
 shift 1
 args=("$@")
+
 megs_dir=${args[-1]} # multilingual directory
 mkdir -p $megs_dir
 mkdir -p $megs_dir/info
@@ -59,17 +75,26 @@ check_params="info/feat_dim info/ivector_dim info/left_context info/right_contex
 ivec_dim=`cat ${args[0]}/info/ivector_dim`
 if [ $ivec_dim -ne 0 ];then check_params="$check_params info/final.ie.id"; fi
 
+# all langs has the same check_params : 
 for param in $check_params; do
     cat ${args[0]}/$param > $megs_dir/$param || exit 1;
 done
 
+
 for lang in $(seq 0 $[$num_langs-1]);do
   multi_egs_dir[$lang]=${args[$lang]}
+
   for f in $required; do
     if [ ! -f ${multi_egs_dir[$lang]}/$f ]; then
       echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
     fi
   done
+
+  # combine the
+  #    langs/egs.scp
+  #    langs/train_diagnostic.scp
+  #    langs/valid_diagnostic.scp
+  #    combine.scp
   train_scp_list="$train_scp_list ${args[$lang]}/egs.scp"
   train_diagnostic_scp_list="$train_diagnostic_scp_list ${args[$lang]}/train_diagnostic.scp"
   valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${args[$lang]}/valid_diagnostic.scp"
@@ -90,6 +115,14 @@ for lang in $(seq 0 $[$num_langs-1]);do
   done
 done
 
+
+
+
+
+
+
+
+
 if [ $stage -le 0 ]; then
   echo "$0: allocating multilingual examples for training."
   if [ ! -z "$lang2weight" ]; then
@@ -97,11 +130,14 @@ if [ $stage -le 0 ]; then
   fi
   # Generate egs.*.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_train.log \
-  steps/nnet3/multilingual/allocate_multilingual_examples.py $egs_opt \
+  steps/nnet3/multilingual/allocate_multilingual_examples.py \
+       $egs_opt \
       --minibatch-size $minibatch_size \
       --samples-per-iter $samples_per_iter \
       $train_scp_list $megs_dir || exit 1;
 fi
+
+
 
 if [ $stage -le 1 ]; then
   echo "$0: combine combine.scp examples from all langs in $megs_dir/combine.scp."
@@ -129,12 +165,15 @@ if [ $stage -le 1 ]; then
   # Generate valid_diagnostic.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_valid_diagnostic.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py \
-      --random-lang false --max-archives 1 --num-jobs 1\
+      --random-lang false \
+      --max-archives 1 --num-jobs 1\
       --minibatch-size $minibatch_size \
       --egs-prefix "valid_diagnostic." \
       $valid_diagnostic_scp_list $megs_dir || exit 1;
 
 fi
+
+# change the 
 for egs_type in combine train_diagnostic valid_diagnostic; do
   mv $megs_dir/${egs_type}.output.1.ark $megs_dir/${egs_type}.output.ark || exit 1;
   mv $megs_dir/${egs_type}.weight.1.ark $megs_dir/${egs_type}.weight.ark || exit 1;

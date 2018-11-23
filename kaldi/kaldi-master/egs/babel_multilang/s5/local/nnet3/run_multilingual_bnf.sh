@@ -14,6 +14,8 @@ set -o pipefail  #Exit if any of the commands in the pipeline will
 . conf/common_vars.sh || exit 1;
 
 set -u           #Fail on an undefined variable
+
+
 bnf_train_stage=-10 # the stage variable used in multilingual bottleneck training.
 stage=1
 speed_perturb=true
@@ -53,10 +55,12 @@ mkdir -p $multilingual_dir${suffix}
 
 if [ ! -f $multilingual_dir${suffix}/.done ]; then
   echo "$0: Train multilingual DNN using Bottleneck layer with lang list = ${lang_list[@]}"
-  . local/nnet3/run_tdnn_multilingual.sh --dir $multilingual_dir \
-     --bnf-dim $bnf_dim \
-     --global-extractor $global_extractor \
-     --train-stage $bnf_train_stage --stage $stage  || exit 1;
+  . local/nnet3/run_tdnn_multilingual.sh \
+    --dir $multilingual_dir \
+    --bnf-dim $bnf_dim \
+    --global-extractor $global_extractor \
+    --train-stage $bnf_train_stage \
+    --stage $stage  || exit 1;
 
   touch $multilingual_dir${suffix}/.done
 else

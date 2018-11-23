@@ -8,20 +8,32 @@
     This scripts produces 3 sets of files --
     egs.*.scp, egs.output.*.ark, egs.weight.*.ark
 
+---------------------------------------
     egs.*.scp are the SCP files of the training examples.
+
     egs.weight.*.ark map from the key of the example to the language-specific
     weight of that example.
+
     egs.output.*.ark map from the key of the example to the name of
+
     the output-node in the neural net for that specific language, e.g.
     'output-2'.
+---------------------------------------
+
+
 
     This script additionally produces temporary files -- egs.ranges.*.txt,
     which are consumed by this script itself.
-    There is one egs.ranges.*.txt file for each of the egs.*.scp files.
+
     Each line in egs.ranges.*.txt corresponds to ranges of examples
+    There is one egs.ranges.*.txt file for each of the egs.*.scp files.
+
     selected from one of the input languages's scp files as:
     <lang> <local-scp-line> <num-examples>
 
+    可以被解释为 选择<num-example> 个样本, 
+    从egs_scp_list 中的lang/egs.scp 中选择 num-example 个example.
+    0 (lang1)  0 (start eg index) 256 (num-example)
     That can be interpreted as selecting <num-example> examples starting from
     <local-scp-line> line from {lang}_th 'egs' file in "egs_scp_list".
     (note that <local-scp-line> is the zero-based line number.)
@@ -30,9 +42,12 @@
     0 0 256
     2 1024 256
 
+    根据egs.ranges.*.txt的描述 生成egs.*.scp, 从 egs_scp_list 中选择第<lang>个 egs.scp 文件做源文件
+    然后egs.*.scp 中就描述了选择那些音频做一个eg (包含了多个音频examples)
     egs.*.scp is generated using egs.ranges.*.txt as following:
     "<num-examples>" consecutive examples starting from line "<local-scp-line>"
     from {lang}_th input scp-file is copied to egs.*.scp.
+
 
     --egs-prefix option can be used to generate train and diagnostics egs files.
     If --egs-prefix=train_diagnostics. is passed, then the files produced by the
@@ -51,12 +66,14 @@
         multilingual-egs-dir
 
     allocate_multilingual_examples.py --minibatch-size 128
-        --lang2weight  "0.2,0.8" exp/lang1/egs.scp exp/lang2/egs.scp
-        exp/multi/egs
+        --lang2weight  "0.2,0.8" exp/lang1/egs.scp exp/lang2/egs.scp  exp/multi/egs
 
     To avoid loading whole scp files from all languages in memory,
     input egs.scp files are processed line by line using readline() for input
-    languages. To have more randomization across different archives,
+    languages. 
+    为了实现更多的随机交叉多个语种, 生成临时的 scp.<job>.<archive_index> 文件, 里面包含不同语种的样本
+    最终实现多个archives内部多个语种??
+    To have more randomization across different archives,
     "num-jobs * num-archives" temporary scp.<job>.<archive_index> files are created
     in egs/temp dir and all "num_jobs" scp.*.<archive_index> combined into
     egs.<archive_index>.scp.
@@ -151,6 +168,7 @@ def select_random_lang(lang_len, tot_egs, random_selection):
     assert(tot_egs > 0)
     rand_int = random.randint(0, tot_egs - 1)
     count = 0
+    # random select a right lang. and return the random lang.
     for l in range(len(lang_len)):
         if random_selection:
             if  rand_int <= (count + lang_len[l]):
@@ -174,6 +192,7 @@ def process_multilingual_egs(args):
 
     scp_files = [open(scp_lists[lang], 'r') for lang in range(num_langs)]
 
+    # each lang's egs cnt
     lang2len = [0] * num_langs
     for lang in range(num_langs):
         lang2len[lang] = sum(1 for line in open(scp_lists[lang]))
@@ -195,9 +214,12 @@ def process_multilingual_egs(args):
     # Each element of all_egs (one per num_archive * num_jobs) is
     # an array of 3-tuples (lang-id, local-start-egs-line, num-egs)
     all_egs = []
+    # each lang's egs cnt
     lang_len = lang2len[:]
     # total num of egs in all languages
     tot_num_egs = sum(lang2len[i] for i in range(len(lang2len)))
+
+    # tot_num_egs = samples_per_iter * num_archives
     num_archives = max(1, min(args.max_archives, tot_num_egs / args.samples_per_iter))
 
     num_arch_file = open("{0}/info/{1}num_archives".format(
@@ -206,12 +228,24 @@ def process_multilingual_egs(args):
                          "w")
     print("{0}".format(num_archives), file=num_arch_file)
     num_arch_file.close()
+
+    # tot_num_egs = samples_per_iter * num_archives
+    # tot_num_egs = num_jobs * this_num_egs_per_archive * num_archives
+    # ==> samples_per_iter = num_jobs * this_num_egs_per_archives, 一次迭代消耗的egs.
+    # 每次迭代 并行num_jobs,
+    #          一起消耗一个archives,
+    #          一个archives中有 this_num_egs_per_archives.
     this_num_egs_per_archive = tot_num_egs / (num_archives * args.num_jobs)
 
     logger.info("Generating {0}scp.<job>.<archive_index> temporary files used to "
                 "generate {0}<archive_index>.scp.".format(args.egs_prefix))
+
+    # each job has num_archives
     for job in range(args.num_jobs):
         for archive_index in range(num_archives):
+
+            # one archive file --- egscp.job.archive.
+            # at then end , will combine the jobs egsscp.job.archive => egsscp.archive.
             archfile = open("{0}/temp/{1}scp.{2}.{3}"
                             "".format(args.egs_dir, args.egs_prefix,
                                       job + 1, archive_index + 1),
@@ -220,17 +254,29 @@ def process_multilingual_egs(args):
 
             num_egs = 0
             while num_egs <= this_num_egs_per_archive:
+                # all egs.
                 num_left_egs = sum(num_left_egs_per_lang for
                                    num_left_egs_per_lang in lang_len)
                 if num_left_egs > 0:
+                    # random select a lang.
                     lang_id = select_random_lang(lang_len, num_left_egs, rand_select)
+                    # from the selected lang , select start_eg_index.
+                    # lang2len will keep the all lang's example cnt,
+                    # and the lang_len will be shorter as going.
                     start_egs = lang2len[lang_id] - lang_len[lang_id]
+
+                    # this_egs is one eg in the egs.scp.???
+                    # this_egs --
+                    #     lang_id  start_pos  minibatch_size (examples)
                     this_egs.append((lang_id, start_egs, args.minibatch_size))
+
+                    # from the scp_files[lang_id] read minibatch write to archfile.
                     for scpline in range(args.minibatch_size):
                         scp_key = scp_files[lang_id].readline().splitlines()[0]
                         print("{0} {1}".format(scp_key, lang_id),
                               file=archfile)
 
+                    # update the lang_len[lang_id]
                     lang_len[lang_id] = lang_len[lang_id] - args.minibatch_size
                     num_egs = num_egs + args.minibatch_size
                     # If num of remaining egs in each lang is less than minibatch_size,
@@ -259,6 +305,7 @@ def process_multilingual_egs(args):
         w = open("{0}/{1}weight.{2}.ark".format(
                     args.egs_dir, args.egs_prefix, archive + 1),
                  'w')
+        
         scp_per_archive_file = open("{0}/{1}{2}.scp"
                                     "".format(args.egs_dir,
                                               args.egs_prefix, archive + 1),
