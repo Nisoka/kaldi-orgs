@@ -100,16 +100,23 @@ for lang_index in `seq 0 $[$num_langs-1]`; do
 done
 
 
-
+# suffix =
 if [ "$speed_perturb" == "true" ]; then suffix=_sp; fi
-# suffix = 
+# dir is the current output
 dir=${dir}${suffix}
 
 # _hires
 ivec_feat_suffix=${feat_suffix}
 
-if $use_pitch; then feat_suffix=${feat_suffix}_pitch ; fi
-if $use_pitch_ivector; then nnet3_affix=_pitch; ivec_feat_suffix=${feat_suffix}_pitch ; fi
+# NULL
+if $use_pitch; then
+    feat_suffix=${feat_suffix}_pitch ;
+fi
+# NULL
+if $use_pitch_ivector; then
+    nnet3_affix=_pitch;
+    ivec_feat_suffix=${feat_suffix}_pitch ;
+fi
 
 # use_pitch = false
 # use_pitch_ivector = false
@@ -132,12 +139,20 @@ for lang_index in `seq 0 $[$num_langs-1]`; do
 done
 
 
+
+# suffix=
+# feat_suffix=_hires
+# ivector_suffix=
+# alidir=tri5_ali
+# nnet3_affix=
+# ivector_feat_suffix=feat_suffix
+
 # datadir
 # multi_data_dirs == [data/lang1/train_hires data/lang2/train_hires data/lang3/train_hires ... ]
 # egsdir
 # multi_egs_dirs  == [exp/lang1/nnet3/egs_hires exp/lang2/nnet3/egs_hires exp/lang3/nnet3/egs_hires]
 # alidir
-# multi_ali_dirs  == [exp/lang1/ali exp/lang2/ali exp/lang3/ali]
+# multi_ali_dirs  == [exp/lang1/tri5_ali exp/lang2/tri5_ali exp/lang3/tri5_ali]
 
 for lang_index in `seq 0 $[$num_langs-1]`; do
   multi_data_dirs[$lang_index]=data/${lang_list[$lang_index]}/train${suffix}${feat_suffix}
@@ -150,12 +165,14 @@ done
 
 
 # config the nnet3 input dims (feat-dim ivector-dim)
+# NULL
 if $use_ivector; then
   ivector_dim=$(feat-to-dim scp:${multi_ivector_dirs[0]}/ivector_online.scp -) || exit 1;
 else
   echo "$0: Not using iVectors in multilingual training."
   ivector_dim=0
 fi
+
 feat_dim=`feat-to-dim scp:${multi_data_dirs[0]}/feats.scp -`
 
 if [ $stage -le 8 ]; then
@@ -165,10 +182,12 @@ if [ $stage -le 8 ]; then
   if [ -z $bnf_dim ]; then
     bnf_dim=1024
   fi
+
   
   mkdir -p $dir/configs
   ivector_node_xconfig=""
   ivector_to_append=""
+  # if use_ivector, the nnet append a input of ivector, else NULL
   if $use_ivector; then
     ivector_node_xconfig="input dim=$ivector_dim name=ivector"
     ivector_to_append=", ReplaceIndex(ivector, t, 0)"
@@ -199,8 +218,11 @@ EOF
     # get each lang's num-pdfs as its softmax output
     num_targets=`tree-info ${multi_ali_dirs[$lang_index]}/tree 2>/dev/null | grep num-pdfs | awk '{print $2}'` || exit 1;
 
-    # add two layers 1: prefinal-affine-lang-n
-    #                2: output-n dim:lang's num-pdfs
+    # add two layers 1: prefinal-affine-lang-${n}
+    #                   dim = 1024, 
+    #                2: output-${n}
+    #                   dim = lang's num-pdfs
+    
     echo " relu-renorm-layer name=prefinal-affine-lang-${lang_index} input=tdnn_bn dim=1024"
     echo " output-layer name=output-${lang_index} dim=$num_targets max-change=1.5"
   done >> $dir/configs/network.xconfig
@@ -215,12 +237,12 @@ EOF
   #      output-0     output-1      output-2
 
   # modify the output-0 to output
-  steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig \
-    --config-dir $dir/configs/ \
-    --nnet-edits="rename-node old-name=output-0 new-name=output"
+  steps/nnet3/xconfig_to_configs.py \
+      --xconfig-file $dir/configs/network.xconfig \
+      --config-dir $dir/configs/ \
+      --nnet-edits="rename-node old-name=output-0 new-name=output"
 
   # $dir/configs/network.xconfig
-  
   #                    tdnn1
   #                    tdnn2
   #                    tdnn3
@@ -228,8 +250,9 @@ EOF
   #   pre-lang1-out pre-lang2-out pre-lang3-out
   #      output       output-1      output-2
   # current output is just the output!!
-
 fi
+
+
 
 if [ $stage -le 9 ]; then
     

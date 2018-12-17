@@ -126,10 +126,6 @@ if ! [ $num_utts -gt $[$num_utts_subset*4] ]; then
   exit 1
 fi
 
-
-
-
-
 # utils/filter_scp.pl -f 1 $dir/utt.list $aishell_text > $dir/transcripts.txt
 # 从 aishell_text 中过滤 得到 transcripts.txt 过滤规则是 第-f n个filed 在 utt.list中存在.
 
@@ -193,8 +189,7 @@ awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlis
 
 
 # false ============ no need
-# because we'll need the features with a different number of jobs than $alidir,
-# copy to ark,scp.
+# because we'll need the features with a different number of jobs than $alidir, copy to ark,scp.
 if [ -f $transform_dir/raw_trans.1 ]; then
   echo "$0: using raw transforms from $transform_dir"
   if [ $stage -le 0 ]; then
@@ -283,7 +278,10 @@ fi
 
 # sample -- eg???
 
-# frames = num_archives * sample_per_iter * frames_per_eg_principal 
+# frames = num_archives * sample_per_iter * frames_per_eg_principal
+# what? num_archives
+#       samplle_per_iter???
+#       frames_per_eg     is example's frames??
 # a archives is a batch.
 
 # the first field in frames_per_eg (which is a comma-separated list of numbers)
@@ -291,6 +289,7 @@ fi
 # of archives we assume that this will be the average number of frames per eg.
 frames_per_eg_principal=$(echo $frames_per_eg | cut -d, -f1)
 
+# num_frames = 
 # the + 1 is to round up, not down... we assume it doesn't divide exactly.
 num_archives=$[$num_frames/($frames_per_eg_principal*$samples_per_iter)+1]
 
@@ -322,7 +321,8 @@ while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
   num_archives_intermediate=$[$num_archives/$archives_multiple+1];
 done
 
-
+# num_archives_intermediate???
+# archives_multiple ???
 # now make sure num_archives is an exact multiple of archives_multiple.
 num_archives=$[$archives_multiple*$num_archives_intermediate]
 
@@ -332,6 +332,8 @@ num_archives=$[$archives_multiple*$num_archives_intermediate]
 # frames = num_archives * sample_per_iter * frames_per_eg_principal 
 # frames = num_archives * egs_per_archive * frames_per_eg_principal
 # Work out the number of egs per archive
+# num_egs = num_frames/frames_per_eg_principal
+# egs_per_archive = num_egs / num_archives
 egs_per_archive=$[$num_frames/($frames_per_eg_principal*$num_archives)]
 ! [ $egs_per_archive -le $samples_per_iter ] && \
   echo "$0: script error: egs_per_archive=$egs_per_archive not <= samples_per_iter=$samples_per_iter" \
@@ -343,7 +345,7 @@ egs_per_archive=$[$num_frames/($frames_per_eg_principal*$num_archives)]
 echo $num_archives >$dir/info/num_archives
 # 394272
 echo $egs_per_archive > $dir/info/egs_per_archive
-# 8
+# 8  is equal to frames_per_eg_princepal
 echo $frames_per_eg >$dir/info/frames_per_eg
 
 # 164017282
@@ -354,7 +356,7 @@ echo $frames_per_eg >$dir/info/frames_per_eg
 
 # num_archives of archives,
 #         egs_per_archives of egs,
-#            frames_per_eg of [labels, (l, r) context]
+#               frames_per_eg of [labels, (l, r) context]
 echo "$0: creating $num_archives archives, each with $egs_per_archive egs, with"
 echo "$0:   $frames_per_eg labels per example, and (left,right) context = ($left_context,$right_context)"
 if [ $left_context_initial -ge 0 ] || [ $right_context_final -ge 0 ]; then
@@ -420,7 +422,7 @@ if [ $stage -le 3 ]; then
   echo "$0: ... extracting validation and training-subset alignments."
   # do the filtering just once, as ali.scp may be long.
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
-    <$dir/ali.scp >$dir/ali_special.scp
+                      <$dir/ali.scp >$dir/ali_special.scp
 
   
   # ================= nnet3-get-egs  构建 tdnn训练用样本结构 ===========

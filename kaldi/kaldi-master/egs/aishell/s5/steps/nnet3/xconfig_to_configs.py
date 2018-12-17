@@ -101,6 +101,8 @@ def write_expanded_xconfig_files(config_dir, all_layers):
     config_dir/xconfig.expanded.2, showing some of the internal stages of
     processing the xconfig file before turning it into config files.
     """
+    # expanded.1 is a easy string, nomuch used
+    # expanded.2 is a detailed string , that all the descriptor detailed descript the input-layers
     try:
         xconfig_file_out = open(config_dir + '/xconfig.expanded.1', 'w')
     except:
@@ -174,9 +176,9 @@ def get_config_headers():
 
 # This is where most of the work of this program happens.
 def write_config_files(config_dir, all_layers):
-    # config_basename_to_lines is map from the basename of the
-    # config, as a string (i.e. 'ref', 'all', 'init') to a list of
-    # strings representing lines to put in the config file.
+    # config_basename_to_lines is
+    # map from the basename of the config, as a string (i.e. 'ref', 'all', 'init')
+    # to a list of strings representing lines to put in the config file.
     config_basename_to_lines = defaultdict(list)
 
     config_basename_to_header = get_config_headers()

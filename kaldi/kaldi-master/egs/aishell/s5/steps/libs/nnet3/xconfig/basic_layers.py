@@ -37,6 +37,7 @@ class XconfigLayerBase(object):
         self.layer_type = first_token
         if 'name' not in key_to_value:
             raise RuntimeError("Expected 'name' to be specified.")
+        
         self.name = key_to_value['name']
         if not xutils.is_valid_line_name(self.name):
             raise RuntimeError("Invalid value: name={0}".format(
@@ -44,10 +45,13 @@ class XconfigLayerBase(object):
 
         # It is possible to have two layers with a same name in 'all_layer', if
         # the layer type for one of them is 'existing'.
+
         # Layers of type 'existing' are corresponding to the component-node names
         # in the existing model, which we are adding layers to them.
+        
         # 'existing' layers are not presented in any config file, and new layer
         # with the same name can exist in 'all_layers'.
+        
         # e.g. It is possible to have 'output-node' with name 'output' in the
         # existing model, which is added to all_layers using layer type 'existing',
         # and 'output-node' of type 'output-layer' with the same name 'output' in
@@ -59,17 +63,24 @@ class XconfigLayerBase(object):
                                    "layer.".format(self.name))
 
         self.config = {}
+
+        # [NAN: ] the child class, will set it's needed config filed.
+        # eg. input layer, will only contain the config['dim']
+        
         # the following, which should be overridden in the child class, sets
         # default config parameters in self.config.
         self.set_default_configs()
+
         # The following is not to be reimplemented in child classes;
         # it sets the config values to those specified by the user, and
         # parses any Descriptors.
         self.set_configs(key_to_value, all_layers)
+        
         # This method, sets the derived default config values
         # i.e., config values when not specified can be derived from
         # other values. It can be overridden in the child class.
         self.set_derived_configs()
+        
         # the following, which should be overridden in the child class, checks
         # that the config parameters that have been set are reasonable.
         self.check_configs()
@@ -81,7 +92,12 @@ class XconfigLayerBase(object):
             the child-class constructor will deal with the configuration values
             in a more specific way.
         """
-
+        # [NAN: ]
+        # 1 check the key_to_value, only have the needed configs
+        # otherwise, will runtimeError
+        # 2 parse the config value, and set to config[key] = value;
+        # 3 descriptors...
+        
         # First check that there are no keys that don't correspond to any config
         # parameter of this layer, and if so, raise an exception with an
         # informative message saying what configs are allowed.
@@ -102,6 +118,10 @@ class XconfigLayerBase(object):
                 self.config[key] = xutils.convert_value_to_type(key,
                                                                 type(self.config[key]),
                                                                 value)
+
+
+        # descriptors is the splice layer for prev-layer and current-layer
+        # eg. all layer will have a input descriptor that descript cur-layer's inputlayer
         self.descriptors = dict()
         self.descriptor_dims = dict()
         # Parse Descriptors and get their dims and their 'final' string form.
@@ -114,10 +134,29 @@ class XconfigLayerBase(object):
 
             descriptor_string = self.config[key]  # input string.
             assert isinstance(descriptor_string, str)
+            # [NAN: ]convert a descriptor_string Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) to
+            # a recursion embedding descriptor.
+            # Des -- operator -----  Append
+            #        items -append-  Des  ----  operator - Offset
+            #                                   items   - Des --- operator - None       +  -1.
+            #                                                     items   - preLayer
+            #        items -append-  Des  ----  operator - Offset
+            #                                   items   - Des --- operator - None       +  0.
+            #                                                     items   - preLayer
+            #        items -append-  Des  ----  operator - Offset
+            #                                   items   - Des --- operator - None       + 1.
+            #                                                     items   - preLayer
+            #        items -append-  Des  ----  operator - ReplaceIndex
+            #                                   items   -append-
+            
             desc = self.convert_to_descriptor(descriptor_string, all_layers)
+            # get the descriptor dim
+            # if Append(-2, -1, 0, 1, 2), will be  5 * dim_of_need_layer.
             desc_dim = self.get_dim_for_descriptor(desc, all_layers)
+            # back to a descript_string, but much normalized.
             desc_norm_str = desc.str()
 
+            # 
             # desc_output_str contains the "final" component names, those that
             # appear in the actual config file (i.e. not names like
             # 'layer.auxiliary_output'); that's how it differs from desc_norm_str.
@@ -133,6 +172,9 @@ class XconfigLayerBase(object):
                                      'final-string': desc_output_str,
                                      'dim': desc_dim}
 
+
+
+            
             # the following helps to check the code by parsing it again.
             desc2 = self.convert_to_descriptor(desc_norm_str, all_layers)
             desc_norm_str2 = desc2.str()
@@ -180,6 +222,8 @@ class XconfigLayerBase(object):
             self.config[key] = desc_str_dict['normalized-string']
 
     def convert_to_descriptor(self, descriptor_string, all_layers):
+        # convert a descriptor string to a truely Descriptor class
+        # will use the info of other layers (eg, input Descriptor need last layer's out-dim)
         """Convenience function intended to be called from child classes,
         converts a string representing a descriptor ('descriptor_string')
         into an object of type Descriptor, and returns it. It needs 'self' and

@@ -174,6 +174,7 @@ def convert_value_to_type(key, dest_type, string_value):
 # like Append(Offset(input, -3), input) and so on.
 # For the full range of possible expressions, see the comment at the
 # top of src/nnet3/nnet-descriptor.h.
+
 # Note: as an extension to the descriptor format used in the C++
 # code, we can have e.g. input@-3 meaning Offset(input, -3);
 # and if bare integer numbers appear where a descriptor was expected,
@@ -295,10 +296,11 @@ def is_valid_line_name(name):
     return isinstance(name, str) and re.match(r'^[a-zA-Z_][-a-zA-Z_0-9.]*', name) != None
 
 # This function for parsing Descriptors takes an array of tokens as produced
-# by tokenize_descriptor.  It parses a descriptor
-# starting from position pos >= 0 of the array 'tokens', and
-# returns a new position in the array that reflects any tokens consumed while
-# parsing the descriptor.
+# by tokenize_descriptor.
+
+# It parses a descriptor starting from position pos >= 0 of the array 'tokens', and
+# returns a new position in the array that reflects any tokens consumed while parsing the descriptor.
+
 # It returns a pair (d, pos) where d is the newly parsed Descriptor,
 # and 'pos' is the new position after consuming the relevant input.
 # 'prev_names' is so that we can find the most recent layer name for
@@ -588,6 +590,8 @@ def parse_config_line(orig_config_line):
     if not (other_fields[0] == '' and len(other_fields) % 2 ==  1):
         raise RuntimeError("Could not parse config line.");
     fields += other_fields[1:]
+
+    
     num_variables = len(fields) / 2
     for i in range(num_variables):
         var_name = fields[i * 2]
