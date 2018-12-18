@@ -1,3 +1,91 @@
+ExampleGenerationConfig::ExampleGenerationConfig()
+    :left_context(0), right_context(0),
+     left_context_initial(-1), right_context_final(-1),
+     num_frames_overlap(0), frame_subsampling_factor(1),
+     num_frames_str("1") {
+}
+ExampleGenerationConfig::Register()
+{
+     // maybe 8
+     po->Register("left-context", &left_context, "Number of frames of left "
+                  "context of input features that are added to each "
+                  "example");
+     // maybe 8
+     po->Register("right-context", &right_context, "Number of frames of right "
+                  "context of input features that are added to each "
+                  "example");
+     
+     po->Register("left-context-initial", &left_context_initial, "Number of "
+                  "frames of left context of input features that are added to "
+                  "each example at the start of the utterance (if <0, this "
+                  "defaults to the same as --left-context)");
+     po->Register("right-context-final", &right_context_final, "Number of "
+                  "frames of right context of input features that are added "
+                  "to each example at the end of the utterance (if <0, this "
+                  "defaults to the same as --right-context)");
+     // THIS IS SET TO BE     --- 8
+     po->Register("num-frames", &num_frames_str, "Number of frames with labels "
+                 "that each example contains (i.e. the left and right context "
+                 "are to be added to this).  May just be an integer (e.g. "
+                 "--num-frames=8), or a principal value followed by "
+                 "alternative values to be used at most once for each utterance "
+                 "to deal with odd-sized input, e.g. --num-frames=40,25,50 means "
+                 "that most of the time the number of frames will be 40, but to "
+                 "deal with odd-sized inputs we may also generate egs with these "
+                 "other sizes.  All these values will be rounded up to the "
+                 "closest multiple of --frame-subsampling-factor.  As a special case, "
+                 "--num-frames=-1 means 'don't do any splitting'.");
+     po->Register("num-frames-overlap", &num_frames_overlap, "Number of frames of "
+                  "overlap between adjacent eamples (applies to chunks of size "
+                  "equal to the primary [first-listed] --num-frames value... "
+                  "will be adjusted for different-sized chunks).  Advisory; "
+                  "will not be exactly enforced.");
+     // THIS IS SET TO BE     --- 1
+     po->Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
+                  "if the frame-rate of the output labels in the generated "
+                  "examples will be less than the frame-rate at the input");
+  }
+
+ExampleGenerationConfig::ComputeDerived()
+{
+  if (num_frames_str == "-1") {
+     return;
+   }
+   if (!SplitStringToIntegers(num_frames_str, ",", false, &num_frames) ||
+       num_frames.empty()) {
+     KALDI_ERR << "Invalid option (expected comma-separated list of integers): "
+               << "--num-frames=" << num_frames_str;
+   }
+ 
+   int32 m = frame_subsampling_factor;
+   if (m < 1) {
+     KALDI_ERR << "Invalid value --frame-subsampling-factor=" << m;
+   }
+   bool changed = false;
+   for (size_t i = 0; i < num_frames.size(); i++) {
+     int32 value = num_frames[i];
+     if (value <= 0) {
+       KALDI_ERR << "Invalid option --num-frames=" << num_frames_str;
+     }
+     if (value % m != 0) {
+       value = m * ((value / m) + 1);
+       changed = true;
+     }
+     num_frames[i] = value;
+   }
+   if (changed) {
+     std::ostringstream rounded_num_frames_str;
+     for (size_t i = 0; i < num_frames.size(); i++) {
+       if (i > 0)
+         rounded_num_frames_str << ',';
+       rounded_num_frames_str << num_frames[i];
+     }
+     KALDI_LOG << "Rounding up --num-frames=" << num_frames_str
+               << " to multiples of --frame-subsampling-factor=" << m
+               << ", to: " << rounded_num_frames_str.str();
+   }
+ }
+
 
 
 UtteranceSplitter::UtteranceSplitter(const ExampleGenerationConfig &config):
@@ -65,17 +153,23 @@ UtteranceSplitter::UtteranceSplitter(const ExampleGenerationConfig &config):
 // maxUtteranceLength = 24
 
 int32 UtteranceSplitter::MaxUtteranceLength() const {
+  // config_.num_frames is [8]
+  // so num_lengths == 1
   int32 num_lengths = config_.num_frames.size();
+  
   KALDI_ASSERT(num_lengths > 0);
   // 'primary_length' is the first-specified num-frames.
   // It's the only chunk that may be repeated an arbitrary number
   // of times.
+  // config_.num_frames = [8]
   int32 primary_length = config_.num_frames[0],
       max_length = primary_length;
+  
   for (int32 i = 0; i < num_lengths; i++) {
     KALDI_ASSERT(config_.num_frames[i] > 0);
     max_length = std::max(config_.num_frames[i], max_length);
   }
+  // return 2*8 + 8 = 24
   return 2 * max_length + primary_length;
 }
 
@@ -109,7 +203,8 @@ void UtteranceSplitter::InitSplits(std::vector<std::vector<int32> > *splits) con
   // i and j.  i == 0 and j == 0 are special cases; they mean, no
   // alternate is chosen.
 
-  // 8 , 8 8, 8 8 8, 8 8 8 8, 8 8 8 8 8.
+  // ------------------------ the splits will be:
+  // [8] , [8 8], [8 8 8], [8 8 8 8]
   
   for (int32 i = 0; i < num_lengths; i++) {
     for (int32 j = 0; j < num_lengths; j++) {
@@ -126,8 +221,8 @@ void UtteranceSplitter::InitSplits(std::vector<std::vector<int32> > *splits) con
       // vec     8   8,8  8,8,8      8,8,8,8
       while (DefaultDurationOfSplit(vec) <= default_duration_ceiling) {
 
-        float UtteranceSplitter::DefaultDurationOfSplit(
-            const std::vector<int32> &split) const {
+        // -------------------------return the vec.accumulate()
+        float UtteranceSplitter::DefaultDurationOfSplit(const std::vector<int32> &split) const {
           if (split.empty())  // not a valid split, but useful to handle this case.
             return 0.0;
           float
@@ -138,9 +233,9 @@ void UtteranceSplitter::InitSplits(std::vector<std::vector<int32> > *splits) con
           
           KALDI_ASSERT(num_frames_overlap < principal_num_frames &&
                        "--num-frames-overlap value is too high");
-          // 重叠比例.
+          // 重叠比例. 0
           float overlap_proportion = num_frames_overlap / principal_num_frames;
-          // 累加  ans = 8  
+          // 累加  ans = 8, 16, 24
           float ans = std::accumulate(split.begin(), split.end(), int32(0));
           
           for (size_t i = 0; i + 1 < split.size(); i++) {
@@ -150,7 +245,10 @@ void UtteranceSplitter::InitSplits(std::vector<std::vector<int32> > *splits) con
           }
           KALDI_ASSERT(ans > 0.0);
           return ans;
-        }
+        }  // end the function
+        // -------------------------
+
+        
        
         if (!vec.empty()) // Don't allow the empty vector as a split.
           splits_set.insert(vec);
@@ -171,13 +269,16 @@ void UtteranceSplitter::InitSplits(std::vector<std::vector<int32> > *splits) con
 }
 
 void UtteranceSplitter::InitSplitForLength() {
+  // 24
   int32 max_utterance_length = MaxUtteranceLength();
 
   // The 'splits' vector is a list of possible splits
   // (a split being a sorted vector of chunk-sizes).
   // The vector 'splits' is itself sorted.
+  
+  
   std::vector<std::vector<int32> > splits;
-  // ?????????????????????
+  // 初始化spd li
   InitSplits(&splits);
 
 
@@ -199,46 +300,53 @@ void UtteranceSplitter::InitSplitForLength() {
   // 'costs_for_length[u][s]', indexed by utterance-length u and then split,
   // contains the cost for utterance-length u and split s.
 
-  // splits.size = 3
-  // max_utt_length = 24
+  
+  // splits.size = 4 ([8], [8 8], [8 8 8], [8 8 8 8])
+  // max_utt_length = 24+1
   std::vector<std::vector<float> > costs_for_length(max_utterance_length + 1);
   int32 num_splits = splits.size();
 
   // 对每个costs_for_length[index] 设置为 splits
-  // costs_for_length< <split1, split2, ... splitn>, <split1, split2, ... splitn> ... >
+  
+  // max_utterance_length is 24
   for (int32 u = 0; u <= max_utterance_length; u++)
     costs_for_length[u].reserve(num_splits);
 
   // foreach split可能划分.
   for (int32 s = 0; s < num_splits; s++) {
-    
     const std::vector<int32> &split = splits[s];
 
-    // 8     8,8    8,8,8
+    // 8, 16, 24, 32
     float default_duration = DefaultDurationOfSplit(split);
-    
+
+    // alway 8
     int32 max_chunk_size = *std::max_element(split.begin(), split.end());
+    // 每种utt长度
     for (int32 u = 0; u <= max_utterance_length; u++) {
+      // c 是对这样的长度的utt使用该种划分方式，出现的损失。我们和overlaps一样惩罚两次间隔gaps，
+      // 给予这样的原因，完全扔掉的帧数， 比两次计算他们更坏？？
       // c is the cost for this utterance length and this split.  We penalize
       // gaps twice as strongly as overlaps, based on the intuition that
       // completely throwing out frames of data is worse than counting them
       // twice.
-      float c = (default_duration > float(u) ? default_duration - float(u) :
-                 2.0 * (u - default_duration));
-      if (u < max_chunk_size)  // can't fit the largest of the chunks in this
-                               // utterance
+      // max_utterance_length is 24, so, usuraly default_duration - u
+      // 8 16 24 32
+      float c = (default_duration > float(u) ? default_duration - float(u) :  2.0 * (u - default_duration));
+      if (u < max_chunk_size)  // can't fit the largest of the chunks in this utterance
         c = std::numeric_limits<float>::max();
       KALDI_ASSERT(c >= 0);
+      // 表示 不同长度的utt 使用不同中划分方式，带来的损害
       costs_for_length[u].push_back(c);
     }
   }
 
-  // ???????????
+  // 用来真正选择某个utt长度，需要使用某种划分方式
   splits_for_length_.resize(max_utterance_length + 1);
 
   // 0 - 24
   for (int32 u = 0; u <= max_utterance_length; u++) {
     const std::vector<float> &costs = costs_for_length[u];
+    // get min cose
     float min_cost = *std::min_element(costs.begin(), costs.end());
     if (min_cost == std::numeric_limits<float>::max()) {
       // All costs were infinity, becaues this utterance-length u is shorter
@@ -253,9 +361,11 @@ void UtteranceSplitter::InitSplitForLength() {
                                    // slightly less than 2...  this will
                                    // hopefully make the behavior more
                                    // deterministic for ties.
+
     std::vector<int32> possible_splits;
     std::vector<float>::const_iterator iter = costs.begin(), end = costs.end();
     int32 s = 0;
+    // 每个utt长度 都选择几个损耗较小的划分方式.
     for (; iter != end; ++iter,++s)
       if (*iter < min_cost + cost_threshold)
         splits_for_length_[u].push_back(splits[s]);

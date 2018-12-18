@@ -40,6 +40,7 @@ static bool ProcessFile(const GeneralMatrix &feats,
                         int32 length_tolerance,
                         UtteranceSplitter *utt_splitter,
                         NnetExampleWriter *example_writer) {
+
   int32 num_input_frames = feats.NumRows();
   if (!utt_splitter->LengthsMatch(utt_id, num_input_frames,
                                   static_cast<int32>(pdf_post.size()),

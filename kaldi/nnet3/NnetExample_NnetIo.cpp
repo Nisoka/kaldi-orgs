@@ -1,6 +1,3 @@
-
-
-// NNET2
 // NnetExample 是输入数据, 对应一个帧或多个帧的label或labels
 // 用于训练nnet3, 正常情况会只有1帧1label
 /// NnetExample is the input data and corresponding label (or labels) for one or

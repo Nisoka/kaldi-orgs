@@ -437,8 +437,12 @@ if [ $stage -le 3 ]; then
     utils/filter_scp.pl $dir/valid_uttlist $dir/ali_special.scp \| \
     ali-to-pdf $alidir/final.mdl scp:- ark:- \| \
     ali-to-post ark:- ark:- \| \
-    nnet3-get-egs --num-pdfs=$num_pdfs --frame-subsampling-factor=$frame_subsampling_factor \
-      $ivector_opts $egs_opts "$valid_feats" \
+    nnet3-get-egs \
+      --num-pdfs=$num_pdfs \
+      --frame-subsampling-factor=$frame_subsampling_factor \
+      $ivector_opts \
+      $egs_opts \
+      "$valid_feats" \
       ark,s,cs:- "ark:$dir/valid_all.egs" || touch $dir/.error &
 
   
