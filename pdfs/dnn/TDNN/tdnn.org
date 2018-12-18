@@ -1,4 +1,0 @@
-* A time delay neural network architecture for efficient modeling of long temporal contexts
-** 1 Introduce
-   
-    

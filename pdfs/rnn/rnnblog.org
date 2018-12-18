@@ -1,2 +1,0 @@
-一文神经网络 各种基础结构(以及几篇文献)
-https://zybuluo.com/hanbingtao/note/541458
