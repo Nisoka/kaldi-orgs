@@ -47,8 +47,8 @@ static bool ProcessFile(const GeneralMatrix &feats,
                                   length_tolerance))
     return false;  // LengthsMatch() will have printed a warning.
 
+  // chunks frist_frame, num_frame, left_frame, right_frame
   std::vector<ChunkTimeInfo> chunks;
-
   utt_splitter->GetChunksForUtterance(num_input_frames, &chunks);
 
   if (chunks.empty()) {
@@ -63,14 +63,20 @@ static bool ProcessFile(const GeneralMatrix &feats,
   int32 frame_subsampling_factor =
       utt_splitter->Config().frame_subsampling_factor;
 
+
+  // 为每个chunkInfo 构造一个 NnetExample（内部是一个input output的NnetIo对, 神经网络的输入输出）
   for (size_t c = 0; c < chunks.size(); c++) {
     const ChunkTimeInfo &chunk = chunks[c];
 
-    int32 tot_input_frames = chunk.left_context + chunk.num_frames +
-        chunk.right_context;
+    int32 tot_input_frames = chunk.left_context + chunk.num_frames + chunk.right_context;
 
+    // start_frame is alway >= 0
+    // 1 chunk[0].first_frame == 0, chunk.left_context = 0
+    // 2 chunk[1].first_frame = (chunk[0].first_frame + chunk[0].num_frames) + gaps[1]
+    //            chunk[1].left_context = 8? must < chunk[1].first_frame, 不然会索引到<0 的帧
     int32 start_frame = chunk.first_frame - chunk.left_context;
 
+    // 获得该chunk的feats (start_frame -- start_frame + tot_input_frames)
     GeneralMatrix input_frames;
     ExtractRowRangeWithPadding(feats, start_frame, tot_input_frames,
                                &input_frames);
@@ -82,6 +88,8 @@ static bool ProcessFile(const GeneralMatrix &feats,
 
     NnetExample eg;
     // call the regular input "input".
+    // NnetIo 没有保存 data的start_frame
+    // 只保存了 NnetIo内数据的index。
     eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
 
     if (ivector_feats != NULL) {
@@ -130,6 +138,7 @@ static bool ProcessFile(const GeneralMatrix &feats,
 
     std::string key = os.str(); // key is <utt_id>-<frame_id>
 
+    // 生成一个example
     example_writer->Write(key, eg);
   }
   return true;
@@ -227,7 +236,10 @@ int main(int argc, char *argv[]) {
         online_ivector_rspecifier);
 
     int32 num_err = 0;
-
+    // 为每个utt 输出 多个examples， 
+    // 每个example 有两种可能
+    // 1   primary_length* 3
+    // 2   (primary_length - 3*primary_length)
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
       const GeneralMatrix &feats = feat_reader.Value();

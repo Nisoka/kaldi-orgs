@@ -413,6 +413,7 @@ float UtteranceSplitter::DefaultDurationOfSplit(
   a list of chunk-sizes in increasing order (we when we actually split the
   utterance into chunks, we may, at random, reverse the order.
 
+  // ---------- MAIN ----------
   The choice of split to use for a given utterance-length is determined as
   follows.  Firstly, for each split we compute a 'default duration' (see
   DefaultDurationOfSplit()... if --num-frames-overlap is zero, this is just the
@@ -579,14 +580,21 @@ void UtteranceSplitter::GetChunkSizesForUtterance(
   // of times.
   int32 primary_length = config_.num_frames[0],
       num_frames_overlap = config_.num_frames_overlap,
+      // splits_for_length_.size() == max_uttrance_length
+      // splits_for_length_.size() 是最大utt长度
       max_tabulated_length = splits_for_length_.size() - 1,
       num_primary_length_repeats = 0;
   KALDI_ASSERT(primary_length - num_frames_overlap > 0);
   KALDI_ASSERT(utterance_length >= 0);
+
+  // 计算可以划分为多少个 primary_length 8 
+  // 余下小于 max_tabulated_length 的数据，生成possible_splits
   while (utterance_length > max_tabulated_length) {
     utterance_length -= (primary_length - num_frames_overlap);
     num_primary_length_repeats++;
   }
+  // 剩余的就使用 possible_splits 进行划分， possible_splits 中保存了
+  // 小于max_tablulated_length 的所有长度的最可能划分。
   KALDI_ASSERT(utterance_length >= 0);
   const std::vector<std::vector<int32> > &possible_splits =
       splits_for_length_[utterance_length];
@@ -594,12 +602,15 @@ void UtteranceSplitter::GetChunkSizesForUtterance(
     chunk_sizes->clear();
     return;
   }
+
+  //1 保存安排来了primary之后剩余的 frames的 最佳划分。 8, 16, 24
   int32 num_possible_splits = possible_splits.size(),
       randomly_chosen_split = RandInt(0, num_possible_splits - 1);
   *chunk_sizes = possible_splits[randomly_chosen_split];
+  //2 安排已经计算好的最佳划分。 primary_length = 8
   for (int32 i = 0; i < num_primary_length_repeats; i++)
     chunk_sizes->push_back(primary_length);
-
+  // 排序
   std::sort(chunk_sizes->begin(), chunk_sizes->end());
   if (RandInt(0, 1) == 0) {
     std::reverse(chunk_sizes->begin(), chunk_sizes->end());
@@ -818,24 +829,36 @@ void UtteranceSplitter::GetGapSizes(int32 utterance_length,
 void UtteranceSplitter::GetChunksForUtterance(
     int32 utterance_length,
     std::vector<ChunkTimeInfo> *chunk_info) {
+  
+  //chunk_size 会保存对utteerance_length 长度的 primary_length*repeat + maybe splits
   std::vector<int32> chunk_sizes;
   GetChunkSizesForUtterance(utterance_length, &chunk_sizes);
+
+  // 经过对 utterance_length -- primary_length * repeat + maybe_length
+  // 之后 会有一些剩余， 叫做间隔gaps， 
+  // gaps 是根据 chunk_size 每个chunk_size之间的间隔构建的。
   std::vector<int32> gaps(chunk_sizes.size());
   GetGapSizes(utterance_length, true, chunk_sizes, &gaps);
+
+  //根据 chunk_size-vec 构造chunk_info
   int32 num_chunks = chunk_sizes.size();
   chunk_info->resize(num_chunks);
   int32 t = 0;
   for (int32 i = 0; i < num_chunks; i++) {
     t += gaps[i];
     ChunkTimeInfo &info = (*chunk_info)[i];
+    //example 内
     info.first_frame = t;
     info.num_frames = chunk_sizes[i];
+    // 这个left_context_initial == -1
     info.left_context = (i == 0 && config_.left_context_initial >= 0 ?
                          config_.left_context_initial : config_.left_context);
     info.right_context = (i == num_chunks - 1 && config_.right_context_final >= 0 ?
                           config_.right_context_final : config_.right_context);
     t += chunk_sizes[i];
   }
+
+  // the output weight is the frame repeat cnt(alway 1?)
   SetOutputWeights(utterance_length, chunk_info);
   AccStatsForUtterance(utterance_length, *chunk_info);
   // check that the end of the last chunk doesn't go more than
@@ -847,23 +870,28 @@ void UtteranceSplitter::GetChunksForUtterance(
 void UtteranceSplitter::AccStatsForUtterance(
     int32 utterance_length,
     const std::vector<ChunkTimeInfo> &chunk_info) {
+  // all utterances
   total_num_utterances_ += 1;
+  // all data frames
   total_input_frames_ += utterance_length;
 
   for (size_t c = 0; c < chunk_info.size(); c++) {
     int32 chunk_size = chunk_info[c].num_frames;
+    // acc the overlap frames  total_frames_overlap
     if (c > 0) {
       int32 last_chunk_end = chunk_info[c-1].first_frame +
           chunk_info[c-1].num_frames;
       if (last_chunk_end > chunk_info[c].first_frame)
         total_frames_overlap_ += last_chunk_end - chunk_info[c].first_frame;
     }
+    // acc the chunk_size_to_count_, 计算同样chunk_size 的chunk数量
     std::map<int32, int32>::iterator iter = chunk_size_to_count_.find(
         chunk_size);
     if (iter == chunk_size_to_count_.end())
       chunk_size_to_count_[chunk_size] = 1;
     else
       iter->second++;
+    
     total_num_chunks_ += 1;
     total_frames_in_chunks_ += chunk_size;
   }

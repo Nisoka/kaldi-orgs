@@ -151,10 +151,10 @@ struct ExampleGenerationConfig {
  */
 
 struct ChunkTimeInfo {
-  int32 first_frame;
-  int32 num_frames;
-  int32 left_context;
-  int32 right_context;
+  int32 first_frame;    // frame-index
+  int32 num_frames;     // count
+  int32 left_context;   // count  when frame-index == 0, left_context=0, others will normal 8?
+  int32 right_context;  // count
   // The 'output_weights' member is a vector of length equal to the
   // num_frames divided by frame_subsampling_factor from the config.
   // It contains values 0 < x <= 1 that represent weightings of

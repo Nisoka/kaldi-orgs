@@ -195,6 +195,8 @@ fi
 # of archives we assume that this will be the average number of frames per eg.
 frames_per_eg_principal=$(echo $frames_per_eg | cut -d, -f1)
 
+# 每个archive， 就是一次iter 需要的数量。
+# 这里并不需要考虑 jobs
 # the + 1 is to round up, not down... we assume it doesn't divide exactly.
 num_archives=$[$num_frames/($frames_per_eg_principal*$samples_per_iter)+1]
 if [ $num_archives -eq 1 ]; then
@@ -208,6 +210,9 @@ fi
 # of open filehandles that the system allows per process (ulimit -n).
 # This sometimes gives a misleading answer as GridEngine sometimes changes that
 # somehow, so we limit it to 512.
+# 1 正常不用考虑， num_archives_intermediate=$num_archives
+# 2 当数据量太多时， 会出现很多的 num_archives, 所以，必须减小 同时打开文件数量
+#   这就逐渐将 同时打开的num_archives 减半 再减半 
 max_open_filehandles=$(ulimit -n) || exit 1
 [ $max_open_filehandles -gt 512 ] && max_open_filehandles=512
 num_archives_intermediate=$num_archives
@@ -274,19 +279,27 @@ if [ $stage -le 3 ]; then
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
     <$dir/ali.scp >$dir/ali_special.scp
 
+  # 生成 egs, nnet3-get-egs for valid, and train_subset(都是300 utt)
   $cmd $dir/log/create_valid_subset.log \
     utils/filter_scp.pl $dir/valid_uttlist $dir/ali_special.scp \| \
     ali-to-pdf $alidir/final.mdl scp:- ark:- \| \
     ali-to-post ark:- ark:- \| \
-    nnet3-get-egs --num-pdfs=$num_pdfs --frame-subsampling-factor=$frame_subsampling_factor \
-      $ivector_opts $egs_opts "$valid_feats" \
+    nnet3-get-egs --num-pdfs=$num_pdfs \
+      --frame-subsampling-factor=$frame_subsampling_factor \
+      $ivector_opts \
+      $egs_opts \
+      "$valid_feats" \
       ark,s,cs:- "ark:$dir/valid_all.egs" || touch $dir/.error &
+
   $cmd $dir/log/create_train_subset.log \
     utils/filter_scp.pl $dir/train_subset_uttlist $dir/ali_special.scp \| \
     ali-to-pdf $alidir/final.mdl scp:- ark:- \| \
     ali-to-post ark:- ark:- \| \
-    nnet3-get-egs --num-pdfs=$num_pdfs --frame-subsampling-factor=$frame_subsampling_factor \
-      $ivector_opts $egs_opts "$train_subset_feats" \
+    nnet3-get-egs --num-pdfs=$num_pdfs \
+      --frame-subsampling-factor=$frame_subsampling_factor \
+      $ivector_opts \
+      $egs_opts \
+      "$train_subset_feats" \
       ark,s,cs:- "ark:$dir/train_subset_all.egs" || touch $dir/.error &
   wait;
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
@@ -298,6 +311,7 @@ if [ $stage -le 3 ]; then
     valid_diagnostic_output="ark:$dir/valid_diagnostic.egs"
     train_diagnostic_output="ark:$dir/train_diagnostic.egs"
   fi
+  # subset .egs, 从valid_all.egs 中 取真实需要数量的example ==> valid_combine.egs
   $cmd $dir/log/create_valid_subset_combine.log \
     nnet3-subset-egs --n=$[$num_valid_frames_combine/$frames_per_eg_principal] ark:$dir/valid_all.egs \
       ark:$dir/valid_combine.egs || touch $dir/.error &
@@ -321,27 +335,56 @@ if [ $stage -le 3 ]; then
   else
     cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
   fi
+
+
   for f in $dir/{combine,train_diagnostic,valid_diagnostic}.egs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done
   rm $dir/valid_all.egs $dir/train_subset_all.egs $dir/{train,valid}_combine.egs
 fi
 
+
+
+
+
+
+# 训练数据egs准备， 上面的都是用于诊断的小数据egs.
+# num_archives(num_archives_intermediate) 是一次iter 的所有archives
 if [ $stage -le 4 ]; then
   # create egs_orig.*.*.ark; the first index goes to $nj,
   # the second to $num_archives_intermediate.
-
   egs_list=
   for n in $(seq $num_archives_intermediate); do
     egs_list="$egs_list ark:$dir/egs_orig.JOB.$n.ark"
   done
+
+  # feats 是划分好的 feats (splitData-nj)
+  # 所以生成的egs_list egs_orig.JOB.$n.ark, 
+  # 每个JOB是并行数量，JOB的数据是全部数据，每个JOB 是每个splitData的feats.
+  # 那么每个JOB下的所有num_archives, 则是对splitData下的再次划分.
+  # 最终:
+  #    all-datas := JOB-0 ---split0
+  #                          sequential-subset0
+  #                          sequential-subset1
+  #                          sequential-subset2
+  #                          sequential-subset..
+  #                 JOB-1 ---split1
+  #                 JOB-2 ---split2
   echo "$0: Generating training examples on disk"
   # The examples will go round-robin to egs_list.
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    nnet3-get-egs --num-pdfs=$num_pdfs --frame-subsampling-factor=$frame_subsampling_factor \
-    $ivector_opts $egs_opts "$feats" \
-    "ark,s,cs:filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp | ali-to-pdf $alidir/final.mdl scp:- ark:- | ali-to-post ark:- ark:- |" ark:- \| \
-    nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
+    nnet3-get-egs \
+      --num-pdfs=$num_pdfs \
+      --frame-subsampling-factor=$frame_subsampling_factor \
+      $ivector_opts \
+      $egs_opts \
+      "$feats" \
+      "ark,s,cs:filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp | ali-to-pdf $alidir/final.mdl scp:- ark:- | ali-to-post ark:- ark:- |" \
+      ark:- \| nnet3-copy-egs \
+                    --random=true \
+                    --srand=\$[JOB+$srand] \
+                    ark:- \
+                    $egs_list || exit 1;
 fi
 
 if [ $stage -le 5 ]; then
@@ -350,6 +393,15 @@ if [ $stage -le 5 ]; then
   # shuffle the order, writing to the egs.JOB.ark
 
   # the input is a concatenation over the input jobs.
+  # nj 是 训练时的job数量
+  # 如下又将 job内的数据重排合并，
+  # 现在形成的archives:
+  # num_archives: 每个archive内都是 splitData 的一部分。  
+  # 最后还是只有 num_archives 个archive, 每个archive内的数据都是重排的。
+  # num_archives: 
+  #                archive0   ------- random-(split0 split1 split2 .... )
+  #                archive1   ------- random-(split0 split1 split2 .... )
+  #                archive2   ------- random-(split0 split1 split2 .... )
   egs_list=
   for n in $(seq $nj); do
     egs_list="$egs_list $dir/egs_orig.$n.JOB.ark"
@@ -361,6 +413,7 @@ if [ $stage -le 5 ]; then
     else
       output_archive="ark:$dir/egs.JOB.ark"
     fi
+    
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
       nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" $output_archive  || exit 1;
 

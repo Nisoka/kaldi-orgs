@@ -1223,8 +1223,11 @@ void ExtractRowRangeWithPadding(
       Matrix<BaseFloat> mat_out(num_rows, num_cols, kUndefined);
       for (int32 row = 0; row < num_rows; row++) {
         int32 row_in = row + row_offset;
-        if (row_in < 0) row_in = 0;
-        else if (row_in >= num_rows_in) row_in = num_rows_in - 1;
+        if (row_in < 0) 
+          row_in = 0;
+        else if (row_in >= num_rows_in) 
+          row_in = num_rows_in - 1;
+          
         SubVector<BaseFloat> vec_in(mat_in, row_in),
             vec_out(mat_out, row);
         vec_out.CopyFromVec(vec_in);
