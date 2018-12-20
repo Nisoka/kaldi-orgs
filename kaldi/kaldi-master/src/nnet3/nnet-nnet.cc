@@ -207,7 +207,7 @@ void Nnet::ReadConfig(std::istream &config_is) {
   // now "lines" will have comments removed and empty lines stripped out
 
   std::vector<ConfigLine> config_lines(lines.size());
-
+  // generate the vector<ConfigLine>, 
   ParseConfigLines(lines, &config_lines);
 
   // the next line will possibly remove some elements from "config_lines" so no

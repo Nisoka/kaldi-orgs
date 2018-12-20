@@ -29,6 +29,7 @@ int main(int argc, char *argv[]) {
     using namespace kaldi::nnet3;
     typedef kaldi::int32 int32;
 
+    // 可以向已经存在的模型中增加新的layers
     const char *usage =
         "Initialize nnet3 neural network from a config file; outputs 'raw' nnet\n"
         "without associated information such as transition model and priors.\n"

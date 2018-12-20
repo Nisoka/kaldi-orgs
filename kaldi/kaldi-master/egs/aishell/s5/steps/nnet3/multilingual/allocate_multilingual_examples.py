@@ -14,14 +14,14 @@
     egs.weight.*.ark map from the key of the example to the language-specific
     weight of that example.
 
-    egs.output.*.ark map from the key of the example to the name of
-
-    the output-node in the neural net for that specific language, e.g.
+    egs.output.*.ark map from the key of the example to the name of the output-node 
+    in the neural net for that specific language, e.g.
     'output-2'.
 ---------------------------------------
 
 
 
+    # 1 egs.ranges.*.txt
     This script additionally produces temporary files -- egs.ranges.*.txt,
     which are consumed by this script itself.
 
@@ -31,9 +31,11 @@
     selected from one of the input languages's scp files as:
     <lang> <local-scp-line> <num-examples>
 
-    可以被解释为 选择<num-example> 个样本, 
-    从egs_scp_list 中的lang/egs.scp 中选择 num-example 个example.
-    0 (lang1)  0 (start eg index) 256 (num-example)
+    可以被解释为 选择 <num-example> 个样本, 
+    从egs_scp_list 中的lang/egs.scp 中选择 num-example(minibatch_size) 个example.
+    0 (lang1-id)  0 (start eg index) 256 (num-example)
+    这样就在一次minibatch中就会只有一个任务， 而不同的minibatch就会是不同的训练任务，进而实现多语种同时训练。
+
     That can be interpreted as selecting <num-example> examples starting from
     <local-scp-line> line from {lang}_th 'egs' file in "egs_scp_list".
     (note that <local-scp-line> is the zero-based line number.)
@@ -42,8 +44,11 @@
     0 0 256
     2 1024 256
 
-    根据egs.ranges.*.txt的描述 生成egs.*.scp, 从 egs_scp_list 中选择第<lang>个 egs.scp 文件做源文件
-    然后egs.*.scp 中就描述了选择那些音频做一个eg (包含了多个音频examples)
+    根据egs.ranges.*.txt的描述 生成egs.*.scp, 
+    从某个lang的scp-file中 从<local-scp-line> 中选择连续的<num-examples>个样本cp-> egs.*.scp
+    貌似并没有使用egs.ranges.*.txt， 而是根据all_egs生成的.
+    从 egs_scp_list 中选择<lang-id> egs.scp 文件做源文件
+    然后egs.ranges.*.scp 就描述了<num-examples>个egs -> egs.*.scp
     egs.*.scp is generated using egs.ranges.*.txt as following:
     "<num-examples>" consecutive examples starting from line "<local-scp-line>"
     from {lang}_th input scp-file is copied to egs.*.scp.
@@ -60,8 +65,9 @@
     for validation examples and "combine." for examples used for model
     combination.
 
-    You can call this script as (e.g.):
 
+    # Usage:
+    You can call this script as (e.g.):
     allocate_multilingual_examples.py [opts] example-scp-lists
         multilingual-egs-dir
 
@@ -71,8 +77,10 @@
     To avoid loading whole scp files from all languages in memory,
     input egs.scp files are processed line by line using readline() for input
     languages. 
-    为了实现更多的随机交叉多个语种, 生成临时的 scp.<job>.<archive_index> 文件, 里面包含不同语种的样本
-    最终实现多个archives内部多个语种??
+
+
+    为了实现更多的随机交叉多个语种, 需要生成临时的 scp.<job>.<archive_index> 文件, 
+    然后合并<jobs> 最终实现多个egs.<archives>.scp
     To have more randomization across different archives,
     "num-jobs * num-archives" temporary scp.<job>.<archive_index> files are created
     in egs/temp dir and all "num_jobs" scp.*.<archive_index> combined into
@@ -186,13 +194,12 @@ def process_multilingual_egs(args):
     random.seed(args.seed)
     rand_select = args.random_lang
 
-    # read egs.scp for input languages
+    # read input languages egs.scp
     scp_lists = args.egs_scp_lists
     num_langs = len(scp_lists)
-
     scp_files = [open(scp_lists[lang], 'r') for lang in range(num_langs)]
 
-    # each lang's egs cnt
+    # each lang's egsCnt
     lang2len = [0] * num_langs
     for lang in range(num_langs):
         lang2len[lang] = sum(1 for line in open(scp_lists[lang]))
@@ -206,79 +213,100 @@ def process_multilingual_egs(args):
         lang2weight = args.lang2weight.split(",")
         assert(len(lang2weight) == num_langs)
 
+    # create tempdir
     if not os.path.exists("{0}/temp".format(args.egs_dir)):
         os.makedirs("{0}/temp".format(args.egs_dir))
+    # 实际上就是多任务训练方法， 并没有特别特殊的. num_tasks
     num_lang_file = open("{0}/info/{1}num_tasks".format(args.egs_dir, args.egs_prefix), "w")
     print("{0}".format(num_langs), file=num_lang_file)
 
-    # Each element of all_egs (one per num_archive * num_jobs) is
-    # an array of 3-tuples (lang-id, local-start-egs-line, num-egs)
+    # Each element of all_egs is an array of 3-tuples
+    # (lang-id, local-start-egs-line, num-egs)
     all_egs = []
-    # each lang's egs cnt
+    # each lang's egs cnt, 
+    # the lang2len never change, lang2len 
+    #     就是保存每个语种的egs数量
+    # the lang_len will be consumed, when the combine going
+    #     lang_len 是在描述，剩余未进行组合的每个语种的egs数量
     lang_len = lang2len[:]
+
+    #  ----------- archive cnt, egs cnt
+    #              归档文件总数， egs 总数
     # total num of egs in all languages
     tot_num_egs = sum(lang2len[i] for i in range(len(lang2len)))
-
     # tot_num_egs = samples_per_iter * num_archives
     num_archives = max(1, min(args.max_archives, tot_num_egs / args.samples_per_iter))
-
     num_arch_file = open("{0}/info/{1}num_archives".format(
                             args.egs_dir,
                             args.egs_prefix),
                          "w")
     print("{0}".format(num_archives), file=num_arch_file)
     num_arch_file.close()
-
+    
+    # ------ 每个archive里每个job的egs总数
     # tot_num_egs = samples_per_iter * num_archives
     # tot_num_egs = num_jobs * this_num_egs_per_archive * num_archives
-    # ==> samples_per_iter = num_jobs * this_num_egs_per_archives, 一次迭代消耗的egs.
-    # 每次迭代 并行num_jobs,
-    #          一起消耗一个archives,
-    #          一个archives中有 this_num_egs_per_archives.
+    # ==> samples_per_iter = num_jobs * this_num_egs_per_archives, 
+    # 一个 archive， 是一次迭代消耗的egs 归档， 而一次迭代，是多个job 并行。
+    # 一个archives中有 this_num_egs_per_archives * num_jobs
+    # 这就是上面说的，为了增加随机性， 使用一个临时无用的job 概念，对archive 进行再划分.
     this_num_egs_per_archive = tot_num_egs / (num_archives * args.num_jobs)
 
     logger.info("Generating {0}scp.<job>.<archive_index> temporary files used to "
                 "generate {0}<archive_index>.scp.".format(args.egs_prefix))
 
-    # each job has num_archives
     for job in range(args.num_jobs):
         for archive_index in range(num_archives):
 
+            # egsscp.job-id.archive-id
             # one archive file --- egscp.job.archive.
             # at then end , will combine the jobs egsscp.job.archive => egsscp.archive.
             archfile = open("{0}/temp/{1}scp.{2}.{3}"
                             "".format(args.egs_dir, args.egs_prefix,
                                       job + 1, archive_index + 1),
                             "w")
-            this_egs = [] # this will be array of 2-tuples (lang-id start-frame num-frames)
+            # this_egs 保存的是minibatch的描述。
+            # 一个archive 
+            #     n x job  (job== this_num_egs_per_archive)
+            #         n x minibatch
+            this_egs = [] # this will be array of 3-tuples (lang-id start-frame num-frames)
 
             num_egs = 0
+            # 累计存入的egs数量， 每个job 在每个archive上应该保存的egs数量
             while num_egs <= this_num_egs_per_archive:
                 # all egs.
                 num_left_egs = sum(num_left_egs_per_lang for
                                    num_left_egs_per_lang in lang_len)
                 if num_left_egs > 0:
                     # random select a lang.
+                    # 随机选择一个语种
                     lang_id = select_random_lang(lang_len, num_left_egs, rand_select)
+                    # 从选择语种中，取得该语种剩余的egs(lang_len)开始点
                     # from the selected lang , select start_eg_index.
-                    # lang2len will keep the all lang's example cnt,
-                    # and the lang_len will be shorter as going.
                     start_egs = lang2len[lang_id] - lang_len[lang_id]
-
-                    # this_egs is one eg in the egs.scp.???
-                    # this_egs --
-                    #     lang_id  start_pos  minibatch_size (examples)
+                    
+                    # this_egs    
+                    #        -- job 内minibatch的描述。 minibatch_per_job* minibatch_size 个egs
+                    # 内部
+                    # ---    minibatch-0     -- lang_id  start_pos  minibatch_size (examples)
+                    # ---    minibatch-1
+                    # ---    minibatch-2
+                    #           
                     this_egs.append((lang_id, start_egs, args.minibatch_size))
-
+                    
+                    # 从选择语种的scp_file 中逐行取得<eg-name save-postion> 
+                    # 写入archfile(临时 egsscp.job.archive文件)
                     # from the scp_files[lang_id] read minibatch write to archfile.
                     for scpline in range(args.minibatch_size):
                         scp_key = scp_files[lang_id].readline().splitlines()[0]
                         print("{0} {1}".format(scp_key, lang_id),
                               file=archfile)
-
-                    # update the lang_len[lang_id]
+                    
+                    # 更新 lang_len, 该语种剩余的数量逐渐减少， 下一次选择egs的开始点向后。
                     lang_len[lang_id] = lang_len[lang_id] - args.minibatch_size
                     num_egs = num_egs + args.minibatch_size
+
+                    # 如果该语种剩余的数量 小于minibatch， 直接不要了。
                     # If num of remaining egs in each lang is less than minibatch_size,
                     # they are discarded.
                     if lang_len[lang_id] < args.minibatch_size:
@@ -288,24 +316,43 @@ def process_multilingual_egs(args):
                 else:
                     logger.info("Done processing data for all languages.")
                     break
+
+            # all_egs 保存 this_egs
+            # 是个 二级list
+            # 
+            # 即 
+            # 保存了 num_archives * job 个 对job内的描述。
+            # [
+            # ---  archive-0 job-0  [this_egs]
+            # ---  archive-0 job-1  [this_egs]
+            # ---  archive-0 job-2  [this_egs]
+            # ---  archive-1 job-0  [this_egs]
+            # ---  archive-2 job-1  [this_egs]
+            # ---  archive-3 job-2  [this_egs]
+            # ]
+            # .....
             all_egs.append(this_egs)
             archfile.close()
 
+    # 下面 组合为了增加随机性 而引入的job域, 最终保持为 num_archives个egs.*.scp
     logger.info("combining egs.<job>.*.scp across all jobs into egs.*.scp file.")
     for archive in range(num_archives):
         logger.info("Combine {0}job.{1}.scp across all jobs into "
                     "{0}{1}.scp.".format(args.egs_prefix, archive))
         this_ranges = []
+        # ranges
         f = open("{0}/temp/{1}ranges.{2}.txt".format(
                     args.egs_dir, args.egs_prefix, archive + 1),
                  'w')
+        # output, <eg-name  output-node>
         o = open("{0}/{1}output.{2}.ark".format(
                     args.egs_dir, args.egs_prefix, archive + 1),
                  'w')
+        # weight
         w = open("{0}/{1}weight.{2}.ark".format(
                     args.egs_dir, args.egs_prefix, archive + 1),
                  'w')
-        
+        # egs.*.scp  <eg-name save-postion>
         scp_per_archive_file = open("{0}/{1}{2}.scp"
                                     "".format(args.egs_dir,
                                               args.egs_prefix, archive + 1),
@@ -321,28 +368,33 @@ def process_multilingual_egs(args):
         if scp_per_archive_file is None:
             raise Exception("Error opening file {0}".format(scp_per_archive_file))
 
+        # 当前archive下的所有job （<job>.<archive>) 进行合并
         for job in range(args.num_jobs):
             scp = ("{0}/temp/{1}scp.{2}.{3}".format(args.egs_dir, args.egs_prefix,
                                                     job + 1, archive + 1))
             with open(scp, "r") as scpfile:
+                # 逐个eg
                 for line in scpfile:
                     scp_line = line.splitlines()[0].split()
                     print("{0} {1}".format(scp_line[0], scp_line[1]),
                           file=scp_per_archive_file)
+
                     print("{0} output-{1}".format(scp_line[0], scp_line[2]),
                           file=o)
+
                     print("{0} {1}".format(
                             scp_line[0],
                             lang2weight[int(scp_line[2])]),
                           file=w)
             os.remove(scp)
 
-        for (lang_id, start_eg_line, num_egs) in all_egs[num_archives * job + archive]:
-            this_ranges.append((lang_id, start_eg_line, num_egs))
-
-        # write egs.ranges.*.txt
-        for (lang_id, start_eg_line, num_egs) in this_ranges:
-            print("{0} {1} {2}".format(lang_id, start_eg_line, num_egs), file=f)
+            # 保存了 num_archives * job 个job内的minibatch的描述.
+            # ranges ???
+            for (lang_id, start_eg_line, num_egs) in all_egs[num_archives * job + archive]:
+                this_ranges.append((lang_id, start_eg_line, num_egs))
+            # write egs.ranges.*.txt
+            for (lang_id, start_eg_line, num_egs) in this_ranges:
+                print("{0} {1} {2}".format(lang_id, start_eg_line, num_egs), file=f)
 
         f.close()
         o.close()

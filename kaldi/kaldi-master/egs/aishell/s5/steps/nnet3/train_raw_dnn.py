@@ -209,7 +209,10 @@ def train(args, run_opts):
                                              dir=args.dir))
 
     default_egs_dir = '{0}/egs'.format(args.dir)
+    # egs_dir is merge egs dir
+    # stage === -10?
     if (args.stage <= -4) and args.egs_dir is None:
+        # if not supply egs_dir, so generate here!!
         if args.targets_scp is None or args.feat_dir is None:
             raise Exception("If you don't supply the --egs-dir option, the "
                             "--targets-scp and --feat-dir options are required.")

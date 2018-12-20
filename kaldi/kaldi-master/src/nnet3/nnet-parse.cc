@@ -27,7 +27,9 @@
 namespace kaldi {
 namespace nnet3 {
 
-
+// eg:
+// component name=tdnn1.renorm type=NormalizeComponent dim=1024        target-rms=1.0 add-log-stddev=false
+// component-node name=tdnn1.renorm component=tdnn1.renorm input=tdnn1.relu
 bool ConfigLine::ParseLine(const std::string &line) {
   data_.clear();
   whole_line_ = line;
@@ -37,7 +39,8 @@ bool ConfigLine::ParseLine(const std::string &line) {
   if (pos == size)
     return false;  // whitespace-only line
   size_t first_token_start_pos = pos;
-  // first get first_token_.
+  // first get first_token_. (first_token_start_pos -- 1 space, 2 =)
+  // 1 normalize: space, get component or component-node
   while (!isspace(line[pos]) && pos < size) {
     if (line[pos] == '=') {
       // If the first block of non-whitespace looks like "foo-bar=...",
@@ -48,6 +51,7 @@ bool ConfigLine::ParseLine(const std::string &line) {
     }
     pos++;
   }
+  // component / component-node, not have a '=' follow
   first_token_ = std::string(line, first_token_start_pos, pos - first_token_start_pos);
   // first_token_ is expected to be either empty or something like
   // "component-node", which actually is a slightly more restrictive set of
@@ -55,7 +59,10 @@ bool ConfigLine::ParseLine(const std::string &line) {
   if (!first_token_.empty() && !IsValidName(first_token_))
     return false;
 
+  // find other tokens !!!
+  //   must be -- key=value struct 
   while (pos < size) {
+    // find next token start
     if (isspace(line[pos])) {
       pos++;
       continue;
@@ -68,11 +75,15 @@ bool ConfigLine::ParseLine(const std::string &line) {
       // or it's not preceded by something, it's a parsing failure.
       return false;
     }
+    // eg:
+    // name=tdnn1.renorm    type=NormalizeComponent  dim=128
+    // data_.add(<key, <value, false>> <key, <value, false>>)
+
     std::string key(line, pos, next_equals_sign - pos);
     if (!IsValidName(key)) return false;
 
     // handle any quotes.  we support key='blah blah' or key="foo bar".
-    // no escaping is supported.
+    // no escaping(';') is supported.
     if (line[next_equals_sign+1] == '\'' || line[next_equals_sign+1] == '"') {
       char my_quote = line[next_equals_sign+1];
       size_t next_quote = line.find_first_of(my_quote, next_equals_sign + 2);

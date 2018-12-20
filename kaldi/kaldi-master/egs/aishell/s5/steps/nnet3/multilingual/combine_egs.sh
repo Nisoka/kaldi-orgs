@@ -8,18 +8,24 @@
 # egs.*.scp, egs.output.*.ark, egs.weight.*.ark
 #
 
+# 0 eg-name ????
+
+# 1 egs.*.scp 
+# 只是 langs 的所有egs 进行组合， 组合的方式也是 key-pos map的组合。
 # combine the multi lang's egs.*.ark to  merged egs.*.scp.
 # egs.*.scp is a map :
 #   eg-name-1 /path/lang1/egs.n.ark:xxxxx  ; identify that the eg-name-1 belong to lang1
 #   eg-name-2 /path/lang3/egs.n.ark:xxxxx  ; identify that the eg-name-2 belong to lang3
 # egs.*.scp are the SCP files of the training examples.
 
-
+# 2 egs.weight.*.ark 
 #   eg-name-1 0.3  ; the lang1's weight
 #   eg-name-2 0.4  ; the lang3's weight
 # egs.weight.*.ark map from the key of the example to the language-specific
 # weight of that example.
 
+# 3 egs.output.*.ark
+#   eg --> output-node (多任务训练方法) 训练时对于不同的eg， 就换进行不同任务的训练。进而实现多语种同时训练。
 # ----------------------------------------------------------
 #   eg-name-1 output-0 ; when use the eg-n(belong lang1) eg train the nnet, change the output-0 as output node.
 #   eg-name-2 output-2 ; when use the eg-n(belong lang2) eg train the nnet, change the output-2 as output node.

@@ -402,7 +402,7 @@ if [ $stage -le 5 ]; then
   #                archive0   ------- random-(split0 split1 split2 .... )
   #                archive1   ------- random-(split0 split1 split2 .... )
   #                archive2   ------- random-(split0 split1 split2 .... )
-  egs_list=
+  egs_list= 
   for n in $(seq $nj); do
     egs_list="$egs_list $dir/egs_orig.$n.JOB.ark"
   done

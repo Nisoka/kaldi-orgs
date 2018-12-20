@@ -396,6 +396,7 @@ class XconfigInputLayer(XconfigLayerBase):
 
         # unlike other layers the input layers need to be printed in
         # 'init.config' (which initializes the neural network prior to the LDA)
+        # ans is a tuple List, (config_name, xconfig_descript)
         ans = []
         for config_name in ['init', 'ref', 'final']:
             ans.append((config_name,

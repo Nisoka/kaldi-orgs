@@ -825,7 +825,6 @@ void UtteranceSplitter::GetGapSizes(int32 utterance_length,
   }
 }
 
-
 void UtteranceSplitter::GetChunksForUtterance(
     int32 utterance_length,
     std::vector<ChunkTimeInfo> *chunk_info) {

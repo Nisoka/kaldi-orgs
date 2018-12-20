@@ -77,6 +77,7 @@ class ConfigLine {
   // the first token of the line, e.g. if line is
   // foo-bar baz=bing
   // then first_token_ would be "foo-bar".
+  // normalize: component component-node
   std::string first_token_;
 
   // data_ maps from key to (value, is-this-value-consumed?).

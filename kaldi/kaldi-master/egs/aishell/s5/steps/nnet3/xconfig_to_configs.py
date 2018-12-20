@@ -175,6 +175,32 @@ def get_config_headers():
 
 
 # This is where most of the work of this program happens.
+# 使用简单的 network.xconfig(run_xxx.sh 生成的)
+# 生成为 最终可给 nnet3-init 等程序识别并生成对应Component的init.config ref.config 等.
+# network.xconfig ------
+#   input dim=$feat_dim name=input
+#   relu-renorm-layer name=tdnn1 input=Append(input@-2,input@-1,input,input@1,input@2$ivector_to_append) dim=1024
+#   relu-renorm-layer name=tdnn2 dim=1024
+#   relu-renorm-layer name=tdnn3 input=Append(-1,2) dim=1024
+#   relu-renorm-layer name=tdnn4 input=Append(-3,3) dim=1024
+#   relu-renorm-layer name=tdnn5 input=Append(-3,3) dim=1024
+#   relu-renorm-layer name=tdnn6 input=Append(-7,2) dim=1024
+#   relu-renorm-layer name=tdnn_bn dim=$bnf_dim
+#   output name=output dim=100
+# init.config -----
+#   input-node name=input dim=64
+#   component name=tdnn1.affine type=NaturalGradientAffineComponent input-dim=320 output-dim=1024  max-change=0.75
+#   component-node name=tdnn1.affine component=tdnn1.affine input=Append(Offset(input, -2), Offset(input, -1), input, Offset(input, 1), Offset(input, 2))
+#   component name=tdnn1.relu type=RectifiedLinearComponent dim=1024 self-repair-scale=1e-05
+#   component-node name=tdnn1.relu component=tdnn1.relu input=tdnn1.affine
+#   component name=tdnn1.renorm type=NormalizeComponent dim=1024 target-rms=1.0 add-log-stddev=false
+#   component-node name=tdnn1.renorm component=tdnn1.renorm input=tdnn1.relu
+#   component name=tdnn2.affine type=NaturalGradientAffineComponent input-dim=1024 output-dim=1024  max-change=0.75
+#   component-node name=tdnn2.affine component=tdnn2.affine input=tdnn1.renorm
+#   component name=tdnn2.relu type=RectifiedLinearComponent dim=1024 self-repair-scale=1e-05
+#   component-node name=tdnn2.relu component=tdnn2.relu input=tdnn2.affine
+#  .....
+
 def write_config_files(config_dir, all_layers):
     # config_basename_to_lines is
     # map from the basename of the config, as a string (i.e. 'ref', 'all', 'init')
@@ -341,7 +367,7 @@ if __name__ == '__main__':
 
 # test:
 # mkdir -p foo; (echo 'input dim=40 name=input'; echo 'output name=output input=Append(-1,0,1)')  >xconfig; ./xconfig_to_configs.py xconfig foo
-#  mkdir -p foo; (echo 'input dim=40 name=input'; echo 'output-layer name=output dim=1924 input=Append(-1,0,1)')  >xconfig; ./xconfig_to_configs.py xconfig foo
+# mkdir -p foo; (echo 'input dim=40 name=input'; echo 'output-layer name=output dim=1924 input=Append(-1,0,1)')  >xconfig; ./xconfig_to_configs.py xconfig foo
 
 # mkdir -p foo; (echo 'input dim=40 name=input'; echo 'relu-renorm-layer name=affine1 dim=1024'; echo 'output-layer name=output dim=1924 input=Append(-1,0,1)')  >xconfig; ./xconfig_to_configs.py xconfig foo
 
