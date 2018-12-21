@@ -266,20 +266,23 @@ def train(args, run_opts):
                                          left_context, right_context))
     assert str(args.frames_per_eg) == frames_per_eg_str
 
+    # 12(run_tdnn_multilingual.sh)
+    # in allocate_multilingual_examples.py
+    # num_archives = max(1, min(args.max_archives, tot_num_egs / args.samples_per_iter))
     if args.num_jobs_final > num_archives:
         raise Exception('num_jobs_final cannot exceed the number of archives '
                         'in the egs directory')
 
-    # copy the properties of the egs to dir for
-    # use during decoding
+    # copy the properties of the egs to dir for use during decoding
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
+    #  ??? what for?? 计算输入特征的预处理矩阵????
     if args.stage <= -3 and os.path.exists(args.dir+"/configs/init.config"):
         logger.info('Computing the preconditioning matrix for input features')
 
         train_lib.common.compute_preconditioning_matrix(
             args.dir, egs_dir, num_archives, run_opts,
-            max_lda_jobs=args.max_lda_jobs,
+            max_lda_jobs=args.max_lda_jobs,                # 10
             rand_prune=args.rand_prune)
 
     if args.stage <= -1:

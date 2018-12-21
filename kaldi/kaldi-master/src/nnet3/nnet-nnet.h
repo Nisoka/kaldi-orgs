@@ -56,28 +56,37 @@ enum NodeType { kInput, kDescriptor, kComponent, kDimRange, kNone };
 
 
 
-/// NetworkNode is used to represent, three types of thing: either an input of the
-/// network (which pretty much just states the dimension of the input vector);
-/// a Component (e.g. an affine component or a sigmoid component); or a Descriptor.
-/// A Descriptor is basically an expression that can do things like append
-/// the outputs of other components (or inputs) together, add them together, and
-/// do various other things like shifting the time index.
+/// NetworkNode is used to represent, 
+//  three types of thing: 
+//  an input of the network 
+//      (which pretty much just states the dimension of the input vector);
+
+/// a Component 
+//      (e.g. an affine component or a sigmoid component); 
+
+//  or a Descriptor.
+///     A Descriptor is basically an expression that can do things like append
+///     the outputs of other components (or inputs) together, add them together, and
+///     do various other things like shifting the time index.
 ///
-/// Each Component must have an input of type kDescriptor that is numbered
-/// Preceding to the Component, and that is not used elsewhere.  This may seem
-/// unintuitive but it makes the implementation a lot easier; any apparent waste
-/// can be optimized out after compilation.  And outputs must also be of type
-/// kDescriptor.
+/// Each Component must have an input of type kDescriptor 
+//    that is numbered Preceding to the Component, 
+//    and that is not used elsewhere.  
+//    This may seem unintuitive(直觉的) 
+//    but it makes the implementation a lot easier; 
+//    any apparent waste can be optimized out after compilation.  
+//    And outputs must also be of type kDescriptor.
 ///
 /// Note: in the actual computation you can provide input not only to nodes of
 /// type kInput but also to nodes of type kComponent; this is useful in things
 /// like recurrent nets where you may want to split the computation up into
 /// pieces.
 ///
-/// Note that in the config-file format, there are three types of node: input,
-/// component and output.  output maps to kDescriptor, but the nodes of type
-/// kDescriptor that represent the input to a component, are described in the
-/// same config-file line as the Component itself.
+/// Note that in the config-file format, 
+//   there are three types of node: input, component and output.  
+//   output maps to kDescriptor, 
+//   but the nodes of type kDescriptor that represent the input to a component, are described in the
+///  same config-file line as the Component itself.
 struct NetworkNode {
   NodeType node_type;
   // "descriptor" is relevant only for nodes of type kDescriptor.
@@ -85,7 +94,7 @@ struct NetworkNode {
   union {
     // For kComponent, the index into Nnet::components_
     int32 component_index;
-    // for kDimRange, the node-index of the input node, which must be of
+    // For kDimRange,  the node-index of the input node, which must be of
     // type kComponent or kInput.
     int32 node_index;
 
@@ -96,10 +105,11 @@ struct NetworkNode {
     // ignore it.  View it as a kind of annotation.
     ObjectiveType objective_type;
   } u;
-  // for kInput, the dimension of the input feature.  For kDimRange, the dimension
-  // of the output (i.e. the length of the range)
+  // For kInput, the dimension of the input feature.  
+  // For kDimRange, the dimension of the output (i.e. the length of the range)
   int32 dim;
-  // for kDimRange, the dimension of the offset into the input component's feature.
+  // For kDimRange, the dimension of the offset into the input component's feature.
+  // kDimRange 是对输入component's 输出的一个范围截断.
   int32 dim_offset;
 
   int32 Dim(const Nnet &nnet) const;  // Dimension that this node outputs.

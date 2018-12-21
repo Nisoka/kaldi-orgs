@@ -210,8 +210,8 @@ void Nnet::ReadConfig(std::istream &config_is) {
   // generate the vector<ConfigLine>, 
   ParseConfigLines(lines, &config_lines);
 
-  // the next line will possibly remove some elements from "config_lines" so no
-  // node or component is doubly defined, always keeping the second repeat.
+  // the next line will possibly remove some elements from "config_lines" 
+  // so no node or component is doubly defined, always keeping the second repeat.
   // Things being doubly defined can happen when a previously existing node or
   // component is redefined in a new config file.
   RemoveRedundantConfigLines(num_lines_initial, &config_lines);
@@ -220,6 +220,8 @@ void Nnet::ReadConfig(std::istream &config_is) {
   for (int32 pass = 0; pass <= 1; pass++) {
     for (size_t i = 0; i < config_lines.size(); i++) {
       const std::string &first_token = config_lines[i].FirstToken();
+      // for components and input-node only process once,
+      // but for other nodes process twices
       if (first_token == "component") {
         if (pass == 0)
           ProcessComponentConfigLine(initial_num_components,
@@ -242,7 +244,10 @@ void Nnet::ReadConfig(std::istream &config_is) {
   Check();
 }
 
-
+// component name=tdnn1.renorm type=NormalizeComponent dim=1024        target-rms=1.0 add-log-stddev=false
+// 1 InitFromConfig ==> a Component
+// 2 components_.push_back NormalizeComponent
+// 3 component_names_.push_back tdnn1.renorm
 // called only on pass 0 of ReadConfig.
 void Nnet::ProcessComponentConfigLine(
     int32 initial_num_components,
@@ -282,7 +287,20 @@ void Nnet::ProcessComponentConfigLine(
               << " in config line: " << config->WholeLine();
 }
 
-
+// component name=tdnn1.renorm type=NormalizeComponent dim=1024        target-rms=1.0 add-log-stddev=false
+// component-node name=tdnn1.renorm component=tdnn1.renorm input=tdnn1.relu
+// 这里 处理的就是 tdnn1.renorm, 
+// pass==0 时
+//  1 nodes_.append kDescriptor
+//  2 nodes_.append kComponent
+//  3 node_names_.push_back(input_name);  tdnn1.renorm_input
+//  4 node_names_.push_back(name);        tdnn1.renorm
+// pass == 1
+//  1 get component域的值 ---- tdnn1.renorm
+//  2 get tdnn1.renorm 在  > 类成员 components_ < 中的索引 component_index
+//  3 set nodes_[node_index].u.component_index = component_index; 设置NetworkNode 需要的计算操作 Component-index
+//  4 get input 域Descriptort --- dnn1.relu
+//  5 构造Descritpor
 void Nnet::ProcessComponentNodeConfigLine(
     int32 pass,
     ConfigLine *config) {
@@ -292,14 +310,20 @@ void Nnet::ProcessComponentNodeConfigLine(
     KALDI_ERR << "Expected field name=<component-name> in config line: "
               << config->WholeLine();
 
+  // component-node will be
+  //  1 kDescriptor-node     input_name    input_node_index
+  //  2 kComponent-node      name          node_index
   std::string input_name = name + std::string("_input");
   int32 input_node_index = GetNodeIndex(input_name),
-      node_index = GetNodeIndex(name);
+        node_index = GetNodeIndex(name);
 
   if (pass == 0) {
     KALDI_ASSERT(input_node_index == -1 && node_index == -1);
     // just set up the node types and names for now, we'll properly set them up
     // on pass 1.
+    // pass==0, 时 对一个Component-node的处理是直接先生成2个nodes_
+    //  1 kDescriptor --- name == component-node_name_value_input
+    //  2 kComponent  --- name == component-node_name_value
     nodes_.push_back(NetworkNode(kDescriptor));
     nodes_.push_back(NetworkNode(kComponent));
     node_names_.push_back(input_name);
@@ -307,7 +331,10 @@ void Nnet::ProcessComponentNodeConfigLine(
     return;
   } else {
     KALDI_ASSERT(input_node_index != -1 && node_index == input_node_index + 1);
+    // 1 component filed --- component
+    // 2 component-index in components_
     std::string component_name, input_descriptor;
+    // 获得 component-node component=affixe, 中的affixe name, 
     if (!config->GetValue("component", &component_name))
       KALDI_ERR << "Expected component=<component-name>, in config line: "
                 << config->WholeLine();
@@ -315,15 +342,24 @@ void Nnet::ProcessComponentNodeConfigLine(
     if (component_index == -1)
       KALDI_ERR << "No component named '" << component_name
                 << "', in config line: " << config->WholeLine();
+    
+    // 3 set the component-node's componet is component_index
+    // component-node's NetworkNode 的 component_index 设置为 对应的component NetworkNode的index
     nodes_[node_index].u.component_index = component_index;
 
+    // 4 get input descriptor
     if (!config->GetValue("input", &input_descriptor))
       KALDI_ERR << "Expected input=<input-descriptor>, in config line: "
                 << config->WholeLine();
+    // 5 parse the Descriptor to tokens
     std::vector<std::string> tokens;
     if (!DescriptorTokenize(input_descriptor, &tokens))
       KALDI_ERR << "Error tokenizing descriptor in config line "
                 << config->WholeLine();
+
+    // 6 get all the node_names_temp
+    //    将会根据Descriptor的tokens描述, 链接上node_names_temp
+    //    构建descritpor
     std::vector<std::string> node_names_temp;
     GetSomeNodeNames(&node_names_temp);
     tokens.push_back("end of input");
@@ -332,6 +368,9 @@ void Nnet::ProcessComponentNodeConfigLine(
                                                    &next_token))
       KALDI_ERR << "Error parsing Descriptor in config line: "
                 << config->WholeLine();
+
+
+
     if (config->HasUnusedValues())
       KALDI_ERR << "Unused values '" << config->UnusedValues()
                 << " in config line: " << config->WholeLine();
@@ -480,6 +519,10 @@ int32 Nnet::GetComponentIndex(const std::string &component_name) const {
 }
 
 
+// config_lines 由两部分组成
+// 1 nnet 生成的 具有node 信息的config
+// 2 use 提供的config
+
 // note: the input to this function is a config generated from the nnet,
 // containing the node info, concatenated with a config provided by the user.
 //static
@@ -487,12 +530,14 @@ void Nnet::RemoveRedundantConfigLines(int32 num_lines_initial,
                                       std::vector<ConfigLine> *config_lines) {
   int32 num_lines = config_lines->size();
   KALDI_ASSERT(num_lines_initial <= num_lines);
+  
   // node names and component names live in different namespaces.
   unordered_map<std::string, int32, StringHasher> node_name_to_most_recent_line;
   unordered_set<std::string, StringHasher> component_names;
   typedef unordered_map<std::string, int32, StringHasher>::iterator IterType;
 
   std::vector<bool> to_remove(num_lines, false);
+
   for (int32 line = 0; line < num_lines; line++) {
     ConfigLine &config_line = (*config_lines)[line];
     std::string name;
@@ -502,6 +547,7 @@ void Nnet::RemoveRedundantConfigLines(int32 num_lines_initial,
     if (!IsValidName(name))
       KALDI_ERR << "Name '" << name << "' is not allowable, in line: "
                 << config_line.WholeLine();
+
     if (config_line.FirstToken() == "component") {
       // a line starting with "component"... components live in their own
       // namespace.  No repeats are allowed because we never wrote them

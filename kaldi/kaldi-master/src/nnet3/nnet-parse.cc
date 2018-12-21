@@ -30,6 +30,9 @@ namespace nnet3 {
 // eg:
 // component name=tdnn1.renorm type=NormalizeComponent dim=1024        target-rms=1.0 add-log-stddev=false
 // component-node name=tdnn1.renorm component=tdnn1.renorm input=tdnn1.relu
+// ConfigLine: 
+//     1 first_token
+//     2 data_ (<key, <value, false>>)
 bool ConfigLine::ParseLine(const std::string &line) {
   data_.clear();
   whole_line_ = line;
