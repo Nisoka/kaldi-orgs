@@ -82,6 +82,11 @@ static void GetIoSizes(const std::vector<NnetExample> &src,
 
 
 
+// eg: 32 个 NnetExample
+//     每个里面有 3个NnetIo
+//                   1 name=input   <Index, Index, Index ...> 8
+//                   2 name=ivector <Index> 1
+//                   3 name=output  <Index, Index, Index ...> 8
 
 // Do the final merging of NnetIo, once we have obtained the names, dims and
 // sizes for each feature/supervision type.
@@ -90,27 +95,42 @@ static void MergeIo(const std::vector<NnetExample> &src,
                     const std::vector<int32> &sizes,
                     bool compress,
                     NnetExample *merged_eg) {
+  // 全部数量的Indexes???? 实际上应该是 NnetIo的类别数量
   // The total number of Indexes we have across all examples.
+  // num_feats = <input, ivector, output>.size
   int32 num_feats = names.size();
-
   std::vector<int32> cur_size(num_feats, 0);
 
+  // <  
+  //    <Matrix Matrix Matrix>     for input
+  //    <Matrix Matrix Matrix>     for ivector
+  //    <Matrix Matrix Matrix>     for output
+  // >
+  // 
   // The features in the different NnetIo in the Indexes across all examples
   std::vector<std::vector<GeneralMatrix const*> > output_lists(num_feats);
 
   // Initialize the merged_eg
+  // 这样让merged_eg 按照NnetIo name合并32个NnetExample内的所有Index,
   merged_eg->io.clear();
   merged_eg->io.resize(num_feats);
   for (int32 f = 0; f < num_feats; f++) {
     NnetIo &io = merged_eg->io[f];
     int32 size = sizes[f];
     KALDI_ASSERT(size > 0);
+    // 安排 input, output, ivector
     io.name = names[f];
+    // 安排, 
+    // input   的 <Index, Index, Index, ...> 8 * 32 个 Index
+    // ivector 的 <Index>                    1 * 32 个 Index
+    // output  的 <Index, Index, Index, ...> 8 * 32 个 Index
     io.indexes.resize(size);
   }
 
+  // 
   std::vector<std::string>::const_iterator names_begin = names.begin(),
                                              names_end = names.end();
+  // src 是32个NnetExamples
   std::vector<NnetExample>::const_iterator eg_iter = src.begin(),
     eg_end = src.end();
   for (int32 n = 0; eg_iter != eg_end; ++eg_iter, ++n) {
@@ -158,16 +178,28 @@ static void MergeIo(const std::vector<NnetExample> &src,
 }
 
 
+// eg: 32 个 NnetExample
+//     每个里面有 3个NnetIo
+//                   1 name=input   <Index, Index, Index ...> 8
+//                   2 name=ivector <Index> 1
+//                   3 name=output  <Index, Index, Index ...> 8
 
 void MergeExamples(const std::vector<NnetExample> &src,
                    bool compress,
                    NnetExample *merged_eg) {
   KALDI_ASSERT(!src.empty());
+  // 多个NnetExample的所有 NnetIo的name(std::set不重复的vector)
+  // eg: [input, ivector, output]
   std::vector<std::string> io_names;
   GetIoNames(src, &io_names);
+
+  // 不同name下的全部index count
+  // eg: [8*32, 1*32, 8*32]
   // the sizes are the total number of Indexes we have across all examples.
   std::vector<int32> io_sizes;
   GetIoSizes(src, io_names, &io_sizes);
+  
+  // 
   MergeIo(src, io_names, io_sizes, compress, merged_eg);
 }
 
@@ -966,6 +998,7 @@ bool ExampleMergingConfig::ParseIntSet(const std::string &str,
   return true;
 }
 
+// e.g. --mini_batch=1:64
 void ExampleMergingConfig::ComputeDerived() {
   if (measure_output_frames != "deprecated") {
     KALDI_WARN << "The --measure-output-frames option is deprecated "
@@ -975,12 +1008,14 @@ void ExampleMergingConfig::ComputeDerived() {
     KALDI_WARN << "The --discard-partial-minibatches option is deprecated "
         "and will be ignored.";
   }
+  // minibatch_size_split=1:64
   std::vector<std::string> minibatch_size_split;
   SplitStringToVector(minibatch_size, "/", false, &minibatch_size_split);
   if (minibatch_size_split.empty()) {
     KALDI_ERR << "Invalid option --minibatch-size=" << minibatch_size;
   }
 
+  // rules = [<?, InSet<1, 64>>  ]
   rules.resize(minibatch_size_split.size());
   for (size_t i = 0; i < minibatch_size_split.size(); i++) {
     int32 &eg_size = rules[i].first;
@@ -1025,6 +1060,10 @@ void ExampleMergingConfig::ComputeDerived() {
   }
 }
 
+// config_ e.g. 
+// rules = [ <?, InSet<1, 64>>  ]
+// size_of_eg = 8
+// input_ended false
 int32 ExampleMergingConfig::MinibatchSize(int32 size_of_eg,
                                           int32 num_available_egs,
                                           bool input_ended) const {
@@ -1035,6 +1074,9 @@ int32 ExampleMergingConfig::MinibatchSize(int32 size_of_eg,
         "MinibatchSize().";
   int32 min_distance = std::numeric_limits<int32>::max(),
       closest_rule_index = 0;
+  
+  // size_of_eg is frames_per_eg
+  // in e.g. : min_distance = 7, closet_rule_index = 0
   for (int32 i = 0; i < num_rules; i++) {
     int32 distance = std::abs(size_of_eg - rules[i].first);
     if (distance < min_distance) {
@@ -1043,6 +1085,12 @@ int32 ExampleMergingConfig::MinibatchSize(int32 size_of_eg,
     }
   }
   if (!input_ended) {
+    // e.g. minibatch=1:64 (1:64 是一个配置， 就是在1之内到64， 就会使用64的minibatch?)
+    // 这里根据 merge 的规则 (minibatch)
+    // 找到最合适的 batch 选择 这里就是64, 如果有其他的配置， 会选择更接近的.
+    // 当已经读取好的egs数量 -- num_availabel_egs > lagerst_size(64--minibatch_size) 时
+    // 就会返回largest_size, 准备写入egs.ark中.
+
     // until the input ends, we can only use the largest available
     // minibatch-size (otherwise, we could expect more later).
     int32 largest_size = rules[closest_rule_index].second.largest_size;
@@ -1211,9 +1259,12 @@ void ExampleMerger::AcceptExample(NnetExample *eg) {
   // element of the vector.
   std::vector<NnetExample*> &vec = eg_to_egs_[eg];
   vec.push_back(eg);
+  // NnetExample 内 NnetIo 内的 Index样本数量(frames_per_eg)
   int32 eg_size = GetNnetExampleSize(*eg),
       num_available = vec.size();
   bool input_ended = false;
+  // 寻找config_ 中最符合 eg_size(frames_per_eg)的merge_minibatch
+  // 如果数据量够了. 返回 merge_minibatch, or 0
   int32 minibatch_size = config_.MinibatchSize(eg_size, num_available,
                                                input_ended);
   if (minibatch_size != 0) {  // we need to write out a merged eg.
@@ -1229,19 +1280,27 @@ void ExampleMerger::AcceptExample(NnetExample *eg) {
       egs_to_merge[i].Swap(vec_copy[i]);
       delete vec_copy[i];  // we owned those pointers.
     }
+    // 将merge_minibatch 个NnetExample 合并为一个NnetExample
+    // 主要是合并内部的NnetIo, 会修改其中Index的 t n x. 
     WriteMinibatch(egs_to_merge);
   }
 }
 
 void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
   KALDI_ASSERT(!egs.empty());
+  // 准备合并的 NnetExamples 
+  // 这种NnetExample的规格 -- frames_per_eg
   int32 eg_size = GetNnetExampleSize(egs[0]);
   NnetExampleStructureHasher eg_hasher;
   size_t structure_hash = eg_hasher(egs[0]);
   int32 minibatch_size = egs.size();
+  
   stats_.WroteExample(eg_size, structure_hash, minibatch_size);
+
+  // Merge minibatch_size 的 NnetExample,主要进行参数修改.
   NnetExample merged_eg;
   MergeExamples(egs, config_.compress, &merged_eg);
+
   std::ostringstream key;
   key << "merged-" << (num_egs_written_++) << "-" << minibatch_size;
   writer_->Write(key.str(), merged_eg);

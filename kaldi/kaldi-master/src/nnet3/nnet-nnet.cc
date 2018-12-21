@@ -697,6 +697,8 @@ void Nnet::Check(bool warn_for_orphans) const {
     num_input_nodes = 0,
     num_output_nodes = 0;
   KALDI_ASSERT(num_nodes != 0);
+  // ----------------
+  //      check on the NetworkNodes
   for (int32 n = 0; n < num_nodes; n++) {
     const NetworkNode &node = nodes_[n];
     std::string node_name = node_names_[n];
@@ -710,6 +712,8 @@ void Nnet::Check(bool warn_for_orphans) const {
         if (IsOutputNode(n))
           num_output_nodes++;
         std::vector<int32> node_deps;
+        //the component-node must have a descriptor frontEnd, 
+        // to descript it's input, so those inputs descript current component-node's dependence .
         node.descriptor.GetNodeDependencies(&node_deps);
         SortAndUniq(&node_deps);
         for (size_t i = 0; i < node_deps.size(); i++) {
@@ -762,7 +766,9 @@ void Nnet::Check(bool warn_for_orphans) const {
         KALDI_ERR << "Invalid node type for node " << node_name;
     }
   }
-
+  
+  // ----------------
+  //      check on the components_
   int32 num_components = components_.size();
   for (int32 c = 0; c < num_components; c++) {
     const std::string &component_name = component_names_[c];

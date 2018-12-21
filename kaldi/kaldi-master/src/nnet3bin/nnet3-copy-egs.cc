@@ -36,6 +36,11 @@ void RenameIoNames(const std::string &old_name,
   for (int32 io_ind = 0; io_ind < io_size; io_ind++)
     orig_io_list.push_back(eg_modified->io[io_ind].name);
 
+  // 一个NnetExample 具有多个NnetIo, 但是相同name 的只有一个
+  // eg: NnetExmaple
+  //     NnetIo   name=input   features= Matrix
+  //     NnetIo   name=ivector features=Matrxi
+  //     NnetIo   name=output  features=(label 的oneHot 矩阵)
   // find the io in eg with name 'old_name'.
   int32 rename_io_ind =
      std::find(orig_io_list.begin(), orig_io_list.end(), old_name) -
@@ -55,6 +60,7 @@ void ScaleAndRenameOutput(BaseFloat weight,
   // scale the supervision weight for egs
   for (int32 i = 0; i < eg->io.size(); i++)
     if (eg->io[i].name == "output")
+      // 对于output NnetIo, feature 是 
       if (weight != 0.0 && weight != 1.0)
         eg->io[i].features.Scale(weight);
   // rename output io name to 'new_output_name'.
@@ -376,10 +382,15 @@ int main(int argc, char *argv[]) {
 
     int64 num_read = 0, num_written = 0, num_err = 0;
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
+      // 当进行多任务训练(eg multilingual 训练时), 
+      // 1 需要 eg对应的output 描述
+      // 2 需要 eg对应的weight
       bool modify_eg_output = !(eg_output_rspecifier.empty() &&
                                 eg_weight_rspecifier.empty());
       // count is normally 1; could be 0, or possibly >1.
       int32 count = GetCount(keep_proportion);
+
+      // modify the example info
       std::string key = example_reader.Key();
       NnetExample eg_modified_output;
       const NnetExample &eg_orig = example_reader.Value(),

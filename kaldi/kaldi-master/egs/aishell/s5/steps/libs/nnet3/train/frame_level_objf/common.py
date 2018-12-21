@@ -217,6 +217,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
         with open('{0}/srand'.format(dir), 'w') as f:
             f.write(str(srand))
 
+    # set off 开始
     # Sets off some background jobs to compute train and
     # validation set objectives
     compute_train_cv_probabilities(
@@ -378,6 +379,7 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, run_opts,
                                    get_raw_nnet_from_am=True,
                                    use_multitask_egs=False,
                                    compute_per_dim_accuracy=False):
+    # read from a acousitc model, so not a normal case
     if get_raw_nnet_from_am:
         model = "nnet3-am-copy --raw=true {dir}/{iter}.mdl - |".format(
                     dir=dir, iter=iter)
@@ -393,6 +395,7 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, run_opts,
     if compute_per_dim_accuracy:
         opts.append("--compute-per-dim-accuracy")
 
+    # '--output=ark:foo/egs/output.3.ark --weight=ark:foo/egs/weights.3.ark'
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
                              egs_dir,
                              egs_prefix="valid_diagnostic.",

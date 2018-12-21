@@ -86,14 +86,17 @@ void NnetIo::Swap(NnetIo *other) {
   features.Swap(&(other->features));
 }
 
-.NnetIo::NnetIo(const std::string &name,
+NnetIo::NnetIo(const std::string &name,
                int32 dim,
                int32 t_begin,
                const Posterior &labels,
                int32 t_stride):
     name(name) {
+  // 这个实现是专门为了NnetIo 的 output label部分
+  // labels 通过 num_pdfs 的dim， 变为oneHot
   int32 num_rows = labels.size();
   KALDI_ASSERT(num_rows > 0);
+  // 这是实现oneHot 
   SparseMatrix<BaseFloat> sparse_feats(dim, labels);
   features = sparse_feats;
   indexes.resize(num_rows);  // sets all n,t,x to zeros.

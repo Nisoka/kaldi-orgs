@@ -391,7 +391,7 @@ public:
     // largest_size is the largest integer in any of the ranges (64 in this
     // example).
     int32 largest_size;
-    // e.g. would contain ((16,32), (64,64)) in this example.
+    
     std::vector<std::pair<int32, int32> > ranges;
     // Returns the largest value in any range (i.e. in the set of
     // integers that this struct represents), that is <= max_value,

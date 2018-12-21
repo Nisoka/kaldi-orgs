@@ -39,6 +39,9 @@ int32 NumOutputIndexes(const NnetExample &eg) {
 }
 }
 
+// copy 从 input cp 训练样本 到output
+// 将多个 NnetExample 映射为一个？？？
+// 形成一个minibatch, 进入到一个NnetExample.
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
@@ -48,7 +51,7 @@ int main(int argc, char *argv[]) {
 
     const char *usage =
         "This copies nnet training examples from input to output, but while doing so it\n"
-        "merges many NnetExample objects into one, forming a minibatch consisting of a\n"
+        "?merges many NnetExample objects into one?, forming a minibatch consisting of a\n"
         "single NnetExample.\n"
         "\n"
         "Usage:  nnet3-merge-egs [options] <egs-rspecifier> <egs-wspecifier>\n"
@@ -70,7 +73,7 @@ int main(int argc, char *argv[]) {
 
     std::string examples_rspecifier = po.GetArg(1),
         examples_wspecifier = po.GetArg(2);
-
+    // 推导 一个配置 minibatch的配置， 主要可能是 frames_per_eg, 对应的可能merge_minibatch.
     merging_config.ComputeDerived();
 
     SequentialNnetExampleReader example_reader(examples_rspecifier);
@@ -80,6 +83,9 @@ int main(int argc, char *argv[]) {
 
     for (; !example_reader.Done(); example_reader.Next()) {
       const NnetExample &cur_eg = example_reader.Value();
+      // 向merger 中添加样本, 当达到 merge_minibatch 时，
+      // 将这些 NnetExample merge为一个NnetExample
+      // 写入 merge_minibatch 的ExampleNnet
       merger.AcceptExample(new NnetExample(cur_eg));
     }
     // the merger itself prints the necessary diagnostics.

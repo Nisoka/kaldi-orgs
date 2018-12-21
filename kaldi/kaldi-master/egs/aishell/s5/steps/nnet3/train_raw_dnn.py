@@ -286,16 +286,23 @@ def train(args, run_opts):
         logger.info("Preparing the initial network.")
         common_train_lib.prepare_initial_network(args.dir, run_opts)
 
-    # set num_iters so that as close as possible, we process the data
-    # $num_epochs times, i.e. $num_iters*$avg_num_jobs) ==
-    # $num_epochs*$num_archives, where
-    # avg_num_jobs=(num_jobs_initial+num_jobs_final)/2.
+    # all the trained data(include repeat)
+    # ??????????????????? DON'T UNDERSTAND!!!!!!!!!!!!!!!!!!1
+    # set num_iters so that as close as possible, 
+    # we process the data $num_epochs times, 
+    #       $num_iters*$avg_num_jobs ==? $num_epochs*$num_archives, 
+    # where 
+    #       avg_num_jobs=(num_jobs_initial+num_jobs_final)/2.
+
+    # -----------------
+    #  ？？？？？？？？？？？？？
+    # -----------------
     num_archives_expanded = num_archives * args.frames_per_eg
     num_archives_to_process = int(args.num_epochs * num_archives_expanded)
     num_archives_processed = 0
     num_iters = ((num_archives_to_process * 2)
                  / (args.num_jobs_initial + args.num_jobs_final))
-
+    
     # If do_final_combination is True, compute the set of models_to_combine.
     # Otherwise, models_to_combine will be none.
     if args.do_final_combination:
