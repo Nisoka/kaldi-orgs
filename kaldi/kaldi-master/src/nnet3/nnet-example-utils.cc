@@ -90,15 +90,24 @@ static void GetIoSizes(const std::vector<NnetExample> &src,
 
 // Do the final merging of NnetIo, once we have obtained the names, dims and
 // sizes for each feature/supervision type.
+
+// ------ Parameters
+//   src      --- vector<NnetExample>
+//                待合并的所有NnetExample
+//   io_names --- common NnetIo-names
+//                所有 vector<NnetExample>下不同name的NnetIo 类型
+//   io_sizes --- NnetIo-name's summary of indexes.size() across of the vector<NnetExample>
+//                所有 vector<NnetExample>下相同name的NnetIo的所有Index 
 static void MergeIo(const std::vector<NnetExample> &src,
                     const std::vector<std::string> &names,
                     const std::vector<int32> &sizes,
                     bool compress,
                     NnetExample *merged_eg) {
-  // 全部数量的Indexes???? 实际上应该是 NnetIo的类别数量
+  // 所有 NnetExample 的 NnetIo的类别数量
   // The total number of Indexes we have across all examples.
   // num_feats = <input, ivector, output>.size
   int32 num_feats = names.size();
+  // 当前 已经merged的indexes.
   std::vector<int32> cur_size(num_feats, 0);
 
   // <  
@@ -108,10 +117,17 @@ static void MergeIo(const std::vector<NnetExample> &src,
   // >
   // 
   // The features in the different NnetIo in the Indexes across all examples
+  // 不同NnetIo类型< >
   std::vector<std::vector<GeneralMatrix const*> > output_lists(num_feats);
 
-  // Initialize the merged_eg
-  // 这样让merged_eg 按照NnetIo name合并32个NnetExample内的所有Index,
+  // 1 Initialize the merged_eg
+  //   1 初始化 NnetIo的数量为 所有类型NnetIo
+  //   2 安排不同的 NnetIo的name
+  //   3 安排不同name 的NnetIo的indexes的大小.(所有NnetExample 相同name的NnetIo的所有Index的和) 
+  // 这样让merged_eg 
+  // 按照NnetIo name(num_feats)合并32个NnetExample内的相同类型的NnetIo
+  // io.indexes.resize(size) 
+  //       合并后的MergedExample的NnetIo的indexes 大小是合并总大小.
   merged_eg->io.clear();
   merged_eg->io.resize(num_feats);
   for (int32 f = 0; f < num_feats; f++) {
@@ -127,33 +143,46 @@ static void MergeIo(const std::vector<NnetExample> &src,
     io.indexes.resize(size);
   }
 
-  // 
+  // <--2--> 逐个NnetExample 逐个NnetIo 进行合并到MergeNnetExample
+  // NnetExample 内部的NnetIo-name vector
   std::vector<std::string>::const_iterator names_begin = names.begin(),
-                                             names_end = names.end();
-  // src 是32个NnetExamples
+                                           names_end = names.end();
+  // src 32个NnetExamples vector
   std::vector<NnetExample>::const_iterator eg_iter = src.begin(),
-    eg_end = src.end();
+                                           eg_end = src.end();
+  // foreach NnetExample
   for (int32 n = 0; eg_iter != eg_end; ++eg_iter, ++n) {
+    //                                  NnetExample 内的每个NnetIo
     std::vector<NnetIo>::const_iterator io_iter = eg_iter->io.begin(),
-      io_end = eg_iter->io.end();
+                                        io_end = eg_iter->io.end();
+    // foreach NnetIo in NnetExample
+    //                                  每个NnetExample 的每个NnetIo
     for (; io_iter != io_end; ++io_iter) {
       const NnetIo &io = *io_iter;
-      std::vector<std::string>::const_iterator names_iter =
-          std::lower_bound(names_begin, names_end, io.name);
+      std::vector<std::string>::const_iterator names_iter = std::lower_bound(names_begin, names_end, io.name);
       KALDI_ASSERT(*names_iter == io.name);
 
+      // MergeNnetExample NnetIo-index
       int32 f = names_iter - names_begin;
+      // 待合并的NnetExample 内的 NnetIo- io.name 的indexes
       int32 this_size = io.indexes.size();
+
+      // 当前已经merged到MergedNnetExample的Index 数量
       int32 &this_offset = cur_size[f];
       KALDI_ASSERT(this_size + this_offset <= sizes[f]);
 
+      // <1> 临时保存: 该NnetIo的features 
+      //     并且留存了一个NnetExample 顺序. 用来区分MergedNnetExample内的 合并来的不同NnetExample 
       // Add f'th Io's features
       output_lists[f].push_back(&(io.features));
 
+      // <2> copy indexes到相同name的NnetIo 内.
       // Work on the Indexes for the f^th Io in merged_eg
       NnetIo &output_io = merged_eg->io[f];
       std::copy(io.indexes.begin(), io.indexes.end(),
                 output_io.indexes.begin() + this_offset);
+
+      // <3> 为合并来的Index 安排n域, n域表明, 合并成MergedNnetExample 的不同NnetExample.
       std::vector<Index>::iterator output_iter = output_io.indexes.begin();
       // Set the n index to be different for each of the original examples.
       for (int32 i = this_offset; i < this_offset + this_size; i++) {
@@ -163,9 +192,12 @@ static void MergeIo(const std::vector<NnetExample> &src,
                      "Merging already-merged egs?  Not currentlysupported.");
         output_iter[i].n = n;
       }
+
       this_offset += this_size;  // note: this_offset is a reference.
     }
   }
+
+  // <4>  合并不同name NnetIo 的features 到 MergedNnetExample 内的 name NnetIo features
   KALDI_ASSERT(cur_size == sizes);
   for (int32 f = 0; f < num_feats; f++) {
     AppendGeneralMatrixRows(output_lists[f],
@@ -195,11 +227,19 @@ void MergeExamples(const std::vector<NnetExample> &src,
 
   // 不同name下的全部index count
   // eg: [8*32, 1*32, 8*32]
-  // the sizes are the total number of Indexes we have across all examples.
+  // the sizes are the total number of Indexes of io_names we have across all examples.
   std::vector<int32> io_sizes;
   GetIoSizes(src, io_names, &io_sizes);
   
-  // 
+  // NnetExample 中的数据 是内部的NnetIo.
+  // NnetIo 
+  // 1 name
+  // 2 indexes<Index>  数据标记
+  // 3 features        数据
+  // 合并, 就是按照 name 合并的Index,以及feature.
+  //   src --- vector<NnetExample>
+  //   io_names --- common NnetIo-names
+  //   io_sizes --- each NnetIo-name's summary of indexes.size()
   MergeIo(src, io_names, io_sizes, compress, merged_eg);
 }
 
@@ -240,17 +280,26 @@ void GetComputationRequest(const Nnet &nnet,
   request->inputs.reserve(eg.io.size());
   request->outputs.clear();
   request->outputs.reserve(eg.io.size());
+
   request->need_model_derivative = need_model_derivative;
   request->store_component_stats = store_component_stats;
+
+  // for each NnetIo in NnetExample
   for (size_t i = 0; i < eg.io.size(); i++) {
     const NnetIo &io = eg.io[i];
     const std::string &name = io.name;
+    // 1 获得图中 对应NnetIo 需要的 node_names_.index 
     int32 node_index = nnet.GetNodeIndex(name);
     if (node_index == -1 &&
         !nnet.IsInputNode(node_index) && !nnet.IsOutputNode(node_index))
       KALDI_ERR << "Nnet example has input or output named '" << name
                 << "', but no such input or output node is in the network.";
 
+    // 2 cp NnetIo -> ComputationRequest io_spec
+    // 即 NnetExample 的 NnetIo 对应为 ComputationRequest 的 io_spec
+    //   1 name  
+    //   2 indexes数据标记
+    // !!! 但是没有cp 实际输出 NnetIo.features
     std::vector<IoSpecification> &dest =
         nnet.IsInputNode(node_index) ? request->inputs : request->outputs;
     dest.resize(dest.size() + 1);
@@ -1297,7 +1346,9 @@ void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
   
   stats_.WroteExample(eg_size, structure_hash, minibatch_size);
 
-  // Merge minibatch_size 的 NnetExample,主要进行参数修改.
+  // Merge minibatch_size 的 NnetExample,
+  // 1 合并 同名的 NnetIo
+  // 2 修改 NnetIo 内 Index.n 表示 Merge的NnetExample 索引
   NnetExample merged_eg;
   MergeExamples(egs, config_.compress, &merged_eg);
 

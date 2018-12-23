@@ -50,7 +50,10 @@ Compiler::Compiler(
 void Compiler::CreateComputation(const CompilerOptions &opts,
                                  NnetComputation *computation) {
   computation->Clear();
+  // 1 计算图ComputationGraph 构建子
   ComputationGraphBuilder builder(nnet_, &graph_);
+
+  // 2 计算图 构建子 完成构图
   // note: there are only >1 segments in a 'looped' computation.
   // 每次取一个request进行Compute
   // 实际request 是经过一个 merged NnetExample => request  => mini_request.
@@ -63,20 +66,38 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
     }
     builder.Prune();
   }
-  // see function declaration's comment for more on the meaning of "phases" (a
-  // phase will later be decomposed into one or more steps).  for each segment
-  // s, phases_per_segment[s] is a list of phases; each phase is a list of
-  // cindex_ids.
+
+
+
+
+  // 3 安排计算阶段 phases 
+  //   查看函数声明的comment, 了解更多关于 phases的意义.
+  // (a phase, 后面会被分界为多个steps)
+  //     segment(request 的cindex分界点) 
+  //            用一个phase vector, phases_per_segment[s] 描述
+  //     phase 是可以放在一起进行计算的cindex_ids 的list 
+  //            是一个segment 内部cindex,的更精细意义的划分, 更甚者还有 steps
+  // see function declaration's comment for more on the meaning of "phases" 
+  // (a phase will later be decomposed into one or more steps).  
+  // for each segment s, phases_per_segment[s] is a list of phases; 
+  // each phase is a list of cindex_ids.
+
+  //   segments   phases        cindex_id??
   std::vector<std::vector<std::vector<int32> > > phases_per_segment;
   ComputeComputationPhases(nnet_, graph_, &phases_per_segment);
+  
+
+
+
+
+  
+  // 4 安排计算步 steps
   std::vector<std::vector<int32> > steps;
   steps.reserve(1000);
 
   // maps each step to the segment in which it appears.  in the normal case
   // (non-looped computation), a vector of all zeros.
   std::vector<int32> step_to_segment;
-
-
   {
     // note: this class will output to 'steps' and to 'cindex_id_to_location_'.
     // it may incidentally change 'graph_' by adding a few cindexes.

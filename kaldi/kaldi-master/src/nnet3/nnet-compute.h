@@ -35,6 +35,9 @@
 namespace kaldi {
 namespace nnet3 {
 
+// NnetComputation 计算选项 用处不大.
+// see too: NnetOptimizeOptions, NnetComputeOptions, CachingOptimizingCompilerOptions
+// 用于debug 计算代码
 
 struct NnetComputeOptions {
   bool debug;

@@ -395,6 +395,7 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, run_opts,
     if compute_per_dim_accuracy:
         opts.append("--compute-per-dim-accuracy")
 
+    # compute-prob for valid_diagnostic.
     # '--output=ark:foo/egs/output.3.ark --weight=ark:foo/egs/weights.3.ark'
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
                              egs_dir,

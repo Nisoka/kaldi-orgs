@@ -3258,6 +3258,8 @@ static bool IoSpecificationIsDecomposable(const IoSpecification &io_spec,
   if (n_stride == 0)
     return false;
 
+  // 只保存, Merged NnetExample 中实际两个 NnetExample 的 <indexes>
+  // 这样简小了 request, 也简化了构建 NnetComputation的过程.
   ConvertNumNValues(n_stride, num_n_values, 2,
                     indexes, &(mini_io_spec->indexes));
 
@@ -3277,6 +3279,8 @@ bool RequestIsDecomposable(const ComputationRequest &request,
   mini_request->misc_info = request.misc_info;
 
   KALDI_ASSERT(num_inputs != 0 && num_outputs != 0);
+
+  // Decompose inputs
   for (size_t i = 0; i < num_inputs; i++) {
     int32 this_num_n_values = 0;
     if (!IoSpecificationIsDecomposable(request.inputs[i],
@@ -3290,6 +3294,7 @@ bool RequestIsDecomposable(const ComputationRequest &request,
         return false;  // .. which would be odd.
     }
   }
+  // Decompose outputs
   for (size_t i = 0; i < num_outputs; i++) {
     int32 this_num_n_values = 0;
     if (!IoSpecificationIsDecomposable(request.outputs[i],

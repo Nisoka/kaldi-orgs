@@ -717,6 +717,11 @@ CachingOptimizingCompiler::~CachingOptimizingCompiler() {
   }
 }
 
+
+// 构建 ComputationRequest 的完整计算结构NnetComputation
+// 因为设计的NNet结构是个大工程, 可以服务于多个task
+// 因此可以配置不同的 计算需求实现不同的计算流程, 因此需要对每个不同的ComputationRequest 
+// 编译为 不同的计算结构NnetComputation, 不用完整的Nnet图.
 const NnetComputation* CachingOptimizingCompiler::Compile(
     const ComputationRequest  &in_request) {
   Timer timer;
@@ -728,6 +733,9 @@ const NnetComputation* CachingOptimizingCompiler::Compile(
 const NnetComputation* CachingOptimizingCompiler::CompileInternal(
     const ComputationRequest  &in_request) {
   const NnetComputation *ans;
+  // 是否已经遇到过相同的 ComputationRequest
+  // 遇到过的话, 就是已经cache了,不需要再编译一边, 否则重新编译并cache.
+
   // find computation in the cache
   CacheType::iterator cit = computation_cache_.find(&in_request);
   if (cit == computation_cache_.end()) {
@@ -743,11 +751,16 @@ const NnetComputation* CachingOptimizingCompiler::CompileInternal(
 
 const NnetComputation* CachingOptimizingCompiler::CompileAndCache(
     const ComputationRequest  &in_request) {
+
+  // 1 重新构造一个ComputationReqeust, 用作cache中的key.
+  //   没有包含数据,很小
   // we need to make a copy of ComputationRequest, because it's stored
   // as the key in the cache, and we need to own the pointer.
   ComputationRequest *request = new ComputationRequest(in_request);
 
+  // 2 使用shortcut方法 compile 计算.
   const NnetComputation *computation = CompileViaShortcut(*request);
+  // 3 如果不能简化了, 开始compile NnetComputation
   if (computation == NULL)
     computation = CompileNoShortcut(*request);
   UpdateCache(request, computation);
@@ -758,13 +771,15 @@ const NnetComputation* CachingOptimizingCompiler::CompileAndCache(
 const NnetComputation* CachingOptimizingCompiler::CompileNoShortcut(
     const ComputationRequest &request) {
 
-  //构建Compiler.
+  //1 构建真实Compiler.
   Compiler compiler(request, nnet_);
   // note: 'opts' only contains 'output_debug_info', which is true by default.
   // There may be situations where we'd prefer not to keep it, for speed.
   CompilerOptions opts;
-  NnetComputation *computation = new NnetComputation;
 
+
+  // 2 创建 计算结构NnetComputation.
+  NnetComputation *computation = new NnetComputation;
   {
     Timer timer;
     compiler.CreateComputation(opts, computation);
@@ -822,18 +837,40 @@ const NnetComputation* CachingOptimizingCompiler::CompileNoShortcut(
 }
 
 
+// shortcut 方法构建 ComputationRequest 的计算结构NnetComputation
+// 一个request 并不是一个计算数据, 而是一个计算结构NnetComputation内的 input - output 
+// 然后在Nnet图中找到对应该计算需要的计算结构NnetComputation.
+// 而ComputationRequest 主要有:
+// 1 <IoSpecification>  inputs
+//                          name 
+//                          indexes
+// 2 <IoSpecification>  outputs
+//                          name
+//                          indexes
+// 3 是否需要反向传播.
+// 4 对应某个node_name 的 IoSpecification
 const NnetComputation* CachingOptimizingCompiler::CompileViaShortcut(
     const ComputationRequest &request) {
   if (!config_.use_shortcut)
     return NULL;
 
   int32 num_n_values;
+  // 1 压缩request -> mini_request
   ComputationRequest mini_request;
-  //压缩了request -> mini_request, 返回true
-  //如果不可压缩返回false.
-  //经过第一次之后,递归在进入这里时 返回false. 执行CompileNoShortcut
+  // 压缩了request -> mini_request, 返回true
+  //     递归调用 CompileInternel, 此时已经压缩了 request, 完成shortcut, 
+  //     执行CompileNoShortcut
+  // 如果不可压缩返回false.
+  //     不可压缩,返回后直接 
+  //     执行CompileNoShortcut
+  // 
   if (!RequestIsDecomposable(request, &mini_request, &num_n_values))
     return NULL;
+
+  
+  // 2 返回的是 mini_request 的 computation
+  //   mini_request 也会被chache. 与 传入的request的唯一区别是没有调用timercode
+  //   因此这个计算结构NnetComputation mini_computation 的拥有者是class, 保存在cache里.
 
   // By invoking CompileInternal() on the mini request, we go through the same
   // caching process as for any externally requested computation.  [the only
@@ -842,14 +879,19 @@ const NnetComputation* CachingOptimizingCompiler::CompileViaShortcut(
   // deleted by this function; it's owned by the class, in the cache.
   const NnetComputation *mini_computation = CompileInternal(mini_request);
 
+  // 默认我们一直创建debug_info, 即使在正常编译时
+  // 即默认为true 在CompilerOptions, 
+  // 如果打开打印信息确实太大消耗, 我们会在未来某时刻重新考虑这一点
+
   // note: by default we always create debug_info, even in regular compilation.
   // (e.g. it defaults to true in CompilerOptions).  If it really seems to be a
   // significant overhead, we can revisit this at some point in future.
   bool need_debug_info = true;
 
 
+  // 3 通过 mini_request 的NnetComputation, 
+  //   扩展变化为标准 request 的 NnetComputation.
   NnetComputation *ans = new NnetComputation();
-
   {
     Timer timer;
     ExpandComputation(nnet_, request.misc_info, *mini_computation,

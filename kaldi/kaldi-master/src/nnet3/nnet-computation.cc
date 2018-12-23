@@ -78,12 +78,16 @@ NnetComputation::~NnetComputation() {
 		delete component_precomputed_indexes[i].data;
 }
 
+// cp NnetIo的indexes 到 NnetComputation 的 cuda内存部分中
+// 看来 NnetComputation 的东西还是真多阿.
 void NnetComputation::ComputeCudaIndexes() {
-	indexes_cuda.resize(indexes.size());
 
+	// cp NnetIo.indexes
+	indexes_cuda.resize(indexes.size());
 	for (size_t i = 0; i < indexes.size(); i++)
 		indexes_cuda[i].CopyFromVec(indexes[i]);
 
+	// cp ranges???
 	KALDI_ASSERT(sizeof(Int32Pair) == sizeof(std::pair<int32, int32>));
 	indexes_ranges_cuda.resize(indexes_ranges.size());
 	for (int32 i = 0; i < indexes_ranges.size(); i++) {

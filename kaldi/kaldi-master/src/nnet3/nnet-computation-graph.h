@@ -42,6 +42,8 @@ namespace nnet3 {
 /// ComputationGraph.  The GetCindexId() functions perform the reverse mapping.
 struct ComputationGraph {
 
+  // ------------------------- 计算图 的 计算点
+  // 描述了计算图在 NNET网络上的位置节点, 以及数据在位置节点上的具体出现.
   /// The mapping of cindex_id to Cindex.
   std::vector<Cindex> cindexes;
 
@@ -54,6 +56,9 @@ struct ComputationGraph {
   /// from the provided Cindexes.
   std::vector<bool> is_input;
 
+  // 某个 cindex_id 直接依赖的cindex_ids. 
+  // 不会出现重复, 有些依赖是可选依赖. 
+  // 在编译Nnet的早期, 会包含所有期望的inputs, 后来我们会剪枝依赖.
   /// dependencies[cindex_id] gives you the list of other cindex_ids that this
   /// particular cindex_id directly depends on to compute it.  No repeats will
   /// be present.  Note, some of these dependencies may be optional
@@ -106,6 +111,9 @@ struct ComputationGraph {
   void Print(std::ostream &os, const std::vector<std::string> &node_names);
 
  private:
+  //  将一个Cindex 对象 映射为 int32 cindex_id
+  //  通过GetCindexId() 可以反向映射cindex 到 cindex-id 
+  //  是上面 cindexes 成员 的 反向映射对象.
   /// Maps each Cindex to an integer cindex_id: reverse mapping of "cindexes".
   /// Must be accessed via the GetCindexId() functions.
   unordered_map<Cindex, int32, CindexHasher> cindex_to_cindex_id_;
@@ -252,14 +260,21 @@ class ComputationGraphBuilder {
   const ComputationRequest *request_;
   ComputationGraph *graph_;
 
+
+
+
   // this is the transpose of graph_->dependencies; it tells us
   // for each cindex_id, which other cindex_ids depend on it.
   std::vector<std::vector<int32> > depend_on_this_;
 
+  
+  
+  // ---------------- cindex 是否可以计算                       --- 反向于 usable_count_
   // this vector, indexed by cindex_id, contains our information about whether
   // each cindex_id is computable; it's ComputableInfo, cast to char.
   std::vector<char> computable_info_;
 
+  // 保存 需要判断是否可以计算的cindex的队列.                       --- 反向于 next_queue_; current_queue_
   // this is a queue of cindex_ids that we need to re-compute whether they are
   // computable or not (because either they are new and haven't had dependencies
   // added, or their dependencies' computable status has changed since we last
@@ -269,10 +284,21 @@ class ComputationGraphBuilder {
   // stops us from adding things twice.
   std::vector<bool> computable_queued_;
 
+
+  // ---------------- cindex 是否需要计算 -----------------------
+  //  -------------- 被认为是 计算引用计数 -----------------------
+  // 1 usable_count_[cindex_id] == 1 
+  //                  需要进行output 的cindex_id, 这样的被认为是有用的
+  // 2 如果 computable_info[cindex_id] != kNotComputabel && usable_count_[j] > 0 && in graph->dependencies
+  //                  有用的 cindex
   // usable_count_[i] for a cindex_id i is defined as 1 if i is a requested
   // output, and otherwise as the number of other cindex_ids j such that
   // computable_info_[j] is not kNotComputable AND usable_count_[j] > 0 AND i is
-  // a member of graph->dependencies[j].  A cindex_id is termed "usable"
+  // a member of graph->dependencies[j].  
+    
+  // 如果一个cindex 是usable的 ,usable_count_[cindex_id] > 0, 那么该cindex 就是会加入计算的, 计算路径中的一部分
+  // ---------- 表明必然是 计算路径中的一部分 -------------
+  // A cindex_id is termed "usable"
   // (meaning it could potentially participate in the computation of the output)
   // if its usable_count_ is > 0.  This quantity is designed to be easy to keep
   // updated as we add cindex_ids.
@@ -296,6 +322,7 @@ std::ostream& operator << (std::ostream &os,
 
 class CindexSet {
  public:
+  //  返回true, 如果该 Set 中包含了该 cindex.
   /// Parenthesis operator; returns true if this cindex exists in the set.
   bool operator () (const Cindex &cindex) const;
 
@@ -316,7 +343,8 @@ class CindexSet {
   bool treat_unknown_as_computable_;
 };
 
-
+// Indexes 的抽象描述? 
+// 和 CindexSet 有什么不同的么? 感觉没啥
 /// An abstract representation of a set of Indexes.
 class IndexSet {
  public:

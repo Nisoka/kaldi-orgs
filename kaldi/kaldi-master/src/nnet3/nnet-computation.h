@@ -103,6 +103,14 @@ struct IoSpecificationHasher {
   size_t operator () (const IoSpecification &io_spec) const noexcept;
 };
 
+// ComputationRequest 是除了network本身, 我们需要的 创建一个计算结构的必需品.
+// 最重要的是他指定了 
+// 1 在不同输入端inputs   indexes
+// 2 在不同输出端outputs, indexes 
+// 3 以及是否我们需要进行backprop
+// 4 对应某个node_name 的 IoSpecification
+// 相同的 input output node 不能被list出两次.
+
 
 // struct ComputationRequest is whatever we need in addition to the
 // network itself in order to create the structure of a computation.  The most
@@ -136,16 +144,18 @@ struct ComputationRequest {
   /// need_model_derivative is true.
   bool NeedDerivatives() const;
 
+  // 返回 对应node_name, inputs vec<IoSpecification> 中的index
   /// Returns the index into "inputs" corresponding to the node with name
   /// "node_name", or -1 if there is no such index.  It is an error if >1 inputs
   /// have the same name.
   int32 IndexForInput(const std::string &node_name) const;
 
-  /// Returns the index into "inputs" corresponding to the node with name
+  /// Returns the index into "onputs" corresponding to the node with name
   /// "node_name", or -1 if there is no such index.  It is an error if >1 inputs
   /// have the same name.
   int32 IndexForOutput(const std::string &node_name) const;
 
+  // 人类可读的计算 request 信息.
   /// This function is for printing info about the computation request
   /// in a human-readable way.
   void Print(std::ostream &os) const;
@@ -267,7 +277,15 @@ enum CommandType {
   kNoOperation, kNoOperationPermanent, kNoOperationMarker, kNoOperationLabel,
   kGotoLabel };
 
-
+// Nnet 最核心的class
+// NnetComputation 
+// 1 定义了Nnet 计算的详细 steps
+// 2 把NnetComputation 看作一个编译好的程序
+// 3 给定Nnet网络 和 ComputationRequest, 可以构建一个执行程序.
+// Note: 
+//    Nnet定义的是 可以多任务,多流程,反正很大很全的一个网络图
+//    而NnetComputation 则根据 ComputationRequest 从Nnet网络图上, 找寻需要的 执行路径
+//    然后利用NnetExample的数据,执行以下 执行路径, 是一个流程结构.
 
 // struct NnetComputation defines the specific steps of a neural-net
 // computation.  View this as a compiled program; given the Nnet and the

@@ -109,6 +109,8 @@ void ReadIndexVector(std::istream &is, bool binary,
                      std::vector<Index> *vec);
 
 
+// Cindex 就是 一个计算数据点
+//        表明在一个node-index, 上的 Index(数据索引)
 /* A Cindex is a pair of a node-index (i.e. the index of a NetworkNode) and an
    Index.  It's frequently used so it gets its own typedef.
  */

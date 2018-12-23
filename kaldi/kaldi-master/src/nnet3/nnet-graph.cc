@@ -60,6 +60,25 @@ void NnetToDirectedGraph(const Nnet &nnet,
   }
 }
 
+// 有向图方向变换
+// graph 是原图, 
+// a    指向
+//      b c
+// b    指向
+//      c d
+// c    指向
+//      d e
+// ...
+// graph_transpose
+// e 
+//      c
+// d    
+//      b c
+// c
+//      b a
+// b    
+//      a
+// a
 void ComputeGraphTranspose(const std::vector<std::vector<int32> > &graph,
                            std::vector<std::vector<int32> > *graph_transpose) {
   int32 size = graph.size();

@@ -67,12 +67,17 @@ struct NnetComputeProbOptions {
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   CachingOptimizingCompilerOptions compiler_config;
+
+
+
   NnetComputeProbOptions():
       debug_computation(false),
       compute_deriv(false),
       compute_accuracy(true),
       store_component_stats(false),
       compute_per_dim_accuracy(false) { }
+
+
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
     // because it's not relevant for nnet3-compute-prob.
@@ -85,6 +90,8 @@ struct NnetComputeProbOptions {
     opts->Register("compute-per-dim-accuracy", &compute_per_dim_accuracy,
                    "If true, compute accuracy values per-dim");
 
+
+    // 3个主要的 options
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
     optimize_config.Register(&optimization_opts);

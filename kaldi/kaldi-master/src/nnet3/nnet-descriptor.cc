@@ -300,11 +300,17 @@ void SimpleSumDescriptor::GetDependencies(const Index &ind,
   dependencies->push_back(src_->MapToInput(ind));
 }
 
+// 一个Index 在 simpleSumDescriptor中的可计算性
 bool SimpleSumDescriptor::IsComputable(
     const Index &ind,
     const CindexSet &cindex_set,
     std::vector<Cindex> *used_inputs) const {
+  
+  // 映射到 Descriptor 的输入 node 节点上, 构建
+  // 描述 直接底层的所需计算节点, (和依赖一样吧?)
+  // 这个简单的SimpleSumDescritpor 的计算 很简单所以,这里看着比较容易.
   Cindex c = src_->MapToInput(ind);
+  // 判断是否在计算图中?
   bool src_present  = cindex_set(c);
   if (src_present && used_inputs != NULL)
     used_inputs->push_back(c);

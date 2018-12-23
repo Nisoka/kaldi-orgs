@@ -198,8 +198,11 @@ bool Component::IsComputable(const MiscComputationInfo &misc_info,
                              std::vector<Index> *used_inputs) const {
   // the default Component dependency is for an output index to map directly to
   // the same input index, which is required to compute the output.
+  // Normal: false
   if (!input_index_set(output_index))
     return false;
+
+  // Normal: NULL
   if (used_inputs) {
     used_inputs->clear();
     used_inputs->push_back(output_index);

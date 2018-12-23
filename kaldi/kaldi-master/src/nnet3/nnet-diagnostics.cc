@@ -29,13 +29,18 @@ NnetComputeProb::NnetComputeProb(const NnetComputeProbOptions &config,
     nnet_(nnet),
     deriv_nnet_owned_(true),
     deriv_nnet_(NULL),
+    // 这里发生保存了 NnetComputeProbOptions, 
+    // 内部还有几个配置选项
     compiler_(nnet, config_.optimize_config, config_.compiler_config),
     num_minibatches_processed_(0) {
+  // false
   if (config_.compute_deriv) {
     deriv_nnet_ = new Nnet(nnet_);
     ScaleNnet(0.0, deriv_nnet_);
     SetNnetAsGradient(deriv_nnet_); // force simple update
-  } else if (config_.store_component_stats) {
+  }
+  // false
+  else if (config_.store_component_stats) {
     KALDI_ERR << "If you set store_component_stats == true and "
               << "compute_deriv == false, use the other constructor.";
   }
@@ -79,15 +84,31 @@ void NnetComputeProb::Reset() {
 void NnetComputeProb::Compute(const NnetExample &eg) {
   //compute_deriv  false
   //store_component_stats false
+  // 是否需要计算导数
+  // 是否存储组件状态
   bool need_model_derivative = config_.compute_deriv,
       store_component_stats = config_.store_component_stats;
+
+  // 1 根据NnetExample 构造 ComputationRequest
+  //   只需要 NnetIo.name  NnetIo.indexes 来构建计算的需求
+  //   目的是用该request来构建计算结构NnetComputation(包含计算图), 不需要 NnetIo.features 这还保存在NnetIo中.
   ComputationRequest request;
   GetComputationRequest(nnet_, eg, need_model_derivative,
                         store_component_stats,
                         &request);
+  
+  // ---------------- Most Important
+  // 2 编译ComputationRequest的计算结构(NnetComputation)
+  // ----------------
   const NnetComputation *computation = compiler_.Compile(request);
+  
+  // 3 构造计算子
+  //   1 配置 
+  //   2 计算结构
   NnetComputer computer(config_.compute_config, *computation,
                         nnet_, deriv_nnet_);
+  
+  // 4 计算子 接受 input 进行计算
   // give the inputs to the computer object.
   computer.AcceptInputs(nnet_, eg.io);
   computer.Run();

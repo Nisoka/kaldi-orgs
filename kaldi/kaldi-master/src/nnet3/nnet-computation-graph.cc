@@ -29,15 +29,22 @@ int32 ComputationGraph::GetCindexId(const Cindex &cindex,
                                     bool input, bool *is_new) {
   typedef unordered_map<Cindex, int32, CindexHasher> map_type;
   int32 new_index = cindexes.size();  // we'll add this if we don't find it.
-  std::pair<map_type::iterator, bool> p = cindex_to_cindex_id_.insert(
-      std::pair<Cindex, int32>(cindex, new_index));
+  // 向 cindex_to_cindex_id_ 中插入 一个 <cindex, id(当前cindexes的数量,即id)>
+  std::pair<map_type::iterator, bool> p = 
+          cindex_to_cindex_id_.insert(std::pair<Cindex, int32>(cindex, new_index));
+  
+  // 返回 true, 则插入成功, 否则, 说明已经存在
   if (p.second == true) {  // We added something to the hash.
     *is_new = true;
+    // 这个Assert没有作用, 永远会是匹配的
+    // 因为 只有下面的地方,进行了 push_back()
     KALDI_ASSERT(is_input.size() == cindexes.size());
     cindexes.push_back(cindex);
     is_input.push_back(input);
+
     // make room for this "dependencies" entry.
     dependencies.resize(new_index + 1);
+    // 返回 cindex id
     return new_index;
   } else { // We did not add anything.
     *is_new = false;
@@ -232,37 +239,61 @@ void ComputationGraphBuilder::AddCindexId(int32 cindex_id,
                         cindex_id == computable_info_.size() &&
                         cindex_id == depend_on_this_.size() &&
                         cindex_id == usable_count_.size());
+  // input
   if (is_input) {
     computable_info_.push_back(kComputable);
     computable_queued_.push_back(false);
-  } else {
+  } 
+  // 非 input 
+  else {
     computable_info_.push_back(kUnknown);
     // add to the queue of things for which we need to compute their computable
     // status.
     computable_queued_.push_back(false);
+
+    //  ------------ Important
+    // 这个 next_queue_ 保存已经得到的从output -> input 的路径
+    // 然后在后面根据这个next_queue_, 
+    // 从output开始逐渐向input, 寻路,找到完整计算路径.
     next_queue_.push_back(cindex_id);
   }
+
+
+  // 为当前 cindex, 申请一个vector
+  // 描述 denpen_on_this 的所有 cindex.
   depend_on_this_.push_back(std::vector<int32>());
+  
+  // 描述的是 cindex_id > 0 则, 该cindex 是计算路径中的一部分.
   usable_count_.push_back(is_output ? 1 : 0);
 }
 
 
 void ComputationGraphBuilder::AddInputs() {
   int32 num_added = 0;
+  // request 内 IoSpecification --
+  //                     name
+  //                     indexes
   for (int32 i = 0; i < request_->inputs.size(); i++) {
+    // 根据 NnetIo.name 获得 Nnet中的 node index.
+    // 可以同时索引 node_names_  nodes_ 获得node-name 和 具体 node
     int32 n = nnet_.GetNodeIndex(request_->inputs[i].name);
     if (n == -1)
       KALDI_ERR << "Network has no input with name "
                 << request_->inputs[i].name;
+
     NodeType t = nnet_.GetNode(n).node_type;
     KALDI_ASSERT((t == kInput || t == kComponent) &&
                  "Inputs to graph only allowed for Input and Component nodes.");
-
+    // foreach 每个小样本 (left-context, 1, right-context) , 计算具体到每个点?
     for (int32 j = 0; j < request_->inputs[i].indexes.size(); j++) {
+      // 为每个具体小样本构建Cindex.
       Cindex cindex(n, request_->inputs[i].indexes[j]);
       bool is_input = true, is_new;
+      // GetCindexId, 查找cindex 是否已经存在.
+      // 
       int32 cindex_id = graph_->GetCindexId(cindex, is_input, &is_new);
       KALDI_ASSERT(is_new && "Input index seems to be listed more than once");
+      // 
       AddCindexId(cindex_id, true, false);
       num_added++;
     }
@@ -289,7 +320,11 @@ void ComputationGraphBuilder::AddOutputs() {
   if (num_added == 0) {
     KALDI_ERR << "Cannot process computation request with no outputs";
   }
+  
+  
   current_distance_ = 0;
+
+  // 后续的程序 逐渐构建 计算路径的起点 ---- current_queue_.swap(next_queue_).
   // the calls to AddCindexId in this function will have added to next_queue_.
   KALDI_ASSERT(current_queue_.empty());
   current_queue_.swap(next_queue_);
@@ -460,28 +495,51 @@ ComputationGraphBuilder::ComputationGraphBuilder(
 
 
 void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
+  // 注意当前是在 GraphBuilder内, 并不在 Compiler里面.
   if (request_ != NULL && graph_->segment_ends.empty()) {
     // this check is relevant to multi-segment (i.e. online) computations.
     KALDI_ERR << "You are calling things in the wrong order: should be "
-              << "Compute(), Prune(), Compute, Prune(), ...";
+              << "Compute(), Prune(), Compute(), Prune(), ...";
   }
+
+  // ---------------------
+  // segment, 是一个 request的分界位置.
+  //     计算第一个request时候 == 0
+  //     后续在进入这里, 就是上一个request的cindex 完全加入到计算图中了.
+  // ---------------------
+
   int32 cur_segment_start = graph_->cindexes.size();
   request_ = &request;
+  // 插入 input NnetIo<IoSpecification>
   AddInputs();
   AddOutputs();  // sets current_distance_ to 0.
+
+  // 循环的按照Nnet网络, 完善计算路径.
+  //   1 从高层 output 向 input 添加依赖 cindex
+  //   2 从底层 input  向 output 通知高层cindex可计算性 
+  
+  // 保证没有无限递归的错误.
   // max_distance for debugging, to detect infinite recursion.
   int32 max_distance = 10000;
   while (current_distance_ < max_distance) {
+    // 1 从 output -> input 查找底层依赖的方式 构建 计算路径结构 cindex路径
     BuildGraphOneIter();
+    
     // only check rarely if we're running at low verbose level.
     if (GetVerboseLevel() >= 3 || RandInt(1,  (current_distance_ + 1)) == 1)
       Check(cur_segment_start);
+
+    // 2 从 input -> output 通知高层可以计算 computable
     // TODO: come up with a scheme to delay when we call
     // UpdateAllComputableInfo().
     UpdateAllComputableInfo();
+
+    // 3 确定没有了需要查找依赖的cindex, 完成计算路径构建
     if (current_queue_.empty()) // we're done.
       break;
   }
+
+
   if (current_distance_ == max_distance)
     KALDI_ERR << "Loop detected while building computation graph (bad "
               << "network topology?)";
@@ -490,8 +548,9 @@ void ComputationGraphBuilder::Compute(const ComputationRequest &request) {
     Check(cur_segment_start);
 }
 
-
+// 检查当前 request 的计算依赖关系, 和 可计算性.
 void ComputationGraphBuilder::Check(int32 start_cindex_id) const {
+  // 
   int32 num_cindex_ids = graph_->cindexes.size();
   for (int32 cindex_id = start_cindex_id; cindex_id < num_cindex_ids;
        cindex_id += 1 + RandInt(0, num_cindex_ids / 100)) {
@@ -507,6 +566,7 @@ void ComputationGraphBuilder::Check(int32 start_cindex_id) const {
         KALDI_ASSERT(std::count(dep.begin(), dep.end(), cindex_id) == 1);
       }
     }
+    
     { // check dependencies.
       std::vector<int32> dependencies = graph_->dependencies[cindex_id];
       int32 size = dependencies.size();
@@ -628,11 +688,17 @@ void ComputationGraphBuilder::Prune() {
   computable_queued_.resize(new_num_cindex_ids);
 
   KALDI_ASSERT(computable_queue_.empty());
+
+  // Prune 剪枝函数, 是对每个request, 构成了计算图 ComputationGraph之后才进行的
+  // 而每个segment 实际上就是每个每个request的计算图部分的所有cindex的分界线, 
+  // 所以在剪枝之后才会添加到 分段segment_ends 中
   graph_->segment_ends.push_back(new_num_cindex_ids);
 }
 
+//  找到当前cindex_id, 依赖的所有cindex_ids
 // Add cindex_ids that this cindex_id depends on.
 void ComputationGraphBuilder::AddDependencies(int32 cindex_id) {
+  // 如果cindex_id 还没有安排依赖
   if (static_cast<int32>(graph_->dependencies.size()) <= cindex_id) {
     graph_->dependencies.resize(2 * cindex_id + 1);
   }
@@ -644,24 +710,32 @@ void ComputationGraphBuilder::AddDependencies(int32 cindex_id) {
   const Index &index = cindex.second;
   const NetworkNode &node = nnet_.GetNode(node_index);
 
+  // cindex 的所有 计算依赖 
   std::vector<Cindex> input_cindexes;
 
   // the following switch statement sets up "input_cindexes".
   switch (node.node_type) {
+    // kDescriptor 直接描述了所有依赖.
     case kDescriptor: {
       // desc describes how this node obtains its input from other nodes.
       const Descriptor &desc = node.descriptor;
       desc.GetDependencies(index, &input_cindexes);
       break;
     }
+    // component , 直接依赖 node_index 的 cindex easy
     case kComponent: {
       int32 c = node.u.component_index;
+      // 获得对应的 计算Component
       const Component *component = nnet_.GetComponent(c);
+      // 计算Component 所需的Index.
       std::vector<Index> input_indexes;
       component->GetInputIndexes(request_->misc_info, index,
                                  &input_indexes);
       input_cindexes.resize(input_indexes.size());
+      
+      // cp Index 构成 Cindex
       for (size_t i = 0; i < input_indexes.size(); i++) {
+        // 直接依赖 所对应的上层kDescriptor
         input_cindexes[i].first = node_index  - 1;  // preceding node
         input_cindexes[i].second = input_indexes[i];
       }
@@ -678,37 +752,57 @@ void ComputationGraphBuilder::AddDependencies(int32 cindex_id) {
       KALDI_ERR << "Invalid node type";
   }
 
+  // 为 cindex_id 找到的所有依赖 input_cindexes
   int32 num_dependencies = input_cindexes.size();
+
+  // reserve 语句, 确定我们下面进行的loop循环所需要的空间是可行的,避免allocation
   // this "reserve" statement is to make sure the reference
   // we declare below does not become invalid in the loop below
   // (the call to graph_->GetCindexId() could add up to
   // num_dependencies elements to the graph_->dependencies array
   // and we want to avoid allocation).
+  // 申请的大一点是为了效率, 避免频繁resize.
   // the RoundUpToNearestPowerOfTwo is for efficiency, to
   // avoid too-frequent resizes.
   graph_->dependencies.reserve(RoundUpToNearestPowerOfTwo(
       graph_->dependencies.size() +  num_dependencies));
+  
+  // 引用当前 cindex_id 的所有依赖队列
   std::vector<int32> &this_dep = graph_->dependencies[cindex_id];
-
+  // resize 为 找到的依赖总数
   this_dep.resize(num_dependencies);
+
+  // 将每个依赖都添加到 graph_.cindex_to_cindex_id_中.
   for (size_t i = 0; i < num_dependencies; i++) {
     bool is_input = false, is_new;
     int32 dep_cindex_id = graph_->GetCindexId(input_cindexes[i],
                                               is_input, &is_new);
     this_dep[i] = dep_cindex_id;
+
+    // 如果是新的cindex, 那么还要设置很多东西
+    // 1 加入到next_queue_, 下次迭代就要找它的依赖
+    // 2 computable_info_, 是否 kComputable, kUnknown, 
+    // 3 computable_queue_,
+    // 3 depend_on_this_ 为其保留一个list位置
+    // 4 usable_count_ = 1
     if (is_new)
       AddCindexId(dep_cindex_id, false, false);
     // we will keep dependent's usable_count_ up to date below
   }
   // remove duplicates of dependencies.
   SortAndUniq(&this_dep);
+
+  // 反向设置 这些依赖 depend_on_cindex_id, depend_on_this_[].push_back[cindex_id]
   // set up the "depend_on_this_" array.
   std::vector<int32>::const_iterator iter = this_dep.begin(),
       end = this_dep.end();
 
+  // 1 设置 depend_on_cindex_id 的 denpend_on_this_
+  // 2 增加 usable_count_ 计算引用计数. 
   // Populate the "depend_on_this_" array, and append the
   // usable_count_ of things we depend on (see the definition
   // of this quantity next to where it is declared).
+
   // Note: before calling AddDependencies() we verified the following:
   //  computable_info_[cindex_id] == kUnknown
   // and
@@ -721,13 +815,17 @@ void ComputationGraphBuilder::AddDependencies(int32 cindex_id) {
     IncrementUsableCount(dep_cindex_id);
   }
 
+  // 现在, 我们已经增加了dependences, 我们将起加入到computable_queue_, 
+  // 类似查找依赖使得递归判断是否可以computable.
   // Now that we've added the dependencies, we can put this into
   // the computable_queue_ to assess whether it's computable
-  KALDI_ASSERT(computable_info_[cindex_id] == kUnknown &&
-               !computable_queued_[cindex_id]);
+  KALDI_ASSERT(computable_info_[cindex_id] == kUnknown && !computable_queued_[cindex_id]);
+
+  // 认为 放到前面会比较快, push_back push_front 都可以.
   // we think it'll be faster in the next line to do push_front instead of
   // push_back; either one would be correct.
   computable_queue_.push_front(cindex_id);
+  // 辨明cindex_id 已经加入判断是否可以计算队列中.
   computable_queued_[cindex_id] = true;
 }
 
@@ -735,21 +833,34 @@ void ComputationGraphBuilder::AddDependencies(int32 cindex_id) {
 ComputationGraphBuilder::ComputableInfo
 ComputationGraphBuilder::ComputeComputableInfo(int32 cindex_id)
     const {
+  // 1 获得对应的 Nnet 网络中 网络节点 node_id
   const Cindex &cindex = graph_->cindexes[cindex_id];
   int32 node_id = cindex.first;
+  // 2 实际数据点 ()
   const Index &index = cindex.second;
   const NetworkNode &node = nnet_.GetNode(node_id);
+
   switch (node.node_type) {
     case kDescriptor: {
       const Descriptor &desc = node.descriptor;
       {
+        // 构建CindexSet, 实际上是根据计算图, 搜索路径的一个方法类, 并没有特殊的.
+        //   1 当前计算图
+        //   2 computable_info_ 可计算性信息(input 都是 kComputable, output 以及其他一开始都是 kUnknown)
+        //   3 false 表明,严格确定可计算性, 不能随意认为 kUnknown == kComputable.
         CindexSet cindex_set(*graph_, computable_info_, false);
+        // 1 开始时, input 还没通知到 高层cindex是否可计算, 一般都是 kUnknown, 
+        // 所以返回都是false
+        // 2 当到后来, input 逐渐向高层通知 可计算, 才会在这里就返回 kComputable
         if (desc.IsComputable(index, cindex_set, NULL)) {
           // it's computable even without counting kUnknown inputs as computable
           // [treat_unknown_as_computable = false] -> definitely computable.
           return kComputable;
         }
       }
+      // 这里 降低限制要求, 认为 kUnknown 也可以认为是 kComputable
+      // 但是这里实际判断的不是 是否可以计算, 而是 是不是不能计算
+      // 一般就返回 kUnknown
       CindexSet cindex_set2(*graph_, computable_info_, true);
       if (!desc.IsComputable(index, cindex_set2, NULL)) {
         // it's not computable even when counting kUnknown inputs as
@@ -760,9 +871,14 @@ ComputationGraphBuilder::ComputeComputableInfo(int32 cindex_id)
       return kUnknown;
     }
     case kComponent: {
+      // 如果 cindex 代表的是一个 kComponent-node, 那么首先找到对应的 Component
       const Component *c = nnet_.GetComponent(node.u.component_index);
+      // 如果cindex 代表是一个 kComponent-node, 那么输入必然是 node_id - 1 的 kDescritpor-node.
       const int32 input_node_id = node_id - 1;
+
+      // 这个流程和 直接计算 kDescriptor 计算可计算性 几乎一样.
       {
+
         IndexSet index_set(*graph_, computable_info_, input_node_id, false);
         if (c->IsComputable(request_->misc_info, index, index_set, NULL)) {
           // it's computable even without counting kUnknown inputs as computable
@@ -822,17 +938,26 @@ void ComputationGraphBuilder::GetComputableInfo(
   }
 }
 
-
+// 某个cindex_id , 必然存在于 computable_info_ 中.
+// 只有入队, 没有出队.
 void ComputationGraphBuilder::UpdateComputableInfo(int32 cindex_id) {
   // if the current computable_info_ for cindex_id value is not kUnknown, this
   // cindex_id should not have been in the queue.
   KALDI_ASSERT(static_cast<size_t>(cindex_id) < computable_info_.size());
+
+
   char &output = computable_info_[cindex_id];
   KALDI_ASSERT(output == kUnknown);
-
+  // 计算可计算性. 
+  // 1 从output 向 input 找寻依赖时加入的cindex的 都是 kUnknown
+  // 2 从 input 向 output 逐渐通知计算性的 是 kComputable
   output = static_cast<char>(ComputeComputableInfo(cindex_id));
 
   if (output != kUnknown) {
+    // 依赖于当前cindex的 当前状态为kUnknown的高层cindex 的计算状态 进行改变.
+    // 如果还没在 检查可计算性队列computable_queue_ 中, 则入队,等待检查.
+    // depend_on_this_[cindex_id] 因为当前的cindex 可计算性已经确定, 那么可以继续 找寻依赖它的高层cindex
+    // 尝试 向上递归检查是否可计算.
     // The computable status of cindexes that depend on this cindex and whose
     // status is currently kUnknown might now change, so if they are not in the
     // computable queue, put them there.
@@ -846,6 +971,9 @@ void ComputationGraphBuilder::UpdateComputableInfo(int32 cindex_id) {
         computable_queued_[other_cindex_id] = true;
       }
     }
+    // 如果 当前cindex的 可计算性为 kNotComputable
+    // 并且 是否需要计算引用!=0 说明输出output, 需要这个cindex
+    // 那么向后通知, 最后可能这个计算路径失败.
     if (output == kNotComputable && usable_count_[cindex_id] != 0) {
       // If we have just changed the computable state from kUnknown to
       // kNotComputable, then given the way the usable_count_ is defined (see
@@ -877,22 +1005,33 @@ void ComputationGraphBuilder::SetAsWillNotCompute(int32 cindex_id) {
   }
 }
 
-
+// 逐个更新 computable_queue_ 中的cindex 的可计算性
 void ComputationGraphBuilder::UpdateAllComputableInfo() {
   while (!computable_queue_.empty()) {
     int32 cindex_id = computable_queue_.front();
     computable_queue_.pop_front();
+    // 在可计算队列中标记,  在=true, 
     computable_queued_[cindex_id] = false;
+    // 根据什么进行更新的呢
     UpdateComputableInfo(cindex_id);
   }
 }
 
 
+// cindex_id 增加 计算引用计数()
 void ComputationGraphBuilder::IncrementUsableCount(int32 cindex_id) {
   KALDI_PARANOID_ASSERT(static_cast<size_t>(cindex_id)<usable_count_.size());
+  
+  // 增加一个 计算引用计数
   // the next line post-increments the reachable count.
   if (usable_count_[cindex_id]++ == 0 &&
       computable_info_[cindex_id] != kNotComputable) {
+    // 所有cindex_id的依赖cindex_id 也都递归的增加引用计数.
+    // 被高层引用多的cindex 就会有更多的计算引用计数
+    // 虽然是递归向下的, 但是由于是从顶层, 开始向next_queue_ 添加 cindex
+    // 并且添加完一层依赖之后, 就remove, 所以正常一个cindex,的usable_count = 2
+    // 1 在作为高层的cindex的依赖添加进来时, 加入next_queue_, 是设置为1
+    // 2 在下一轮中从next_queue_逐个被在找其自己依赖时, 在 上面 ++, 后面就移除了, 一般==2
     std::vector<int32>::const_iterator
         iter = graph_->dependencies[cindex_id].begin(),
         end = graph_->dependencies[cindex_id].end();
@@ -921,13 +1060,19 @@ void ComputationGraphBuilder::DecrementUsableCount(int32 cindex_id) {
 
 
 void ComputationGraphBuilder::BuildGraphOneIter() {
+  
+  // 当前从output需要向input方向进行搜索路径的 cindex_id 
   while (!current_queue_.empty()) {
     int32 cindex_id = current_queue_.back();
     current_queue_.pop_back();
     KALDI_ASSERT(computable_info_[cindex_id] == kUnknown);
+    
+    // 判断当前的cindex_id 是否是计算路径的一部分
+    //    因为是 从output 向input 寻路, 所以一直都应该 > 0
     if (usable_count_[cindex_id] == 0)
       SetAsWillNotCompute(cindex_id);
     else
+      // 从 output 高层 向底层 逐步的进行查找依赖, 构建计算路径结构 NnetComputation的 cindex.
       AddDependencies(cindex_id);
   }
   current_queue_.swap(next_queue_);  // now next_queue_ will be empty.
@@ -1064,13 +1209,28 @@ static void ComputeDependenciesSubset(
   }
 }
 
+
+// 这个函数计算cindex_ids 的确定epoch信息
+// ComputeNnetComputationEpochs 计算一个map, 从 node-index 映射到 epoch-index
+// 1 基本上, 首先被计算的node, 会有更小的epoch-index
+// 2 所有一个强联通子图组件的 node 具有相同的epoch-index
+// 3 在无环网络图中, 通常每个component都有自己的epoch-index(即每个component对应的cindex 都具有相同的epoch-index)
+// 4 但在LSTM 这样的层component中, 每层LSTM 都有自己的epoch-index?
+// 
+// 完整的计算顺序, 会按照 epochs中的顺序, 我们会不关心这个函数的输出, 因为它涉及提供给输入的 cindex_id???
+
+
 /// This function computes certain information about "epochs" of cindex_ids.
+
 /// The function ComputeNnetComputationEpochs() from nnet-graph.h gives us a map
 /// from the NetworkNode index to an index we call the "epoch" index:
-/// basically, nodes that are computed first have a lower epoch index, and
-/// all nodes that are part of strongly connected components have the same
-/// epoch index.  In an acyclic nnet graph each component will usually have
-/// its own epoch index, but in things like LSTMs, each LSTM layer (with multiple
+
+/// 1 basically, nodes that are computed first have a lower epoch index, and
+/// 2 all nodes that are part of strongly connected components(强联通组件) have the same
+/// epoch index.  
+/// 3 In an acyclic nnet graph each component will usually have
+/// its own epoch index, 
+/// 4 but in things like LSTMs, each LSTM layer (with multiple
 /// components) will have its own epoch index.
 ///
 /// The overall computation order that we compute, will respect this ordering
@@ -1080,17 +1240,31 @@ static void ComputeDependenciesSubset(
 /// output of this function as it concerns cindex-ids that are provided as input
 /// to the network.
 ///
+
+
+
 ///  \param nnet [in] The neural net
 ///  \param graph [in] The computation graph
-///  \param cindex_id_to_segment_and_epoch [out] A vector that maps cindex_id to
+///  \param cindex_id_to_segment_and_epoch [out] 
+//           映射 cindex_id -> segment_epoch 的map
+//           这个map 会组合segment index 和 epoch index
+//           A vector that maps cindex_id to
 ///          a number that is the same if two cindex_ids are in the same
 ///          segment and same epoch, and different otherwise.  This
 ///          number combines the segment index and the epoch index; the
 ///          details are not important to the calling code.
-///  \param epochs_per_segment [out]  This is a listing of all the
+// 
+///  \param epochs_per_segment [out]  
+//            是计算图中的一系列cindex_ids, 通过 segment epoch 分割
+//            This is a listing of all the
 ///           cindex_ids in the computation graph, divided up first
 ///           by segment and then by epoch.
-///  \param epoch_is_trivial [out] A vector of bool, indexed by the epoch
+// 
+///  \param epoch_is_trivial [out] 
+//            bool vector, epoch index 索引, 和epochs_per_segment的二级索引是相同的索引
+//            如果对应的epoch 是一个但NnetworkNode, epoch_is_trivial[epoch_id] = true
+//            只跟network网络结构有关.
+//            A vector of bool, indexed by the epoch
 ///           index which is the same as the second index of
 ///           'epochs_per_segment', that's true if this epoch index corresponds
 ///           to just a single NetworkNode (and also true for epoch indexes
@@ -1105,6 +1279,12 @@ static void ComputeEpochInfo(
     std::vector<std::vector<std::vector<int32 > > > *epochs_per_segment,
     std::vector<bool> *epoch_is_trivial) {
 
+
+
+  // !!!!!!!!!!!!!!!! IMPORTANT !!!!!!!!!!!!!!!!!!!!!!!
+  // 1 node_to_epochs 映射每个nnet node 到一个粗槽的计算顺序 epoch
+  //   但是我们可能需要在cindex_idlevel 上计算一个更好的数序, 为了服务RNN这样的layer.
+
   // node_to_epoch maps each nnet node to an index >= 0 that tells us coarsely
   // what order to compute them in... but we may need to compute a finer
   // ordering at the cindex_id level in cases like RNNs.
@@ -1115,49 +1295,71 @@ static void ComputeEpochInfo(
     PrintIntegerVector(os, node_to_epoch);
     KALDI_VLOG(6) << "node_to_epoch: " << os.str();
   }
-
+  // 2 所有节点对应的epoch都+=1, 因为我们要保留 0 用来表示 input node 的epoch.
   // Add one to the epoch numbering because we will be reserving
   // zero for inputs to the network, and we don't want to have to
   // prove that epoch number 0 would correspond only to inputs.
   for (int32 i = 0; i < node_to_epoch.size(); i++)
     node_to_epoch[i]++;
+
+
+  // 3 some infos
   int32 num_nodes = nnet.NumNodes(),
       num_cindex_ids = graph.cindexes.size(),
       num_segments = graph.segment_ends.size(),
-      num_epoch_indexes = 1 + *std::max_element(node_to_epoch.begin(),
-                                                node_to_epoch.end());
+      // num_epoch_indexes 是最大的epoch数
+      // 是所有segment共同的epoch-index, 所以下面每个segment的epoch信息都是 num_epoch_indexes个.
+      //                  input-epoch(1) +      other-node epoch
+      num_epoch_indexes = 1 + *std::max_element(node_to_epoch.begin(), node_to_epoch.end());
+  
+  // 节点数必须一致
   KALDI_ASSERT(node_to_epoch.size() == num_nodes);
 
+  // 为每个segment都安排一个 epoch vector
   epochs_per_segment->clear();
   epochs_per_segment->resize(num_segments);
 
+  // 4 epoch_to_num_nodes 的信息, 判断计算图是否简单.
+  // 通过 node_to_epoch 计算 epoch_to_num_nodes
+  // 每个epoch 实际包含的node数量(一般只有1)
   // epoch_to_num_nodes is only used so we know whether each epoch
   // index corresponds to multiple nodes; if it's just one node then we know
   // the computation is very simple and we can do an optimization.
   std::vector<int32> epoch_to_num_nodes(num_epoch_indexes, 0);
   for (int32 n = 0; n < num_nodes; n++)
     epoch_to_num_nodes[node_to_epoch[n]]++;
-
+  // 根据 epoch_to_num_nodes 判断epoch 是否是 trivial(简单的,平常的)
   epoch_is_trivial->resize(num_epoch_indexes);
   for (int32 o = 0; o < num_epoch_indexes; o++) {
     KALDI_ASSERT(o == 0 || epoch_to_num_nodes[o] > 0);
     (*epoch_is_trivial)[o] = (epoch_to_num_nodes[o] <= 1);
   }
+
+
+  // 5
+  // cindex_id -> segment and epoch
+  // 5.1 检查最后一个segment的划分点 是对的  == num_cindex_ids
   cindex_id_to_segment_and_epoch->resize(num_cindex_ids);
   KALDI_ASSERT(graph.segment_ends.back() == num_cindex_ids);
+  // 5.2 检查每个segment
   int32 cur_segment_start = 0, cur_segment_end;
   for (int32 segment = 0; segment < num_segments; segment++) {
     cur_segment_end = graph.segment_ends[segment];
+    
+    // 当前segment-index 的所有epoch 信息 vector,
     std::vector<std::vector<int32> > &epochs = (*epochs_per_segment)[segment];
     epochs.resize(num_epoch_indexes);
 
-    for (int32 cindex_id = cur_segment_start;
-         cindex_id < cur_segment_end; cindex_id++) {
+    // 当前segment(request)的所有cindex_id
+    for (int32 cindex_id = cur_segment_start; cindex_id < cur_segment_end; cindex_id++) {
+      
+      // 1 node_index
       int32 node_index = graph.cindexes[cindex_id].first,
-          epoch_index = (graph.is_input[cindex_id] ? 0 :
-                         node_to_epoch[node_index]);
-      (*cindex_id_to_segment_and_epoch)[cindex_id] =
-          epoch_index + segment * num_epoch_indexes;
+      // 2 epoch index
+          epoch_index = (graph.is_input[cindex_id] ? 0 : node_to_epoch[node_index]);
+      // 3 获得 cindex_id -> segment's epoch_index 
+      (*cindex_id_to_segment_and_epoch)[cindex_id] = epoch_index + segment * num_epoch_indexes;
+      // 某个segment的epoch vector, 的具体epoch-index list上 push_back 这个 cindex_id
       epochs[epoch_index].push_back(cindex_id);
     }
     cur_segment_start = cur_segment_end;
@@ -1332,14 +1534,55 @@ static inline void ComputeComputationPhasesForEpoch(
     bool epoch_is_trivial,
     std::vector<int32> *phase_indexes,
     std::vector<std::vector<int32> > *phases) {
+
+  // --------------------------------
+  // phase(计算阶段)
+  // --------------------------------
+
+  // phases, 是一个segment 里的 phases, 
+  //    基本上和epoch 应该是一样的， 不过会有一些差异
+  //    phase 是 比epoch 更加准确的 对cindex的截断划分.
+  // phases-0
+  //          cindex_id_0
+  //          cindex_id_2
+  //          cindex_id_4
+  // phases-1
+  //          cindex_id_1
+  //          cindex_id_3
+  //          cindex_id_5
+  // phases-2
+  //          cindex_id_12
+  //          cindex_id_13
+  // ....
+  // vector<  vector<int32>>
+
+
+
+
   std::vector<int32> this_phase, next_phase_candidates;
 
   if (this_epoch.empty())
     return;
 
+  // ---------------------------------------
+  // 1 将epoch 中简单依赖关系的 cindex 加入到 cur_phase
+  // ---------------------------------------
+  // 如果epoch 是简单的, 那么就认为epoch内的cindex 就应该一起计算
+  // 直接cp 为 phase
+  // 即 
+  //   1 epoch 简单
+  //      一个epoch 一个phases
+  //   2 如果不是简单的
+  //      那么会将epoch 分为多个phases
+  //      将没有相同epoch-index的依赖cindex_ids 的 cindex_ids 作为第一个phases
+  //      剩余的那些,在继续添加作为后续的phases.
   if (epoch_is_trivial) { // an optimization
     this_phase = this_epoch;
-  } else {
+  } 
+  // not trivial, 那么需要根据 依赖关系等 分割 epochs
+  else {
+    // 现将那些没有相同epoch依赖的cindex 加入进去, 先计算
+    // (难道是认为这样的够简单?)
     // Start out with all elements of this epoch that have no
     // dependencies within the same epoch (i.e. those that
     // can be computed first).
@@ -1356,11 +1599,26 @@ static inline void ComputeComputationPhasesForEpoch(
   KALDI_ASSERT(!this_phase.empty() &&
                "Trying to process computation with cycles");
 
+
+  // ---------------------------------------
+  // 2 将epoch 中剩余的 cindex 添加到下一个phases ---- next_phase
+  // ---------------------------------------
+  // 从刚才计算好了的 this_phase 计算出 phases 输出参数.
   while (!this_phase.empty()) {
+
+    // ---------------------------------------------
+    // phases 扩大一个位置，即新增加一个phase(计算阶段)
+    // ---------------------------------------------
     // The next two lines are a more efficient version of:
     // phases->push_back(this_phase);
     phases->resize(phases->size() + 1);
     phases->back().swap(this_phase);
+
+    // 下面的 if-语句 是一个优化
+    // 如果 this_epoch 的cindex都是相同node, 那我们就可以跳过剩下的循环了
+    // Note: 
+    // 如果 epoch==0, 可能是来自多个不同的input的cindex_ids, 因为所有input 都是 epoch == 0
+    // 但是他们还是会没有依赖, 所以也放在第一个计算, 也能跳过剩下的code
     // The next if-statement is an optimization: if for this epoch index
     // there is just one node, we can skip the rest of this loop.  Note: if
     // epoch == 0, even if there is just one node, cindex_ids from
@@ -1370,26 +1628,38 @@ static inline void ComputeComputationPhasesForEpoch(
     if (epoch_is_trivial)
       return;
 
+    // 当前正在处理的 phase_index.
     int32 cur_phase_index = phases->size() - 1;
+
+    // ---------------------------------------
+    // 2 将epoch 中剩余的 cindex 添加到下一个phases ---- next_phase
+    // 因为当前已经计算了一个 phase
+    // 当前epoch 如果不是trivial，那么其中 还会有剩下的 cindex 可以添加到下一个phases
+    // 这样将 epoch 进一步细分.
 
     // next_phases_candidates is a list of cindexes that we should check
     // whether they are computable now, because one of the things they depend
     // on just became computable.
     next_phase_candidates.clear();
     std::vector<int32>::const_iterator this_phase_iter = phases->back().begin(),
-        this_phase_end = phases->back().end();
-
+                                       this_phase_end = phases->back().end();
+    // 当前处理的 phase 下的所有cindex
     for (; this_phase_iter != this_phase_end; ++this_phase_iter) {
       int32 c = *this_phase_iter;  // c is a cindex_id with phase cur_phase_index.
+      // 安排cur_phase下的 cindex 所属 phase 标记为 cur_phase_index.
       (*phase_indexes)[c] = cur_phase_index;
+      // 所有依赖于 当前cindex的 后继cindex， 都可以加入到 next_phases
       std::vector<int32>::const_iterator iter = depend_on_subset[c].begin(),
-          end = depend_on_subset[c].end();
+                                         end = depend_on_subset[c].end();
       for (; iter != end; ++iter) {
         int32 d = *iter;  // cindex_id that depends on c.
         next_phase_candidates.push_back(d);
       }
     }
     SortAndUniq(&next_phase_candidates);
+
+
+
     // note, at this point 'this_phase' will be the empty vector [see the 'swap'
     // above].
     this_phase.reserve(next_phase_candidates.size());
@@ -1426,16 +1696,39 @@ void ComputeComputationPhases(
     const Nnet &nnet,
     const ComputationGraph &graph,
     std::vector<std::vector<std::vector<int32> > > *phases_per_segment) {
+
   using namespace computation_graph;
+  // 当前request计算图的计算节点.
   int32 num_cindex_ids = graph.cindexes.size();
 
+  // 1 计算segment 下 对cindex 的 更粗糙分组 epoch
+  // segment--- request
+  //     epochs 
+  //        cindexes
   std::vector<int32> cindex_id_to_segment_and_epoch;
   std::vector<std::vector<std::vector<int32 > > > epochs_per_segment;
   std::vector<bool> epoch_is_trivial;
+
   ComputeEpochInfo(nnet, graph, &cindex_id_to_segment_and_epoch,
                    &epochs_per_segment, &epoch_is_trivial);
-
   KALDI_ASSERT(SumVectorSizes(epochs_per_segment) == num_cindex_ids);
+
+
+  // !!!!!!!!!!
+  // epoch 实际上是描述的一个粗糙顺序
+  // 所以需要 dependencies_subset, depend_on_subset 来进一步确定顺序
+  // ------ phases
+  // !!!!!!!!!!
+
+  // 2 计算依赖子集 相同epoch计算次序的 dependencies_subset
+  // 依赖子集 只保存  和cindex_id 的具有相同epoch的依赖cindex. 
+  // 这样就能够修正一个epoch内的cindexes 的计算顺序
+  // 每个 cindex 的 vector<cindex> 
+  // cindexes
+  //      vector<cindex_denpendces> 
+  //      vector<cindex_denpendces> 
+  //      vector<cindex_denpendces>
+  // 这个 dependencies_subset 会是 depend_on list的一个子集
 
   // dependencies_subset contains just the subset of dependencies
   // of each cindex_id, that have the same epoch index as
@@ -1448,18 +1741,26 @@ void ComputeComputationPhases(
   // destroy cindex_id_to_segment_and_epoch, it's no longer needed.
   { std::vector<int32> temp; temp.swap(cindex_id_to_segment_and_epoch);  }
 
+  // 3 计算depend_on 的一个子集
+  // 限制那些具有相同epoch-index 的 depend_on 的
   // depend_on_subset is a subset of the normal "depend_on" list (i.e. a list of
   // all cindex_ids that depend on the current cindex_id), limited to just those
   // cindex_ids that have the same epoch index.
   std::vector<std::vector<int32> > depend_on_subset;
   ComputeGraphTranspose(dependencies_subset, &depend_on_subset);
 
+  // 所有epoch cnt (epoch_is_trivial 是所有epoch 的标记, 所以size 就是全部count)
   int32 num_epoch_indexes = epoch_is_trivial.size(),
       num_segments = graph.segment_ends.size();
 
   // "phase_indexes" is used inside ComputeComputationPhasesForEpoch.
   std::vector<int32> phase_indexes(num_cindex_ids, -1);
 
+  // ---------------------------------------------
+  // phases(计算阶段), 类似 epoch(粗糙计算阶段), 
+  // 根据前面的 dependences_subset, depend_on_subset
+  // 进一步详细的划分 cindex 计算流程
+  // ---------------------------------------------
   phases_per_segment->clear();
   phases_per_segment->resize(num_segments);
 
@@ -1482,6 +1783,14 @@ void ComputeComputationPhases(
   KALDI_ASSERT(SumVectorSizes(*phases_per_segment) == num_cindex_ids);
 }
 
+
+
+
+
+
+
+
+
 CindexSet::CindexSet(const ComputationGraph &graph):
     graph_(graph), is_computable_(NULL) { }
 
@@ -1489,24 +1798,34 @@ CindexSet::CindexSet(const ComputationGraph &graph,
                      const std::vector<char> &is_computable,
                      bool treat_unknown_as_computable):
     graph_(graph), is_computable_(&is_computable),
+    // unknown 就是kUnknown , 不认为是可以计算的.
     treat_unknown_as_computable_(treat_unknown_as_computable) { }
 
 
+// 只有在 从output 向input 找寻依赖
+// 与 从input 向 output通知可计算 相连接之后, 后半部分的cindex才能确定是否 kComputable.
 bool CindexSet::operator () (const Cindex &cindex) const {
   int32 cindex_id = graph_.GetCindexId(cindex);
   if (cindex_id == -1) {
     return false;
   } else {
+    // 实际是 computationGraph 的computable_info_
+    // computable_info_ 一开始 在 AddInput, AddOutput, 时 
+    // 至少添加了 kComputable的 input Index
+    //          kUnknown 的 output Index.
     if (is_computable_ == NULL) {
       return true;
     } else {
       ComputationGraphBuilder::ComputableInfo
           c = static_cast<ComputationGraphBuilder::ComputableInfo>(
               ((*is_computable_)[cindex_id]));
+      
+      // normal: false
       if (treat_unknown_as_computable_)
         return (c == ComputationGraphBuilder::kComputable ||
                 c == ComputationGraphBuilder::kUnknown);
       else
+        // kComputable 才返回true
         return (c == ComputationGraphBuilder::kComputable);
     }
   }

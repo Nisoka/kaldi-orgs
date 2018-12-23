@@ -22,7 +22,8 @@
 #include "nnet3/nnet-diagnostics.h"
 #include "nnet3/nnet-utils.h"
 
-
+// 计算并打印 给定数据的每帧对数概率. 
+// 输入数据是 merged-egs
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
@@ -42,10 +43,17 @@ int main(int argc, char *argv[]) {
     bool batchnorm_test_mode = true, dropout_test_mode = true,
         collapse_model = true;
 
+    // 这个程序不支持实用GPU, 因为是计算诊断概率的, 你可以实用小量数据进行计算,这样CPU 也可以在合理时间完成.
     // This program doesn't support using a GPU, because these probabilities are
     // used for diagnostics, and you can just compute them with a small enough
     // amount of data that a CPU can do it within reasonable time.
 
+
+    // just constructor
+    // 包含有
+    // 1 NnetOptimizeOptions,   优化调试选项
+    // 2 NnetComputeOptions,    计算选项(简单)
+    // 3 CachingOptimizingCompilerOptions   编译优化选项 简单
     NnetComputeProbOptions opts;
 
     ParseOptions po(usage);
@@ -83,11 +91,14 @@ int main(int argc, char *argv[]) {
     if (collapse_model)
       CollapseModel(CollapseModelConfig(), &nnet);
 
+    // 主要设置一些配置
+    // 1 编译配置
+    // 2 优化配置等
     NnetComputeProb prob_computer(opts, nnet);
 
     SequentialNnetExampleReader example_reader(examples_rspecifier);
 
-    //exmple_reader 保存的是多个 minibatch merged NnetExample
+    //exmple_reader 保存的是 minibatch merged NnetExample
     //每个merged NnetExample 是64 个NnetExample(n=0)合并得到的.
     //所以如下 prob_computer.Comput() 计算的是一个minibatch的 NnetExample.
     for (; !example_reader.Done(); example_reader.Next())

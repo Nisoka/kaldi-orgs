@@ -29,6 +29,13 @@
 namespace kaldi {
 namespace nnet3 {
 
+// NnetComputation 优化选项
+// see too: NnetOptimizeOptions, NnetComputeOptions, CachingOptimizingCompilerOptions
+// 用于debug Optimze 代码. 
+
+// 优化NnetComputation 的 option class
+// 主要的用处是用来 debug 优化过程代码. 
+// 因此在优化过程中出现error, 我们可以很容以定位.
 // Options class for optimizing a NnetComputation.  The main projected use for
 // this is in debugging the optimization code itself, so that if an error is
 // detected, we can work out which optimization was responsible for the error.
@@ -181,7 +188,10 @@ struct ComputationRequestPtrEqual {
 };
 
 
-
+// NnetComputation 编译优化选项.
+// see too: NnetOptimizeOptions, NnetComputeOptions, CachingOptimizingCompilerOptions
+// 1 用来控制编译时是否选择实用 shortcut 编译一个ComputationRequest.
+// 2 chache 一些 ComputationRequest.
 struct CachingOptimizingCompilerOptions {
   bool use_shortcut;
   int32 cache_capacity;
@@ -191,18 +201,28 @@ struct CachingOptimizingCompilerOptions {
       cache_capacity(64) { }
 
   void Register(OptionsItf *opts) {
+    // 这里描述的是, 在编译计算时, 是先编译一个相同结构的较小(e.g 2)CompoutationRequest
+    // 然后可以简单的扩展为正常大小的 计算结构.
+    // 如果 use-shortcut is true
+    // 那么 有正常大小结构的(minibatch)computationRequest, 和具有较小的不同的n域的computationRequest,是相同的
+    // 可以很很容易的expand 为真实的computationRequest, 实现快速编译 computation.
     opts->Register("use-shortcut", &use_shortcut,
                    "If true, use the 'shortcut' in compilation whereby "
                    "computation requests with regular structure are identified "
-                   "as such, a computation with a smaller number of distinct "
+                   "as such a computation with a smaller number of distinct "
                    "values of 'n' is compiled (e.g. 2), and the compiled "
                    "computation is expanded to match the size of the real "
                    "computation request.");
+    // 决定 cache 多少个computation.
     opts->Register("cache-capacity", &cache_capacity,
                    "Determines how many computations the computation-cache will "
                    "store (most-recently-used).");
   }
 };
+
+// 编译 优化 class
+// 1 compilation
+// 2 optimization
 
 /// This class enables you to do the compilation and optimization in one call,
 /// and also ensures that if the ComputationRequest is identical to the previous
