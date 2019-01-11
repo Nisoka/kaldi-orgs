@@ -150,6 +150,7 @@ class Compiler {
   // by step-index.
   std::vector<StepInfo> steps_;
 
+  //  每个 cindex_id 具体代表哪一个帧数据， 具体到那个matix-row.
   /// This maps each cindex_id to its location.  However, you should not rely on
   /// its accuracy for cindex_ids that correspond to the Descriptors at
   /// Component inputs, since it's possible in principle for such cindex_ids to

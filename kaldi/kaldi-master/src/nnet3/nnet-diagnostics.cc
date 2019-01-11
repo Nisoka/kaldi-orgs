@@ -97,7 +97,7 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
                         store_component_stats,
                         &request);
   
-  // ---------------- Most Important
+  // ---------------- Most Important -----------------
   // 2 编译ComputationRequest的计算结构(NnetComputation)
   // ----------------
   const NnetComputation *computation = compiler_.Compile(request);

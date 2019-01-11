@@ -1863,32 +1863,40 @@ ComputationStepsComputer::ComputationStepsComputer(
     nnet_(nnet), graph_(graph), steps_(steps), locations_(locations) {
   steps_->clear();
   locations_->clear();
+  // 所有的cindexes
   int32 num_cindexes = graph_->cindexes.size();
   // leave a little space in case a few cindexes are added (unlikely
   // but could happen with dim-range nodes).
+  // reserve 可以申请的最大空间(一般留一些空间余量)
   locations_->reserve(num_cindexes + num_cindexes / 10);
+  // resize  申请确定空间
   locations_->resize(num_cindexes, std::pair<int32,int32>(-1, -1));
 }
 
+// request, 一个具体输入输出 batch
+// phases,  描述request的segment段的phases
 void ComputationStepsComputer::ComputeForSegment(
     const ComputationRequest &request,
     const std::vector<std::vector<int32> > &phases) {
 
   int32 this_num_phases = phases.size();
-  //基本phase 按照内部相同的node-index 再进行划分 为 sub_phases.
-  //所有的phase
+  //将比epoch稍微精细的本phase,按照内部相同的node-index 再进行划分 为 sub_phases.
   for (int32 i = 0; i < this_num_phases; i++) {
     std::vector<std::vector<Cindex> > sub_phases;
     SplitIntoSubPhases(phases[i], &sub_phases);
-    //每个phase 分成的vector<sub_phase>
-    //对每个sub_phase 安排为相同的 step-index.
-    //每个sub_phase 中step之间具有相同的step-index, 不同的row-index.
+
+    // 每个phase 分成的vector<sub_phase>
+    // 对每个sub_phase 安排为相同的 step-index， 
+    // 这样的sub_phase 足够精细， 可以同时计算
+    // 每个sub_phase 中step之间具有相同的step-index, 不同的row-index.
     for (size_t j = 0; j < sub_phases.size(); j++) {
       ProcessSubPhase(request, sub_phases[j]);
     }
   }
 }
 
+// 为sub_phase, 找对应的request(vector<IoSpecification(NnetIo)>) 中的数据Index, 
+// 安排对应的Index 为一个 step
 void ComputationStepsComputer::ProcessInputOrOutputStep(
     const ComputationRequest &request,
     bool is_output,
@@ -1899,26 +1907,43 @@ void ComputationStepsComputer::ProcessInputOrOutputStep(
   } else {
     KALDI_ASSERT(nnet_.IsInputNode(io_node));
   }
+
+  // 获得对应的node_name
   std::string node_name = nnet_.GetNodeName(io_node);
+
+  // 遍历所有的IoSpecification(NnetIo)
+  // 一个IoSpecification , 确定是 inputs, ivectors, outputs 中的一个
+  // 最终所有的name 肯定都是 node_name
   const std::vector<IoSpecification> &inputs_or_outputs =
-      (is_output ? request.outputs : request.inputs);
+        (is_output ? request.outputs : request.inputs);
   int32 io_index = -1;
   for (size_t i = 0; i < inputs_or_outputs.size(); i++)
-    if (inputs_or_outputs[i].name == node_name)
-      io_index = i;
+      if (inputs_or_outputs[i].name == node_name)
+        io_index = i;
   KALDI_ASSERT(io_index >= 0);
+
+  // 对应的所有indexes -> Cindexes
+  // 并且一个input(output)的cindex一定都在一个sub_phase中.
   const std::vector<Index> &io_indexes = inputs_or_outputs[io_index].indexes;
   std::vector<Cindex> io_cindexes(io_indexes.size());
   for (size_t i = 0, size = io_cindexes.size(); i < size; i++) {
     io_cindexes[i].first = io_node;
     io_cindexes[i].second = io_indexes[i];
   }
-  KALDI_ASSERT(io_cindexes.size() == sub_phase.size());
+  // 必须: 如果是input output里面， 那么io_cindexes的cindexes 必然是在同一个sub_phase里面了
+  // 因为经过之前 epoch -> phase -> sub_phase, 一定已经是最优的了.
   // we expect the list of cindexes in 'io_cindexes' to be identical to
   // that in 'sub_phase' (but they don't have to be in the same order)... for now we check the size, we'll spot-check
   // that they are the same later.
+  KALDI_ASSERT(io_cindexes.size() == sub_phase.size());
+
+  // 为一个sub_phase 安排一个 step.
   // The actual output in 'steps' must be in the same order as
   int32 step_index = AddStep(io_cindexes);
+
+  // 现在进行逐个点的check, 
+  // sub_phase(step)里的cindexes 和我们刚刚添加的一致
+  // 不一定完全一样的顺序， 但是要在一个固定集合.
   // Now spot-check that the cindexes in 'sub_phase' are the same as those
   // we just added.  [note: they don't have to be in the same order, but
   // they should be the same set.]
@@ -1983,14 +2008,21 @@ int32 ComputationStepsComputer::AddStep(const std::vector<Cindex> &cindexes,
 
 
 int32 ComputationStepsComputer::AddStep(std::vector<int32> *cindex_ids) {
+  
   int32 step_index = steps_->size();
+  // steps_ 中增加一个 简易step ---- vector<cindex_ids>
+  // 后续会将这个简易step构成StepInfo
   steps_->push_back(std::vector<int32>());
   steps_->back().swap(*cindex_ids);
+
+  // 对 cindex_ids 安排 对应location
   std::vector<int32>::const_iterator iter = steps_->back().begin(),
-      end = steps_->back().end();
+        end = steps_->back().end();
   int32 row_index = 0;
+  // locations 描述 locations_ 起始内存位置， 通过 [] 方式进行索引其他位置
   std::pair<int32,int32> *locations = &((*locations_)[0]);
   size_t num_cindexes = graph_->cindexes.size();
+  // 逐个cindex_id 安排具体计算位置? row_index 目的是什么
   for (; iter != end; ++iter, ++row_index) {
     int32 cindex_id = *iter;
     KALDI_ASSERT(static_cast<size_t>(cindex_id) < num_cindexes);
@@ -2000,7 +2032,8 @@ int32 ComputationStepsComputer::AddStep(std::vector<int32> *cindex_ids) {
   return step_index;
 }
 
-
+// 将 cindex_ids 里保存的 cindex_id, 取出对应的Cindex对象
+// 存入 cindexes
 void ComputationStepsComputer::ConvertToCindexes(
     const std::vector<int32> &cindex_ids,
     std::vector<Cindex> *cindexes) const {
@@ -2062,17 +2095,24 @@ void ComputationStepsComputer::ConvertToCindexes(
 
 
 
-
+// step==sub_phase
+// segment -> epoch -> phase -> sub_phase
 void ComputationStepsComputer::ProcessComponentStep(
     const std::vector<Cindex> &step) {
   KALDI_ASSERT(!step.empty());
+  // 当前step 实际上是 sub_phase -- vector< Cindex >
+  //                                      <node-id, <t, n, x>>
+  // 如果是kComponent-node, 那么 node-id-1, 必然是前继的 kDescriptor-node
   int32 component_node_index = step.front().first;
   int32 component_input_index = component_node_index - 1;
   KALDI_ASSERT(nnet_.IsComponentNode(component_node_index));
+
+  // 获得对应的NetworkNode, 和 对应的 component-index --索引到计算组建Component
   const NetworkNode &node = nnet_.GetNode(component_node_index);
   int32 c = node.u.component_index;
   const Component *component = nnet_.GetComponent(c);
   if (component->Properties() & kSimpleComponent) {
+    // 如果是个简单的 kSimpleComponent
     // for simple components, the input cindexes will be the same as the
     // output ones except for the node index, so we do a shortcut that's
     // faster (no following dependencies).
@@ -2308,14 +2348,21 @@ void ComputationStepsComputer::Check() const {
 void ComputationStepsComputer::SplitIntoSubPhases(
     const std::vector<int32> &phase,
     std::vector<std::vector<Cindex> > *sub_phases) const {
+  
   std::vector<Cindex> phase_cindexes;
+  // 将phase 中的 cindex_id 对应的Cindex->> phase_cindexes
   ConvertToCindexes(phase, &phase_cindexes);
   KALDI_ASSERT(!phase_cindexes.empty());
   std::sort(phase_cindexes.begin(), phase_cindexes.end());
-  // 'sub_phase_begins' is the indexes onto 'phase_cindees' that
+
+  // segment_begins 表示的是 phase里面所有Cindexes （sort 排序的）
+  // 按照 node-index 顺序， 对Cindexes的一个划分， 这个划分就是 sub_phase
+  // Note: segment 表示的实际是是 sub_phase, 命名有点瑕疵.
+  // 'sub_phase_begins' is the indexes onto 'phase_cindexes' that
   // start a run of the same node-index
   std::vector<size_t> segment_begins;
   int32 cur_node_index = -1;
+  // phase_cindexes的总数
   size_t size = phase_cindexes.size();
   for (size_t i = 0; i < size; i++) {
     if (phase_cindexes[i].first != cur_node_index) {
@@ -2323,13 +2370,17 @@ void ComputationStepsComputer::SplitIntoSubPhases(
       segment_begins.push_back(i);
     }
   }
+  
+  // 应该对 phase 进行进一步划分的总数
   size_t num_sub_phases = segment_begins.size();
+
+  // 根据上面的 sub_phase 划分，将 cindexes 安划分，写入到 sub_phase vector中
   segment_begins.push_back(size);
   sub_phases->clear();
   sub_phases->resize(num_sub_phases);
   for (size_t i = 0; i < num_sub_phases; i++) {
     size_t this_begin = segment_begins[i],
-        this_end = segment_begins[i+1];
+          this_end = segment_begins[i+1];
     (*sub_phases)[i].insert((*sub_phases)[i].end(),
                             phase_cindexes.begin() + this_begin,
                             phase_cindexes.begin() + this_end);

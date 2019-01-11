@@ -30,6 +30,10 @@
 namespace kaldi {
 namespace nnet3 {
 
+
+// ComputationGraph 是一个计算图， 是nnet网络的一个计算路径， 实际是nnet的一个部分
+// 在 nnet是一个多任务系统时，尤其明显， 只需要计算 ComputationRequest需要的计算部分即可
+// 剩余的部分，并不在这个ComputationGraph中.
 /// The first step in compilation is to turn the ComputationSpecification
 /// into a ComputationGraph, where for each Cindex we have a list of
 /// other Cindexes that it depends on.  All the stages of compilation
@@ -407,6 +411,12 @@ void ComputeComputationPhases(
 
 
 /**
+ * 这个类 重新安排计算的cindex_ids, 形成一个 steps的序列
+ * 粗糙的对应到 编译计算的指令顺序
+ * steps 比 phases更精细， 都会满足
+ * 1 一个steps中的所有cindex_ids 会具有相同的node
+ * 2 一个steps中的所有cindex_ids 的依赖 都会在之前的steps中被计算
+ * 3 一个steps中的所有cindex_ids 计算时共享相同的位置（matrix， submatrix)
    This class arranges the cindex_ids of the computation into a sequence of
    lists called "steps", which will correspond roughly to the commands in the
    compiled computation.  The steps are finer than phases.  (See \ref
@@ -422,6 +432,11 @@ void ComputeComputationPhases(
  There are also some extra, more obscure properties that the sequence of steps
  must satisfy:
 
+// 1 一个 ComputationRequest中的 input output 都必须在一个step中
+//   并且所有的 Indexes 是和 ComputationRequest中的顺序一致
+// 2 如果一个step 对应为一个kComponent节点， 那么其之前的step 必须对应一个 kDescritpor 节点
+//   并且Indexes序列必须相同
+// 3  
   - Any input or output specified in a ComputationRequest must be in one step,
     with the Indexes in the same order as specified in the ComputationRequest.
     (Note: inputs can be for nodes of type kComponent as well as kInput).
@@ -435,6 +450,7 @@ void ComputeComputationPhases(
     the kDimRange node).  We guarantee this by adding extra cindexes to the
     kDimRange steps as needed.
 
+// 为什么计算图 不作为一个固定参数提供，是为了确保最后的属性， 我们必须增加一些新的cindex_ids
  The reason why computation_graph is not provided as a const argument is that in
  order to ensure the final property we may have to add a few new cindex_ids.
 */
@@ -457,10 +473,18 @@ class ComputationStepsComputer {
   ///                          for zero-padding and to turn irregularly
   ///                          structured computations into regularly structured
   ///                          ones as needed by the component's implementation.
+  // 这个类的主要输出， 是一个 steps(vector<step>) 的序列， 
+  // 每个step 都是一个cindex_ids的序列
   ///  @param [out] steps     The main output of this class, which is
   ///                         a sequence of steps, each step being an ordered list of cindex_ids.
   ///                         It just gets cleared in the constructor; it's set up
   ///                         when you call ComputeForSegment().
+  // location 是本类的额外输出， 是steps的一部分信息
+  // 以cindex_id所以， 每一个都是 (step-index, index-into-step)
+  // 所以对一个cindex_id c, 
+  // c = (*steps)[locations[c].first][location[c].second]
+  //              step-index          index-in-step                   
+  // 有可能一个cindex 在两个step中， 所以 当(*steps)[i][j] == c， 时， 并不一定由 locations[c] == (i, j)
   ///  @param [out] locations The additional output of this class, which is a function
   ///                         of the information in 'steps'.  The array
   ///                         'locations' is indexed by cindex_id, and each one is a pair
@@ -570,10 +594,11 @@ class ComputationStepsComputer {
   ComputationGraph *graph_;
   /// steps_ is a pointer to an output that's passed in in the constructor.
   std::vector<std::vector<int32> > *steps_;
+  // cindex_id  -> <step-index, index_into_step>
   /// locations_ is a map from cindex_id to the pair of indexes into steps_ where
   /// that cindex_id resides, so if (*locations_)[c] = (i,j), then
-  /// (*steps_)[i][j] == c.  This is also an output (we get the pointer in
-  /// the constructor).
+  /// (*steps_)[i][j] == c.  
+  /// This is also an output (we get the pointer in the constructor).
   std::vector<std::pair<int32, int32> > *locations_;
 };
 

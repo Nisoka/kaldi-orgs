@@ -95,6 +95,7 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
   std::vector<std::vector<int32> > steps;
   steps.reserve(1000);
 
+  //  4.1 step_to_segment
   // maps each step to the segment in which it appears.  in the normal case
   // (non-looped computation), a vector of all zeros.
   std::vector<int32> step_to_segment;
@@ -104,6 +105,7 @@ void Compiler::CreateComputation(const CompilerOptions &opts,
     ComputationStepsComputer steps_computer(nnet_, &graph_, &steps,
                                             &cindex_id_to_location_);
 
+    // 计算每个segment(request)的steps?
     for (size_t segment = 0; segment < requests_.size(); segment++) {
       steps_computer.ComputeForSegment(*(requests_[segment]),
                                        phases_per_segment[segment]);

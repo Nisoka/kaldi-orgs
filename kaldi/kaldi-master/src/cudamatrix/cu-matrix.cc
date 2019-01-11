@@ -2827,7 +2827,8 @@ void CuMatrixBase<Real>::SumColumnRanges(const CuMatrixBase<Real> &src,
   }
 }
 
-
+// AddRowRanges
+// 在Row的 Ranges范围内进行累加sum
 template<typename Real>
 void CuMatrixBase<Real>::AddRowRanges(const CuMatrixBase<Real> &src,
                                       const CuArrayBase<Int32Pair> &indexes) {

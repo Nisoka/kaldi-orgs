@@ -768,6 +768,8 @@ StatisticsPoolingComponent::PrecomputeIndexes(
   return ans;
 }
 
+// 没搞明白， 什么进行传播形成 statistic pool
+// 怎么一个变长feature-seq， 计算的mean 和 stdev.
 void* StatisticsPoolingComponent::Propagate(
     const ComponentPrecomputedIndexes *indexes_in,
     const CuMatrixBase<BaseFloat> &in,
@@ -781,15 +783,22 @@ void* StatisticsPoolingComponent::Propagate(
                indexes->forward_indexes.Dim() == num_rows_out &&
                in.NumCols() == input_dim_ &&
                out->NumCols() == OutputDim());
+  // 生成 保存counts的 vector
   CuVector<BaseFloat> counts(num_rows_out);
   // counts_mat is a fake matrix with one column, containing the counts.
+  // counts_mat 是一个subMatrix， 是一个view
   CuSubMatrix<BaseFloat> counts_mat(counts.Data(), num_rows_out, 1, 1);
+  // 计算每个sample的frame-counts ？
   counts_mat.AddRowRanges(in.ColRange(0, 1), indexes->forward_indexes);
 
+  // 保存统计均值.
   CuSubMatrix<BaseFloat> out_non_count(*out, 0, num_rows_out,
                                        num_log_count_features_, input_dim_ - 1);
+  // 计算 mean 直接就是求各个维度数据的sum
+  // input_dim == feature_dim
   out_non_count.AddRowRanges(in.ColRange(1, input_dim_ - 1),
                              indexes->forward_indexes);
+  // 对sum 除 各个sample的 featureCnt， 计算mean
   out_non_count.DivRowsVec(counts);
 
   if (num_log_count_features_ > 0) {
@@ -809,6 +818,7 @@ void* StatisticsPoolingComponent::Propagate(
         variance(*out, 0, num_rows_out,
                  num_log_count_features_ + feature_dim, feature_dim);
     // subtract mean-squared from average of x^2 to get the variance.
+    // 1.0 * x - mean*mean
     variance.AddMatMatElements(-1.0, mean, mean, 1.0);
     variance.ApplyFloor(variance_floor_);
     // compute the standard deviation via square root.
